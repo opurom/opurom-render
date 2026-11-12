@@ -2,9 +2,10 @@
 
 Independent Rust crate: IR v0.1 → adaptive layout → deterministic RGBA8 software
 raster → incremental dirty rects, plus a deterministic SVG 1.1 **vector software
-backend**. This folder is its own git repository; it has no source dependency on
-any other OPUROM layer, only on the frozen IR/ABI contracts (`IR_SCHEMA.md`,
-`ADAPTER_CONTRACT.md`) and local `FrameView` shape compatibility.
+backend** and deterministic R5 animation primitives. This folder is its own git
+repository; it has no source dependency on any other OPUROM layer, only on the
+frozen IR/ABI contracts (`IR_SCHEMA.md`, `ADAPTER_CONTRACT.md`) and local
+`FrameView` shape compatibility.
 
 ## Verify
 
@@ -16,7 +17,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 70 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 81 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -33,20 +34,28 @@ cargo build --offline
 # digest=8cc3021fa80749b5, dirty=1 (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --svg out.svg
 # writes a deterministic SVG 1.1 snapshot (stdout unchanged)
+./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --transition slide --tick 16
+# deterministic transition digest (stdout still exactly digest=... and dirty=...)
 ```
 
-Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json] [--svg out.svg]`.
+Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg]`.
 `--state` repeats; values are parsed against the declared state type. `--tick`
-sets the animation clock position in milliseconds (default: the settled end
-state, so a v0.1 IR renders exactly as in round 1). Output is a P6 PPM (RGB; the
-opaque alpha byte is dropped). Stdout has exactly two lines:
-`digest=<16 lowercase hex>` (FNV-1a 64 over the **RGBA** frame bytes) and
-`dirty=<rect count>`. Malformed IR or a bad viewport is a readable stderr
-diagnostic with exit code 1, never a panic. A fresh process always reports
-`dirty=1` (first frame = whole surface); unchanged state within one `Renderer`
-yields zero dirty rects. `--a11y <out.json>` writes a separate deterministic
-JSON accessibility tree (see below), and `--svg <out.svg>` a deterministic SVG
-1.1 snapshot; neither adds stdout lines.
+sets the animation clock position in milliseconds, accepts `0..=4000`, and
+rejects non-numeric or out-of-range values with a readable diagnostic; the
+default is the settled end state, so a v0.1 IR renders exactly as in round 1.
+`--transition` is opt-in: the CLI uses the frame at tick 0 as the outgoing page
+and the settled frame as the incoming page, then uses `--tick` as the elapsed
+time of the 320 ms transition. Unknown transition kinds are rejected with exit
+code 1.
+Output stays a P6 PPM (RGB; the opaque alpha byte is dropped). Stdout has
+exactly two lines: `digest=<16 lowercase hex>` (FNV-1a 64 over the **RGBA**
+frame bytes) and `dirty=<rect count>`. Malformed IR or a bad viewport is a
+readable stderr diagnostic with exit code 1, never a panic. A fresh process
+always reports `dirty=1` (first frame = whole surface); unchanged state within
+one `Renderer` yields zero dirty rects. `--a11y <out.json>` writes a separate
+deterministic JSON accessibility tree (see below), and `--svg <out.svg>` a
+deterministic SVG 1.1 snapshot; neither adds stdout lines and neither is
+composited by `--transition`.
 
 ## Architecture
 
@@ -80,7 +89,8 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
 - `src/raster.rs` — filled rounded rectangles (integer quarter-circle test), 1 px
   borders, gradients, shadows, glass fills, scaled glyph blocks, opaque RGBA with
   integer alpha blending, plus the eight R4 primitive drawings.
-- `src/anim.rs` — the fixed-timestep animation clock and the spring/ease curves.
+- `src/anim.rs` — the fixed-timestep animation clock, spring/ease curves, R5
+  page transitions, gesture progress, fixed-seed particles and quality tiers.
 - `src/lib.rs` — `Rgba`, `StateView`, `Renderer`, `Frame`, `FrameView`, inline FNV-1a
   digest, and row/column dirty-rect diffing.
 - `src/a11y.rs` — R3 pre-order accessibility tree, its deterministic JSON serializer,
@@ -203,20 +213,75 @@ degrades to the documented fallback. The 108-name component catalog gains eight
 names mapping onto these primitives (that catalog lives in the compiler repo,
 outside this crate).
 
+## R5 deterministic animation (R5_ADDENDUM section 3)
+
+All R5 animation is additive and opt-in. The fixed-point unit is `ONE = 1024`;
+there are no floats, no `rand` crate, no wall clock and no unseeded randomness.
+The caller supplies every tick, gesture delta, particle seed and frame budget.
+V0.1 IR output without these APIs is byte-identical to round 1.
+
+- **Page transitions:** `Transition { kind, progress }` owns `slide`, `fade`
+  or `scale`. `tick(dt_ms)` advances progress linearly by
+  `dt_ms * 1024 / 320`, clamps to `0..=1024`, is monotonic and settles at 1024.
+  `compose(from, to)` composes two existing RGBA frames: slide translates both
+  pages by integer columns, fade blends channels in fixed point, and scale
+  draws a centered nearest-neighbour copy of the incoming page over the
+  outgoing page. At 1024 the result is exactly the incoming frame. The CLI uses
+  the frame at tick 0 as the outgoing page and the settled frame as the
+  incoming page; a given `--transition <kind> --tick <ms>` pair therefore has a
+  reproducible frame digest.
+- **Gesture-linked animation:** `GestureAnim::drag(delta_x, delta_y)` maps
+  cumulative integer L1 displacement to integer progress `0..=1024`; one input
+  unit is one progress unit and the value saturates. `compose(from, to)` scrubs
+  the same integer slide at that progress. The same gesture sequence produces
+  the same progress and digest sequence. This is an integer input API, not an
+  OS gesture recognizer or real gesture hardware.
+- **Fixed-seed particles:** `ParticleSystem::new(seed, count)` fills integer
+  positions, velocities and lifetimes from a seeded xorshift64* generator. The
+  integer field is 1024 units, lifetime is `1..=64` `step()` calls, and motion,
+  wrapping and respawning are deterministic. `step()` is the only motion
+  source; `render_into(&mut Frame)` overlays 2x2 RGBA blocks on an existing
+  frame. Identical seeds and step sequences give byte-identical frames.
+- **Automatic degradation:** `choose_quality(measured_frame_budget_ms,
+  particle_count, effects_enabled) -> Quality` is a pure integer policy. The
+  caller applies `Quality { particle_count, effects_enabled }` when
+  constructing particles and enabling expensive effects.
+
+| Measured budget (ms) | Particle count | Expensive effects |
+| --- | --- | --- |
+| `>=16` | full `particle_count` | as requested |
+| `8..=15` | `3/4 * particle_count` | disabled |
+| `4..=7` | `1/2 * particle_count` | disabled |
+| `<4` | `1/4 * particle_count` | disabled |
+
+Division truncates in `usize`; negative budgets use the lowest tier. **The
+budget is supplied by the caller** (for example `opurom profile`) and is never
+read from a clock inside the renderer. `opurom profile` remains the measured
+source; this crate makes no measurement and no fps claim.
+
+**Honest scope:** transitions and particles are CPU RGBA software compositing,
+not a GPU compositor; gesture deltas are integers, not real touch hardware;
+quality tiers are a deterministic policy, not runtime device profiling. The
+renderer does not sample `Instant`, system time or GPU counters. No frame-rate
+or fps claim is made. `--a11y` and `--svg` snapshots are unchanged by
+`--transition`.
+
 ## Determinism guarantee
 
 Same IR + same viewport + same state + same animation tick ⇒ byte-identical RGBA
-pixels on every host (and, for `--svg`, byte-identical SVG). Mechanisms: all
-layout and raster arithmetic is integer (`i64`/`i128`, no float ordering, no
-`f32` rounding); state lives in a `BTreeMap`; events are visited in sorted key
+pixels on every host (and, for `--svg`, byte-identical SVG). R5 APIs add their
+own explicit inputs: transition ticks, gesture deltas, particle seeds/step
+sequences and caller-supplied budgets. Mechanisms: all layout, raster and
+animation arithmetic is integer (`i64`/`i128`, no float ordering, no `f32`
+rounding); state lives in a `BTreeMap`; events are visited in sorted key
 order; `theme.mode == "system"` resolves to light instead of querying the host;
-no time, randomness, threads, environment variables or resource I/O affect the
-frame (`Image` uses a stable hash of `src` as a placeholder colour); the
-animation clock only moves when the caller ticks it, so two identical tick
-sequences produce identical digest sequences. The SVG backend applies the same
-rules to its element/attribute ordering.
+no wall-clock time, unseeded randomness, threads, environment variables or
+resource I/O affect the frame (`Image` uses a stable hash of `src` as a
+placeholder colour); the animation clock only moves when the caller ticks it,
+so two identical tick sequences produce identical digest sequences. The SVG
+backend applies the same rules to its element/attribute ordering.
 
-Golden digests (unchanged by R2, R3 and R4):
+Golden digests (unchanged by R2, R3, R4 and R5):
 
 | Fixture | Viewport | Digest |
 | --- | --- | --- |
@@ -228,19 +293,20 @@ Golden digests (unchanged by R2, R3 and R4):
 layout of `ADAPTER_CONTRACT.md`. It is a local struct: adapters do not gain a
 compile-time dependency on this crate, and this crate does not import theirs.
 
-## Where the GPU backend slots in (later round)
+## Where a GPU backend slots in
 
-The pixel contract is fixed now, so a GPU backend is a **replacement for the raster
-stage only**. `layout()` stays the source of `Vec<LaidOut>`; a Metal/Vulkan/ANGLE
-backend would translate those boxes/glyph runs into draw calls and copy the result
-into the same `Frame { width, height, pixels, dirty }`. `Frame::view()` already
-matches the adapter ABI, so `present(FrameView)` is unchanged. A backend must pass
-the same golden digest to be considered conformant; the headless software raster is
-the conformance oracle. Dirty rects remain a property of the diff stage, not of the
-backend. The R4 SVG backend is a *software* sibling of the raster, not this GPU
+The pixel contract is fixed now, so a GPU backend would be a **replacement for
+the raster stage only**. `layout()` stays the source of `Vec<LaidOut>`; a
+Metal/Vulkan/ANGLE backend would translate those boxes/glyph runs into draw
+calls and copy the result into the same `Frame { width, height, pixels, dirty }`.
+`Frame::view()` already matches the adapter ABI, so `present(FrameView)` is
+unchanged. A backend must pass the same golden digest to be considered
+conformant; the headless software raster is the conformance oracle. Dirty rects
+remain a property of the diff stage, not of the backend. The R4 SVG backend and
+R5 animation compositor are *software* siblings of the raster, not this GPU
 path.
 
-## Honest status (round 4)
+## Honest status (round 5)
 
 Verified now, by tests in this crate: IR parsing/validation, adaptive breakpoints +
 Row collapse + fluid sizing, all 32 node kinds, theme tokens with per-token
@@ -251,23 +317,27 @@ tests, interpolation from `StateView`, `FrameView` shape, the PPM CLI, integer
 `fontScale`, high-contrast rendering, the `theme.tokens.contrast` token, a
 deterministic pre-order accessibility tree with roles, labels, bounds and hidden
 flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
-`data-role`, hidden markers), and eight distinct deterministic primitives.
-`cargo test --offline` (70 tests) is green with fixed golden digests and zero
+`data-role`, hidden markers), eight distinct deterministic primitives, R5
+slide/fade/scale frame composition with monotonic ticks and settling, gesture
+digest sequences, integer fixed-seed particles, quality budget tiers, CLI
+transition validation and unchanged V0.1 golden digests.
+`cargo test --offline` (81 tests) is green with fixed golden digests and zero
 warnings.
 
-Not implemented / not measured — later rounds: Metal, Vulkan and ANGLE GPU
-backends; any hardware-accelerated presentation; the 120 fps target (**no measured
-fps is claimed here** — there is no GPU backend or device matrix yet, and the
-software raster has not been profiled on any device); particles; real image
-decoding; real font shaping (text is a 5x7 bitmap font by design, so no
-Unicode shaping, no hinting and no subpixel positioning; the SVG `<text>` is a
-generic monospace approximation); OS screen-reader integration (the R3 tree is
-data only: no ARIA/AT-SPI bridge, no focus order, no hit testing and no live
-announcements); DPI scaling (`fontScale` scales logical pixels, not physical
-DPI); native widget embedding; blur behind glass (the frosted fill is a colour
-blend, not a blur); GPU-side shadows. Bitmap glyphs are blocky by design. PPM
-drops alpha because all palette colours are opaque. The SVG backend is a second
-software backend, NOT a Metal/Vulkan/ANGLE GPU backend.
+Not implemented / not measured — later rounds: a Metal/Vulkan/ANGLE GPU raster
+or hardware-accelerated presentation inside this crate; any fps claim (there is
+no device matrix and the software raster has not been profiled); real gesture
+hardware or an OS gesture recognizer; runtime device profiling in the renderer
+(`opurom profile` remains the measured source); real image decoding; real font
+shaping (text is a 5x7 bitmap font by design, so no Unicode shaping, no hinting
+and no subpixel positioning; the SVG `<text>` is a generic monospace
+approximation); OS screen-reader integration (the R3 tree is data only: no
+ARIA/AT-SPI bridge, no focus order, no hit testing and no live announcements);
+DPI scaling (`fontScale` scales logical pixels, not physical DPI); native widget
+embedding; blur behind glass (the frosted fill is a colour blend, not a blur);
+GPU-side shadows. Bitmap glyphs are blocky by design. PPM drops alpha because
+all palette colours are opaque. The SVG backend and R5 animation compositor are
+software backends, NOT Metal/Vulkan/ANGLE GPU backends.
 
 ## Gaps / known limits
 
@@ -277,6 +347,10 @@ software backend, NOT a Metal/Vulkan/ANGLE GPU backend.
 - `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient with the GPU backend`.
 - `shortcut: glass is a colour blend, not a real blur (a blur needs a render target)`.
 - `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
+- `shortcut: R5 transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.
+- `shortcut: gesture input is integer L1 deltas, upgrade when real hardware gesture events exist`.
+- `shortcut: particles are fixed-seed 2x2 overlays, upgrade when a GPU particle path exists`.
+- `shortcut: quality is a caller-supplied budget policy, upgrade when profile feedback is wired into the host`.
 - `shortcut: the accessibility tree is layout-derived data, upgrade to a platform bridge when a native adapter exists`.
 - `shortcut: SVG <text> uses a generic monospace face and built-in metrics, upgrade to real shaping when a font atlas exists`.
 - `shortcut: SVG has no external crate and no image/font decoding; it is a software vector snapshot, not a GPU backend`.

@@ -1,13 +1,15 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json] [--svg out.svg]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
 //! `--a11y` additionally writes the deterministic R3 accessibility tree and
 //! `--svg` a deterministic SVG 1.1 vector snapshot of the same layout.
+//! `--transition` composes the frame at tick 0 with the settled frame; the
+//! stdout shape is unchanged.
 
 use opurom_render::{
-    a11y_json_at, digest_hex, parse_ir, svg_at, IrError, Renderer, StateValue, StateView,
-    ValueType, SETTLED_MS,
+    a11y_json_at, digest_hex, parse_ir, svg_at, Frame, IrError, Renderer, StateValue, StateView,
+    Transition, TransitionKind, ValueType, SETTLED_MS,
 };
 use std::{env, fs, process};
 
@@ -37,7 +39,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json] [--svg out.svg]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg]"
                 .to_string(),
         );
     }
@@ -51,8 +53,9 @@ fn run() -> Result<(), String> {
         .map_err(|e| format!("cannot read IR file {:?}: {e}", args[0]))?;
     let ir = parse_ir(&text).map_err(|e: IrError| e.to_string())?;
     let mut state = StateView::from_ir(&ir);
-    // Animation clock position in milliseconds (R2).
+    // Animation clock position in milliseconds (R2); also drives R5 transitions.
     let mut elapsed_ms: i64 = SETTLED_MS;
+    let mut transition_kind: Option<TransitionKind> = None;
     let mut a11y_path: Option<String> = None;
     let mut svg_path: Option<String> = None;
 
@@ -78,9 +81,24 @@ fn run() -> Result<(), String> {
                 let spec = args
                     .get(i + 1)
                     .ok_or_else(|| "--tick requires a millisecond value".to_string())?;
-                elapsed_ms = spec
-                    .parse()
-                    .map_err(|_| format!("invalid tick {:?}: expected milliseconds", spec))?;
+                let value: i64 = spec.parse().map_err(|_| {
+                    format!("invalid tick {spec:?}: expected 0..={SETTLED_MS} milliseconds")
+                })?;
+                if !(0..=SETTLED_MS).contains(&value) {
+                    return Err(format!(
+                        "invalid tick {spec:?}: expected 0..={SETTLED_MS} milliseconds"
+                    ));
+                }
+                elapsed_ms = value;
+                i += 2;
+            }
+            "--transition" => {
+                let spec = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--transition requires slide, fade or scale".to_string())?;
+                transition_kind = Some(TransitionKind::parse(spec).ok_or_else(|| {
+                    format!("unknown transition {spec:?}: expected slide, fade or scale")
+                })?);
                 i += 2;
             }
             "--a11y" => {
@@ -99,14 +117,31 @@ fn run() -> Result<(), String> {
             }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --tick ms, --a11y out.json or --svg out.svg"
+                    "unexpected argument {other:?}: expected --state name=value, --tick 0..={SETTLED_MS}, --transition slide|fade|scale, --a11y out.json or --svg out.svg"
                 ));
             }
         }
     }
 
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
-    let frame = renderer.render_at(&ir, &state, elapsed_ms);
+    let mut frame = renderer.render_at(&ir, &state, elapsed_ms);
+    if let Some(kind) = transition_kind {
+        let mut transition = Transition::new(kind);
+        transition.tick(elapsed_ms);
+        let outgoing = Frame {
+            width,
+            height,
+            pixels: renderer.pixels_at(&ir, &state, 0),
+            dirty: Vec::new(),
+        };
+        let incoming = Frame {
+            width,
+            height,
+            pixels: renderer.pixels_at(&ir, &state, SETTLED_MS),
+            dirty: Vec::new(),
+        };
+        frame = transition.compose(&outgoing, &incoming)?;
+    }
 
     let mut ppm = Vec::with_capacity(frame.width as usize * frame.height as usize * 3 + 32);
     ppm.extend_from_slice(format!("P6\n{} {}\n255\n", frame.width, frame.height).as_bytes());

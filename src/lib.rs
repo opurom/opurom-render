@@ -2,15 +2,16 @@
 //!
 //! Pipeline: `parse_ir` -> `StateView` -> `layout` -> RGBA frame -> dirty rects.
 //! Same IR + same viewport + same state = byte-identical pixels on every host:
-//! integer-only arithmetic, sorted state map, no time, no randomness, no host
-//! queries (`theme.mode == "system"` deterministically resolves to light).
+//! integer-only arithmetic, sorted state map, no wall-clock time, no unseeded
+//! randomness, no host queries (`theme.mode == "system"` resolves to light).
 //!
 //! R2 adds theme tokens, canonical style effects, conditional `when` visibility,
 //! sixteen new node kinds and a fixed-timestep animation clock. R3 adds optional
 //! accessibility props and a data-only accessibility tree. R4 adds eight more
 //! distinct primitives and a deterministic SVG 1.1 vector backend (a second
-//! software backend, not a GPU backend). All of them are opt-in: a v0.1 IR
-//! renders byte-identically to round 1.
+//! software backend, not a GPU backend). R5 adds deterministic page transitions,
+//! gesture progress, fixed-seed particles and caller-supplied quality tiers.
+//! All of them are opt-in: a v0.1 IR renders byte-identically to round 1.
 
 pub mod a11y;
 pub mod anim;
@@ -21,7 +22,10 @@ pub mod raster;
 pub mod svg;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
-pub use anim::{Animator, Curve};
+pub use anim::{
+    choose_quality, Animator, Curve, GestureAnim, Particle, ParticleSystem, Quality, Transition,
+    TransitionKind, ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, TRANSITION_MS,
+};
 pub use ir::{
     parse_ir, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props, Role, StateDecl,
     StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
