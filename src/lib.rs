@@ -14,7 +14,8 @@
 //! capability adds an exact display-list snapshot of the software raster stage. capability
 //! adds five optional deterministic framebuffer effects. All of them are
 //! opt-in: a 0.1.0 IR renders byte-identically to initial release, and effect-free
-//! `--commands` output stays byte-identical to capability.
+//! `--commands` output stays byte-identical to capability. capability adds optional effect
+//! commands that reproduce those effects on the Metal compute backend.
 
 pub mod a11y;
 pub mod anim;
@@ -196,13 +197,26 @@ impl Renderer {
     }
 
     /// Record the exact raster commands, including CPU-decomposed glyph blocks,
-    /// without changing the software frame or the incremental renderer state.
+    /// plus capability effect commands in the order the software framebuffer applies
+    /// them. The software frame and the incremental renderer state are unchanged.
     pub fn display_list_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> DisplayList {
         let pal = Palette::from_theme(&ir.theme);
         let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
         let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.bg);
         for n in &laid {
+            let frame = crate::effects::EffectFrame::new(self.width, self.height, n);
+            if frame.has_local {
+                canvas.emit(Command::EffectBackdrop);
+            }
             raster::draw(&mut canvas, n);
+            if frame.has_local {
+                for command in crate::effects::local_commands(frame, &n.visual_effects) {
+                    canvas.emit(command);
+                }
+            }
+        }
+        for command in crate::effects::frame_blur_commands(&laid) {
+            canvas.emit(command);
         }
         DisplayList {
             width: self.width,

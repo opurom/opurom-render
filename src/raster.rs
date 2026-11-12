@@ -60,27 +60,7 @@ impl Canvas {
     }
 
     pub(crate) fn effective_clip(&self) -> Rect {
-        let full = Rect {
-            x: 0,
-            y: 0,
-            w: self.width as i64,
-            h: self.height as i64,
-        };
-        match self.clip {
-            None => full,
-            Some(c) => {
-                let x0 = c.x.max(0);
-                let y0 = c.y.max(0);
-                let x1 = c.x.saturating_add(c.w).min(full.w);
-                let y1 = c.y.saturating_add(c.h).min(full.h);
-                Rect {
-                    x: x0,
-                    y: y0,
-                    w: (x1 - x0).max(0),
-                    h: (y1 - y0).max(0),
-                }
-            }
-        }
+        crate::effects::effective_clip(self.width, self.height, self.clip)
     }
 
     fn visible_rect(&self, r: Rect, c: Rgba) -> bool {
@@ -101,7 +81,7 @@ impl Canvas {
         x1 > x0 && y1 > y0
     }
 
-    fn emit(&mut self, command: Command) {
+    pub(crate) fn emit(&mut self, command: Command) {
         if self.capture {
             self.commands.push(command);
         }

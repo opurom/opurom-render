@@ -4,8 +4,7 @@
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
 //! `--a11y` additionally writes the deterministic capability accessibility tree,
 //! `--svg` a deterministic SVG 1.1 vector snapshot, and `--commands` the exact
-//! capability raster display list. Visual-effect IR is rejected with `--commands`.
-//! `--transition` composes the frame at tick 0 with the
+//! capability raster display list plus optional capability effect commands. `--transition` composes the frame at tick 0 with the
 //! settled frame; the stdout shape is unchanged.
 
 use opurom_render::{
@@ -138,10 +137,6 @@ fn run() -> Result<(), String> {
                 .to_string(),
         );
     }
-    if commands_path.is_some() && ir.has_visual_effects() {
-        return Err("--commands is unavailable with visual effects: capability software effects are not capability display-list commands".to_string());
-    }
-
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
     let mut frame = renderer.render_at(&ir, &state, elapsed_ms);
     if let Some(kind) = transition_kind {
