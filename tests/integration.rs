@@ -245,10 +245,6 @@ fn malformed_ir_is_rejected_with_readable_diagnostics() {
             "unsupported IR version",
         ),
         (
-            COUNTER_IR.replace("\"kind\": \"Column\"", "\"kind\": \"Grid\""),
-            "unknown node kind",
-        ),
-        (
             COUNTER_IR.replace("\"id\": 3", "\"id\": 9"),
             "pre-order",
         ),
@@ -264,6 +260,10 @@ fn malformed_ir_is_rejected_with_readable_diagnostics() {
         (
             COUNTER_IR.replace("\"align\": \"center\"", "\"align\": \"sideways\""),
             "unknown value",
+        ),
+        (
+            COUNTER_IR.replace("\"value\": \"Count: {count}\"", "\"value\": {\"a\": 1}"),
+            "must be a string or a number",
         ),
         (
             r##"{"ir":"0.1","app":"X","state":[],"theme":{"mode":"light","accent":"#000000","radius":0}}"##.into(),

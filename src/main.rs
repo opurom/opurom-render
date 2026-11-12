@@ -3,7 +3,9 @@
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
 
-use opurom_render::{digest_hex, parse_ir, IrError, Renderer, StateValue, StateView, ValueType};
+use opurom_render::{
+    digest_hex, parse_ir, IrError, Renderer, StateValue, StateView, ValueType, SETTLED_MS,
+};
 use std::{env, fs, process};
 
 fn main() {
@@ -32,7 +34,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms]"
                 .to_string(),
         );
     }
@@ -46,32 +48,46 @@ fn run() -> Result<(), String> {
         .map_err(|e| format!("cannot read IR file {:?}: {e}", args[0]))?;
     let ir = parse_ir(&text).map_err(|e: IrError| e.to_string())?;
     let mut state = StateView::from_ir(&ir);
+    // Animation clock position in milliseconds (R2).
+    let mut elapsed_ms: i64 = SETTLED_MS;
 
     let mut i = 4usize;
     while i < args.len() {
-        if args[i] != "--state" {
-            return Err(format!(
-                "unexpected argument {:?}: expected --state name=value",
-                args[i]
-            ));
+        match args[i].as_str() {
+            "--state" => {
+                let spec = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--state requires a name=value argument".to_string())?;
+                let (name, raw) = spec
+                    .split_once('=')
+                    .ok_or_else(|| format!("--state expects name=value, got {spec:?}"))?;
+                let decl = ir
+                    .state
+                    .iter()
+                    .find(|d| d.name == name)
+                    .ok_or_else(|| format!("unknown state name {name:?}"))?;
+                state.set(name.to_string(), parse_value(decl.typ, raw)?);
+                i += 2;
+            }
+            "--tick" => {
+                let spec = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--tick requires a millisecond value".to_string())?;
+                elapsed_ms = spec
+                    .parse()
+                    .map_err(|_| format!("invalid tick {:?}: expected milliseconds", spec))?;
+                i += 2;
+            }
+            other => {
+                return Err(format!(
+                    "unexpected argument {other:?}: expected --state name=value or --tick ms"
+                ));
+            }
         }
-        let spec = args
-            .get(i + 1)
-            .ok_or_else(|| "--state requires a name=value argument".to_string())?;
-        let (name, raw) = spec
-            .split_once('=')
-            .ok_or_else(|| format!("--state expects name=value, got {spec:?}"))?;
-        let decl = ir
-            .state
-            .iter()
-            .find(|d| d.name == name)
-            .ok_or_else(|| format!("unknown state name {name:?}"))?;
-        state.set(name.to_string(), parse_value(decl.typ, raw)?);
-        i += 2;
     }
 
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
-    let frame = renderer.render(&ir, &state);
+    let frame = renderer.render_at(&ir, &state, elapsed_ms);
 
     let mut ppm = Vec::with_capacity(frame.width as usize * frame.height as usize * 3 + 32);
     ppm.extend_from_slice(format!("P6\n{} {}\n255\n", frame.width, frame.height).as_bytes());

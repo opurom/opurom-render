@@ -4,17 +4,25 @@
 //! Same IR + same viewport + same state = byte-identical pixels on every host:
 //! integer-only arithmetic, sorted state map, no time, no randomness, no host
 //! queries (`theme.mode == "system"` deterministically resolves to light).
+//!
+//! R2 adds theme tokens, canonical style effects, conditional `when` visibility,
+//! sixteen new node kinds and a fixed-timestep animation clock. All of them are
+//! opt-in: a v0.1 IR renders byte-identically to round 1.
 
+pub mod anim;
 pub mod font;
 pub mod ir;
 pub mod layout;
 pub mod raster;
 
+pub use anim::{Animator, Curve};
 pub use ir::{
     parse_ir, Action, Align, Event, Ir, IrError, Kind, Node, Op, Props, StateDecl, StateValue,
-    StateView, Theme, ThemeMode, ValueType,
+    StateView, Theme, ThemeMode, ThemeTokens, ValueType,
 };
-pub use layout::{layout, Breakpoint, Direction, LaidOut, Palette, Rect};
+pub use layout::{
+    layout, layout_at, Breakpoint, Control, Direction, Effects, LaidOut, Palette, Rect, SETTLED_MS,
+};
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,10 +148,20 @@ impl Renderer {
         crate::layout::layout(ir, state, self.width, self.height)
     }
 
+    /// Layout at a given animation clock position (milliseconds).
+    pub fn compute_layout_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Vec<LaidOut> {
+        crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms)
+    }
+
     /// Pure raster: no mutation, no hidden state.
     pub fn pixels(&self, ir: &Ir, state: &StateView) -> Vec<u8> {
+        self.pixels_at(ir, state, SETTLED_MS)
+    }
+
+    /// Pure raster at a given animation clock position.
+    pub fn pixels_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Vec<u8> {
         let pal = Palette::from_theme(&ir.theme);
-        let laid = crate::layout::layout(ir, state, self.width, self.height);
+        let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.bg);
         for n in &laid {
             raster::draw(&mut canvas, n);
@@ -154,7 +172,13 @@ impl Renderer {
     /// Render and diff against the previous frame. Unchanged pixels => empty
     /// dirty list; changed pixels => a bounded, covering rect list.
     pub fn render(&mut self, ir: &Ir, state: &StateView) -> Frame {
-        let pixels = self.pixels(ir, state);
+        self.render_at(ir, state, SETTLED_MS)
+    }
+
+    /// Render at a given animation clock position and diff against the previous
+    /// frame. The clock is the only time source; no wall clock is consulted.
+    pub fn render_at(&mut self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Frame {
+        let pixels = self.pixels_at(ir, state, elapsed_ms);
         let dirty = match self.prev.as_deref() {
             Some(prev) => diff_rects(prev, &pixels, self.width, self.height),
             None => vec![DirtyRect {

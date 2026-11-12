@@ -35,15 +35,15 @@ impl Curve {
 }
 
 /// Progress unit: `ONE` is a fully settled curve.
-pub const ONE: i64 = 65536;
+pub const ONE: i64 = 1024;
 /// Duration of the ease curve.
 pub const EASE_MS: i64 = 320;
 /// Integration step of the spring solver.
 pub const STEP_MS: i64 = 16;
 
-/// Spring constants (per second): stiffness and damping.
-const K: i64 = 225;
-const C: i64 = 22;
+/// Spring constants: stiffness and damping (per second, unit mass).
+const K: i64 = 144;
+const C: i64 = 17;
 
 /// Curve progress at `elapsed_ms`, in `0..=ONE`.
 pub fn progress(curve: Curve, elapsed_ms: i64) -> i64 {
@@ -58,7 +58,7 @@ pub fn progress(curve: Curve, elapsed_ms: i64) -> i64 {
 fn ease(elapsed_ms: i64) -> i64 {
     let t = (elapsed_ms.clamp(0, EASE_MS) as i128 * ONE as i128 / EASE_MS as i128) as i64;
     let inv = ONE - t;
-    ONE - (inv * inv * inv >> 32)
+    ONE - (inv * inv * inv) / (ONE * ONE)
 }
 
 /// Damped spring integrated with fixed 16 ms steps from rest.
@@ -72,6 +72,11 @@ fn spring(elapsed_ms: i64) -> i64 {
         v += a * dt / 1000;
         x += v * dt / 1000;
         t += dt;
+    }
+    // Integer truncation would leave the spring oscillating by one unit forever,
+    // so snap once it is within tolerance.
+    if (x - ONE).abs() <= 8 && v.abs() <= 128 {
+        x = ONE;
     }
     x.clamp(0, ONE)
 }
@@ -118,12 +123,12 @@ mod tests {
 
     #[test]
     fn curves_are_monotonic_and_settle_at_one() {
-        let mut prev = 0i64;
-        for t in (0..=600).step_by(16) {
-            for curve in [Curve::Spring, Curve::Ease] {
+        for curve in [Curve::Spring, Curve::Ease] {
+            let mut prev = 0i64;
+            for t in (0..=4000).step_by(16) {
                 let p = progress(curve, t);
                 assert!((0..=ONE).contains(&p), "{curve:?} at {t}ms left the range");
-                assert!(p >= prev || curve == Curve::Spring, "{curve:?} went backwards");
+                assert!(p >= prev, "{curve:?} went backwards at {t}ms");
                 prev = p;
             }
         }
@@ -135,5 +140,15 @@ mod tests {
     #[test]
     fn spring_and_ease_differ() {
         assert_ne!(progress(Curve::Spring, 100), progress(Curve::Ease, 100));
+    }
+
+    #[test]
+    fn animator_only_moves_when_ticked() {
+        let mut a = Animator::new();
+        assert_eq!(a.elapsed_ms(), 0);
+        assert_eq!(a.tick(16), 16);
+        assert_eq!(a.tick(16), 32);
+        a.reset();
+        assert_eq!(a.elapsed_ms(), 0);
     }
 }

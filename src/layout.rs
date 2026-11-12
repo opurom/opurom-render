@@ -1,7 +1,14 @@
 //! Pure, deterministic adaptive layout. All arithmetic is integer i64/i128:
 //! no floats, no time, no randomness, no host queries.
 
+use crate::anim::{self, Curve};
 use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateView, Theme, ThemeMode};
+
+/// Elapsed time at which every animation curve has settled.
+pub const SETTLED_MS: i64 = 4000;
+
+/// Fixed-point unit: 1024 == fully opaque, 0 == fully transparent.
+pub const UNIT: i64 = 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Breakpoint {
@@ -37,6 +44,57 @@ pub enum Direction {
     Horizontal,
 }
 
+/// R2 style effects. Every value is integer-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Effects {
+    /// Two-stop linear gradient (top to bottom).
+    pub gradient: Option<(Rgba, Rgba)>,
+    /// Frosted fill (surface blended with accent).
+    pub glass: bool,
+    /// Soft shadow strength, 0..=8.
+    pub shadow: i64,
+    /// Alpha in fixed point (0..=1024).
+    pub opacity: i64,
+}
+
+impl Default for Effects {
+    fn default() -> Self {
+        Effects {
+            gradient: None,
+            glass: false,
+            shadow: 0,
+            opacity: UNIT,
+        }
+    }
+}
+
+/// Widget state the raster needs for the interactive kinds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Control {
+    Progress {
+        value: i64,
+    },
+    Slider {
+        value: i64,
+        min: i64,
+        max: i64,
+    },
+    Switch {
+        on: bool,
+    },
+    Checkbox {
+        checked: bool,
+    },
+    Radio {
+        selected: bool,
+    },
+    Tabs {
+        labels: Vec<String>,
+        selected: usize,
+    },
+    Spinner,
+}
+
 /// One laid-out node; the raster draws these in pre-order with no further decisions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaidOut {
@@ -52,6 +110,16 @@ pub struct LaidOut {
     pub text_color: Option<Rgba>,
     pub text_scale: i64,
     pub text_align: Align,
+    pub effects: Effects,
+    pub control: Option<Control>,
+    /// Clip rectangle inherited from a `Scroll` viewport.
+    pub clip: Option<Rect>,
+    /// Absolute glyph origin, used when the text is not centred in the box.
+    pub text_origin: Option<(i64, i64)>,
+    /// Animation clock phase in milliseconds (drives the spinner).
+    pub phase: i64,
+    pub accent: Rgba,
+    pub on_accent: Rgba,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,16 +150,26 @@ impl Palette {
                 Rgba::rgb(0xd8, 0xdc, 0xe4),
             ),
         };
+        // R2 tokens override the mode defaults; missing tokens fall back to them.
         Palette {
             bg,
-            fg,
-            surface,
+            fg: theme.tokens.on_surface.unwrap_or(fg),
+            surface: theme.tokens.surface.unwrap_or(surface),
             border,
             accent: theme.accent,
             on_accent: Rgba::rgb(0xff, 0xff, 0xff),
             radius: theme.radius,
         }
     }
+}
+
+/// Integer lerp between two colours; `t` is 0..=1024.
+pub fn lerp_color(a: Rgba, b: Rgba, t: i64) -> Rgba {
+    let t = t.clamp(0, UNIT);
+    let mix = |x: u8, y: u8| -> u8 {
+        (((y as i64 - x as i64) * t + (UNIT / 2)) / UNIT + x as i64).clamp(0, 255) as u8
+    };
+    Rgba::rgb(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b))
 }
 
 /// Row collapses into a vertical stack in the compact breakpoint.
@@ -111,6 +189,32 @@ fn text_width(text: &str, scale: i64) -> i64 {
     (text.chars().count() as i64).saturating_mul(font::advance(scale))
 }
 
+/// A node is visible unless its `when` bool state is false.
+pub fn visible(n: &Node, state: &StateView) -> bool {
+    match &n.when {
+        None => true,
+        Some(name) => state.get(name).and_then(|v| v.as_bool()).unwrap_or(false),
+    }
+}
+
+/// Fallback text for a kind this renderer does not know: label, value, title, name.
+fn fallback_text(n: &Node, state: &StateView) -> String {
+    let candidates = [
+        n.props.label.as_deref(),
+        n.props.value.as_deref(),
+        n.props.title.as_deref(),
+        n.props.name.as_deref(),
+    ];
+    for c in candidates {
+        if let Some(s) = c {
+            if !s.is_empty() {
+                return state.interpolate(s);
+            }
+        }
+    }
+    String::new()
+}
+
 fn node_text(n: &Node, state: &StateView) -> String {
     match n.kind {
         Kind::Text => state.interpolate(n.props.value.as_deref().unwrap_or("")),
@@ -119,6 +223,19 @@ fn node_text(n: &Node, state: &StateView) -> String {
             Some(v) => v.as_text(),
             None => state.interpolate(n.props.placeholder.as_deref().unwrap_or("")),
         },
+        Kind::Badge => state.interpolate(n.props.label.as_deref().unwrap_or("")),
+        Kind::Avatar => state.interpolate(n.props.label.as_deref().unwrap_or("")),
+        Kind::Dialog => state.interpolate(n.props.title.as_deref().unwrap_or("")),
+        Kind::Icon => n
+            .props
+            .name
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .next()
+            .map(|c| c.to_string())
+            .unwrap_or_default(),
+        Kind::Other => fallback_text(n, state),
         _ => String::new(),
     }
 }
@@ -133,13 +250,16 @@ fn image_color(src: &str) -> Rgba {
     )
 }
 
+/// A node behaves like a leaf for sizing when it has no children of its own.
+fn leaf_like(n: &Node) -> bool {
+    n.children.is_empty() && (n.kind.is_leaf() || n.kind == Kind::Other)
+}
+
 fn container_extent(n: &Node, bp: Breakpoint, state: &StateView, want_w: bool) -> i64 {
     let dir = direction(n.kind, bp);
     let pad = n.props.padding.saturating_mul(2);
-    let gap = n
-        .props
-        .gap
-        .saturating_mul(n.children.len().saturating_sub(1) as i64);
+    let visible_kids = n.children.iter().filter(|c| visible(c, state)).count() as i64;
+    let gap = n.props.gap.saturating_mul(visible_kids.saturating_sub(1));
     let along_main = if want_w {
         dir == Direction::Horizontal
     } else {
@@ -148,6 +268,7 @@ fn container_extent(n: &Node, bp: Breakpoint, state: &StateView, want_w: bool) -
     let inner = if along_main {
         n.children
             .iter()
+            .filter(|c| visible(c, state))
             .fold(0i64, |acc, c| {
                 let v = if want_w {
                     natural_w(c, bp, state)
@@ -160,6 +281,7 @@ fn container_extent(n: &Node, bp: Breakpoint, state: &StateView, want_w: bool) -
     } else {
         n.children
             .iter()
+            .filter(|c| visible(c, state))
             .map(|c| {
                 if want_w {
                     natural_w(c, bp, state)
@@ -173,6 +295,12 @@ fn container_extent(n: &Node, bp: Breakpoint, state: &StateView, want_w: bool) -
     pad.saturating_add(inner)
 }
 
+fn tabs_width(n: &Node, scale: i64) -> i64 {
+    let labels: i64 = n.props.labels.iter().map(|l| text_width(l, scale)).sum();
+    let gaps = 8i64.saturating_mul(n.props.labels.len().saturating_sub(1) as i64);
+    labels.saturating_add(gaps)
+}
+
 fn natural_w(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
     if let Some(w) = n.props.width {
         return w;
@@ -184,6 +312,24 @@ fn natural_w(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
         Kind::Input => 120,
         Kind::Image => 64,
         Kind::Spacer => 8,
+        Kind::Divider => 0, // spans the parent width
+        Kind::Icon => 16,
+        Kind::Badge => text_width(&node_text(n, state), scale).saturating_add(12),
+        Kind::Progress => 120,
+        Kind::Switch => 36,
+        Kind::Slider => 120,
+        Kind::Checkbox => 16,
+        Kind::Radio => 16,
+        Kind::Tabs => tabs_width(n, scale),
+        Kind::Avatar => 24,
+        Kind::Spinner => 16,
+        Kind::Other => {
+            if leaf_like(n) {
+                text_width(&node_text(n, state), scale)
+            } else {
+                container_extent(n, bp, state, true)
+            }
+        }
         _ => container_extent(n, bp, state, true),
     }
 }
@@ -199,6 +345,24 @@ fn natural_h(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
         Kind::Input => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
         Kind::Image => 64,
         Kind::Spacer => 8,
+        Kind::Divider => 1,
+        Kind::Icon => 16,
+        Kind::Badge => font::GLYPH_H.saturating_mul(scale).saturating_add(8),
+        Kind::Progress => 8,
+        Kind::Switch => 20,
+        Kind::Slider => 8,
+        Kind::Checkbox => 16,
+        Kind::Radio => 16,
+        Kind::Tabs => font::GLYPH_H.saturating_mul(scale).saturating_add(8),
+        Kind::Avatar => 24,
+        Kind::Spinner => 16,
+        Kind::Other => {
+            if leaf_like(n) {
+                font::GLYPH_H.saturating_mul(scale)
+            } else {
+                container_extent(n, bp, state, false)
+            }
+        }
         _ => container_extent(n, bp, state, false),
     }
 }
@@ -215,6 +379,17 @@ fn inset(r: Rect, p: i64) -> Rect {
 
 /// Compute the full pre-order layout for one viewport. Pure: same inputs, same output.
 pub fn layout(ir: &Ir, state: &StateView, width: u32, height: u32) -> Vec<LaidOut> {
+    layout_at(ir, state, width, height, SETTLED_MS)
+}
+
+/// Layout at a given animation clock position.
+pub fn layout_at(
+    ir: &Ir,
+    state: &StateView,
+    width: u32,
+    height: u32,
+    elapsed_ms: i64,
+) -> Vec<LaidOut> {
     let bp = Breakpoint::from_width(width);
     let pal = Palette::from_theme(&ir.theme);
     let mut out = Vec::new();
@@ -230,10 +405,88 @@ pub fn layout(ir: &Ir, state: &StateView, width: u32, height: u32) -> Vec<LaidOu
     if let Some(h) = ir.tree.props.height {
         root.h = root.h.min(h);
     }
-    place(&ir.tree, root, bp, &pal, state, Align::Start, &mut out);
+    place(
+        &ir.tree,
+        root,
+        bp,
+        &pal,
+        state,
+        Align::Start,
+        elapsed_ms,
+        None,
+        &mut out,
+    );
     out
 }
 
+/// Entry animation: the box grows from its centre and fades in, both in fixed point.
+fn entry_transform(n: &Node, rect: Rect, elapsed_ms: i64) -> (Rect, i64) {
+    if n.props.animate == Curve::None {
+        return (rect, UNIT);
+    }
+    let p = anim::progress(n.props.animate, elapsed_ms).clamp(0, UNIT);
+    let w = rect.w.saturating_mul(p) / UNIT;
+    let h = rect.h.saturating_mul(p) / UNIT;
+    (
+        Rect {
+            x: rect.x + (rect.w - w) / 2,
+            y: rect.y + (rect.h - h) / 2,
+            w,
+            h,
+        },
+        p,
+    )
+}
+
+fn control_of(n: &Node, state: &StateView) -> Option<Control> {
+    let bound = |name: Option<&String>| name.and_then(|b| state.get(b));
+    match n.kind {
+        Kind::Progress => Some(Control::Progress {
+            value: n.props.value_frac.unwrap_or(0).clamp(0, UNIT),
+        }),
+        Kind::Slider => {
+            let min = n.props.min.unwrap_or(0);
+            let max = n.props.max.unwrap_or(100).max(min.saturating_add(1));
+            let value = bound(n.props.bind.as_ref())
+                .and_then(|v| v.as_int())
+                .unwrap_or(min)
+                .clamp(min, max);
+            Some(Control::Slider { value, min, max })
+        }
+        Kind::Switch => Some(Control::Switch {
+            on: bound(n.props.bind.as_ref())
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }),
+        Kind::Checkbox => Some(Control::Checkbox {
+            checked: bound(n.props.bind.as_ref())
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }),
+        Kind::Radio => {
+            let selected = match (
+                bound(n.props.bind.as_ref()).and_then(|v| v.as_str()),
+                n.props.value.as_deref(),
+            ) {
+                (Some(cur), Some(val)) => cur == val,
+                _ => false,
+            };
+            Some(Control::Radio { selected })
+        }
+        Kind::Tabs => {
+            let labels = n.props.labels.clone();
+            let current = bound(n.props.bind.as_ref()).and_then(|v| v.as_str());
+            let selected = current
+                .and_then(|c| labels.iter().position(|l| l == c))
+                .unwrap_or(0);
+            Some(Control::Tabs { labels, selected })
+        }
+        Kind::Spinner => Some(Control::Spinner),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn place(
     n: &Node,
     rect: Rect,
@@ -241,27 +494,42 @@ fn place(
     pal: &Palette,
     state: &StateView,
     inherited_align: Align,
+    elapsed_ms: i64,
+    clip: Option<Rect>,
     out: &mut Vec<LaidOut>,
 ) {
+    if !visible(n, state) {
+        return; // hidden subtree: no layout, no raster
+    }
     let dir = direction(n.kind, bp);
     let scale = font_scale(&n.props, 16);
-    let radius = n
-        .props
-        .radius
-        .unwrap_or(pal.radius)
-        .max(0)
-        .min(rect.w.min(rect.h).max(0) / 2);
+    let (rect, anim_p) = entry_transform(n, rect, elapsed_ms);
+
+    let radius = match n.kind {
+        Kind::Icon | Kind::Avatar => rect.w.min(rect.h) / 2,
+        Kind::Badge => rect.h / 2,
+        _ => n.props.radius.unwrap_or(pal.radius),
+    }
+    .max(0)
+    .min(rect.w.min(rect.h).max(0) / 2);
 
     let (fill, border, border_w) = match n.kind {
-        Kind::Column | Kind::Row | Kind::Container => (
+        Kind::Column
+        | Kind::Row
+        | Kind::Container
+        | Kind::Card
+        | Kind::List
+        | Kind::Grid
+        | Kind::Scroll
+        | Kind::Dialog => (
             Some(n.props.color.unwrap_or(pal.surface)),
-            Some(pal.border),
+            Some(n.props.border.unwrap_or(pal.border)),
             1,
         ),
-        Kind::Button => (Some(n.props.color.unwrap_or(pal.accent)), None, 0),
+        Kind::Button => (Some(n.props.color.unwrap_or(pal.accent)), n.props.border, 0),
         Kind::Input => (
             Some(n.props.color.unwrap_or(pal.surface)),
-            Some(pal.border),
+            Some(n.props.border.unwrap_or(pal.border)),
             1,
         ),
         Kind::Image => (
@@ -270,10 +538,42 @@ fn place(
                     .color
                     .unwrap_or_else(|| image_color(n.props.src.as_deref().unwrap_or(""))),
             ),
-            Some(pal.border),
+            Some(n.props.border.unwrap_or(pal.border)),
             1,
         ),
         Kind::Text | Kind::Spacer => (None, None, 0),
+        Kind::Divider => (Some(n.props.border.unwrap_or(pal.border)), None, 0),
+        Kind::Icon => (Some(n.props.color.unwrap_or(pal.accent)), n.props.border, 0),
+        Kind::Badge => (Some(n.props.color.unwrap_or(pal.accent)), n.props.border, 0),
+        Kind::Progress | Kind::Slider => (Some(n.props.color.unwrap_or(pal.border)), None, 0),
+        Kind::Switch | Kind::Checkbox | Kind::Radio => (
+            Some(n.props.color.unwrap_or(pal.surface)),
+            Some(n.props.border.unwrap_or(pal.border)),
+            1,
+        ),
+        Kind::Tabs => (
+            Some(n.props.color.unwrap_or(pal.surface)),
+            Some(n.props.border.unwrap_or(pal.border)),
+            1,
+        ),
+        Kind::Avatar => (Some(n.props.color.unwrap_or(pal.accent)), n.props.border, 0),
+        Kind::Spinner => (None, None, 0),
+        Kind::Other => {
+            if leaf_like(n) {
+                (None, None, 0)
+            } else {
+                (
+                    Some(n.props.color.unwrap_or(pal.surface)),
+                    Some(n.props.border.unwrap_or(pal.border)),
+                    1,
+                )
+            }
+        }
+    };
+    // Glass is a frosted fill: the base colour blended with the accent.
+    let fill = match (fill, n.props.glass) {
+        (Some(c), true) => Some(lerp_color(c, pal.accent, UNIT / 4)),
+        (f, _) => f,
     };
 
     let (text, text_color, text_align) = match n.kind {
@@ -288,7 +588,39 @@ fn place(
             Align::Center,
         ),
         Kind::Input => (Some(node_text(n, state)), Some(pal.fg), Align::Start),
+        Kind::Badge => (
+            Some(node_text(n, state)),
+            Some(pal.on_accent),
+            Align::Center,
+        ),
+        Kind::Avatar => (
+            Some(node_text(n, state)),
+            Some(pal.on_accent),
+            Align::Center,
+        ),
+        Kind::Icon => (
+            Some(node_text(n, state)),
+            Some(pal.on_accent),
+            Align::Center,
+        ),
+        Kind::Dialog => (
+            Some(node_text(n, state)),
+            Some(n.props.color.unwrap_or(pal.fg)),
+            Align::Start,
+        ),
+        Kind::Other if leaf_like(n) => (
+            Some(node_text(n, state)),
+            Some(n.props.color.unwrap_or(pal.fg)),
+            inherited_align,
+        ),
         _ => (None, None, Align::Start),
+    };
+
+    let effects = Effects {
+        gradient: n.props.gradient,
+        glass: n.props.glass,
+        shadow: n.props.shadow.unwrap_or(0).clamp(0, 8),
+        opacity: (n.props.opacity.unwrap_or(UNIT) * anim_p) / UNIT,
     };
 
     out.push(LaidOut {
@@ -304,23 +636,52 @@ fn place(
         text_color,
         text_scale: scale,
         text_align,
+        effects,
+        control: control_of(n, state),
+        clip,
+        text_origin: None,
+        phase: elapsed_ms,
+        accent: pal.accent,
+        on_accent: pal.on_accent,
     });
 
     if n.children.is_empty() || rect.w <= 0 || rect.h <= 0 {
         return;
     }
 
+    match n.kind {
+        Kind::Grid => place_grid(n, rect, bp, pal, state, elapsed_ms, clip, out),
+        Kind::Scroll => place_scroll(n, rect, bp, pal, state, elapsed_ms, out),
+        Kind::Dialog => place_dialog(n, rect, bp, pal, state, elapsed_ms, clip, out),
+        _ => place_children(n, rect, bp, pal, state, elapsed_ms, clip, out),
+    }
+}
+
+/// Generic container layout: children share the main axis in proportion to
+/// their natural size (fluid sizing), honouring explicit `width`/`height`.
+#[allow(clippy::too_many_arguments)]
+fn place_children(
+    n: &Node,
+    rect: Rect,
+    bp: Breakpoint,
+    pal: &Palette,
+    state: &StateView,
+    elapsed_ms: i64,
+    clip: Option<Rect>,
+    out: &mut Vec<LaidOut>,
+) {
+    let dir = direction(n.kind, bp);
     let content = inset(rect, n.props.padding);
     let vertical = dir == Direction::Vertical;
     let content_main = if vertical { content.h } else { content.w };
     let cross_avail = if vertical { content.w } else { content.h };
-    let count = n.children.len() as i64;
+    let kids: Vec<&Node> = n.children.iter().filter(|c| visible(c, state)).collect();
+    let count = kids.len() as i64;
     let gap = n.props.gap.max(0);
     let gaps = gap.saturating_mul(count.saturating_sub(1));
     let avail = (content_main - gaps).max(0);
 
-    let mut sizes: Vec<i64> = n
-        .children
+    let mut sizes: Vec<i64> = kids
         .iter()
         .map(|c| {
             if vertical {
@@ -375,7 +736,7 @@ fn place(
     .max(0);
 
     let mut cursor = 0i64;
-    for (i, c) in n.children.iter().enumerate() {
+    for (i, c) in kids.iter().enumerate() {
         // Explicit width/height props win over the fluid share on their own axis.
         let (main_override, cross_override) = if vertical {
             (c.props.height, c.props.width)
@@ -385,7 +746,10 @@ fn place(
         let main = main_override.unwrap_or(sizes[i]).min(content_main).max(0);
         let cross = cross_override
             .unwrap_or_else(|| {
-                if c.kind.is_leaf() {
+                if c.kind == Kind::Divider {
+                    // A divider spans the parent's cross axis.
+                    cross_avail.max(0)
+                } else if leaf_like(c) {
                     let natural = if vertical {
                         natural_w(c, bp, state)
                     } else {
@@ -419,7 +783,185 @@ fn place(
                 h: cross,
             }
         };
-        place(c, child_rect, bp, pal, state, n.props.align, out);
+        let child_rect = inset(child_rect, c.props.margin);
+        place(
+            c,
+            child_rect,
+            bp,
+            pal,
+            state,
+            n.props.align,
+            elapsed_ms,
+            clip,
+            out,
+        );
         cursor = cursor.saturating_add(main.saturating_add(gap));
+    }
+}
+
+/// Fluid grid: `columns` columns, row-major, each row as tall as its tallest cell.
+#[allow(clippy::too_many_arguments)]
+fn place_grid(
+    n: &Node,
+    rect: Rect,
+    bp: Breakpoint,
+    pal: &Palette,
+    state: &StateView,
+    elapsed_ms: i64,
+    clip: Option<Rect>,
+    out: &mut Vec<LaidOut>,
+) {
+    let cols = n.props.columns.unwrap_or(2).max(1);
+    let content = inset(rect, n.props.padding);
+    let kids: Vec<&Node> = n.children.iter().filter(|c| visible(c, state)).collect();
+    if kids.is_empty() {
+        return;
+    }
+    let col_w = content.w / cols;
+    let col_rem = content.w % cols;
+    let rows = (kids.len() as i64 + cols - 1) / cols;
+
+    // Row heights: the tallest natural height in each row.
+    let mut row_h = vec![0i64; rows as usize];
+    for (i, c) in kids.iter().enumerate() {
+        let row = (i as i64 / cols) as usize;
+        row_h[row] = row_h[row].max(natural_h(c, bp, state));
+    }
+
+    let mut y = content.y;
+    for row in 0..rows as usize {
+        if y >= content.y + content.h {
+            break;
+        }
+        let h = row_h[row].min((content.y + content.h - y).max(0));
+        let mut x = content.x;
+        for col in 0..cols {
+            let idx = row * cols as usize + col as usize;
+            if idx >= kids.len() {
+                break;
+            }
+            let c = kids[idx];
+            let w = col_w + if (col as i64) < col_rem { 1 } else { 0 };
+            let cw = c.props.width.unwrap_or(w).min(w).max(0);
+            let ch = c.props.height.unwrap_or(h).min(h).max(0);
+            let child_rect = Rect {
+                x: x + (w - cw) / 2,
+                y: y + (h - ch) / 2,
+                w: cw,
+                h: ch,
+            };
+            let child_rect = inset(child_rect, c.props.margin);
+            place(
+                c,
+                child_rect,
+                bp,
+                pal,
+                state,
+                n.props.align,
+                elapsed_ms,
+                clip,
+                out,
+            );
+            x += w;
+        }
+        y += h;
+    }
+}
+
+/// Scroll: children keep their natural size inside a clipped viewport.
+#[allow(clippy::too_many_arguments)]
+fn place_scroll(
+    n: &Node,
+    rect: Rect,
+    bp: Breakpoint,
+    pal: &Palette,
+    state: &StateView,
+    elapsed_ms: i64,
+    out: &mut Vec<LaidOut>,
+) {
+    let content = inset(rect, n.props.padding);
+    let clip = Some(rect);
+    let gap = n.props.gap.max(0);
+    let mut y = content.y;
+    for c in n.children.iter().filter(|c| visible(c, state)) {
+        let h = c.props.height.unwrap_or_else(|| natural_h(c, bp, state));
+        let w = c
+            .props
+            .width
+            .unwrap_or_else(|| natural_w(c, bp, state))
+            .min(content.w)
+            .max(0);
+        let child_rect = Rect {
+            x: content.x,
+            y,
+            w,
+            h,
+        };
+        let child_rect = inset(child_rect, c.props.margin);
+        place(
+            c,
+            child_rect,
+            bp,
+            pal,
+            state,
+            n.props.align,
+            elapsed_ms,
+            clip,
+            out,
+        );
+        y = y.saturating_add(h.saturating_add(gap));
+    }
+}
+
+/// Dialog: a title band on top, children below it.
+#[allow(clippy::too_many_arguments)]
+fn place_dialog(
+    n: &Node,
+    rect: Rect,
+    bp: Breakpoint,
+    pal: &Palette,
+    state: &StateView,
+    elapsed_ms: i64,
+    clip: Option<Rect>,
+    out: &mut Vec<LaidOut>,
+) {
+    let content = inset(rect, n.props.padding);
+    let title_h = font::GLYPH_H.saturating_mul(font_scale(&n.props, 16));
+    // The title band belongs to the dialog box itself.
+    if let Some(last) = out.last_mut() {
+        if last.id == n.id {
+            last.text_origin = Some((content.x, content.y));
+        }
+    }
+    let body = Rect {
+        x: content.x,
+        y: content.y + title_h + 4,
+        w: content.w,
+        h: (content.h - title_h - 4).max(0),
+    };
+    let gap = n.props.gap.max(0);
+    let mut y = body.y;
+    for c in n.children.iter().filter(|c| visible(c, state)) {
+        let h = c.props.height.unwrap_or_else(|| natural_h(c, bp, state));
+        let w = c
+            .props
+            .width
+            .unwrap_or_else(|| natural_w(c, bp, state))
+            .min(body.w)
+            .max(0);
+        let child_rect = Rect { x: body.x, y, w, h };
+        let child_rect = inset(child_rect, c.props.margin);
+        place(
+            c,
+            child_rect,
+            bp,
+            pal,
+            state,
+            n.props.align,
+            elapsed_ms,
+            clip,
+            out,
+        );
+        y = y.saturating_add(h.saturating_add(gap));
     }
 }
