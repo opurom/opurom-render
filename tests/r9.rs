@@ -157,12 +157,14 @@ fn effect_free_stream_is_byte_identical_to_r6_and_unchanged_by_an_empty_array() 
 #[test]
 fn commands_do_not_change_the_effect_ppm_or_stdout() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let ir_path = dir.join("r9-ppm.opuir.json");
+    let ir_path = dir.join("r9-effect-ppm.opuir.json");
     fs::write(&ir_path, ir_with(ALL_EFFECTS)).unwrap();
     let exe = env!("CARGO_BIN_EXE_opurom-render");
-    let plain_ppm = dir.join("r9-plain.ppm");
-    let command_ppm = dir.join("r9-command.ppm");
-    let commands = dir.join("r9-ppm.commands.json");
+    // Unique names: dump(..., "plain") writes r9-plain.ppm from a different IR,
+    // and parallel tests would otherwise race on the shared temp directory.
+    let plain_ppm = dir.join("r9-effect-plain.ppm");
+    let command_ppm = dir.join("r9-effect-command.ppm");
+    let commands = dir.join("r9-effect-ppm.commands.json");
     let plain = Command::new(exe)
         .arg(&ir_path)
         .args(["96", "64"])
