@@ -2,10 +2,11 @@
 
 Independent Rust crate: IR v0.1 → adaptive layout → deterministic RGBA8 software
 raster → incremental dirty rects, plus a deterministic SVG 1.1 **vector software
-backend** and deterministic R5 animation primitives. This folder is its own git
-repository; it has no source dependency on any other OPUROM layer, only on the
-frozen IR/ABI contracts (`IR_SCHEMA.md`, `ADAPTER_CONTRACT.md`) and local
-`FrameView` shape compatibility.
+backend**, deterministic R5 animation primitives and an exact R6 display-list
+export. This folder is its own git repository; it has no source dependency on
+any other OPUROM layer, only on the frozen IR/ABI contracts
+(`IR_SCHEMA.md`, `ADAPTER_CONTRACT.md`) and local `FrameView` shape
+compatibility.
 
 ## Verify
 
@@ -17,7 +18,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 81 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 87 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -34,11 +35,13 @@ cargo build --offline
 # digest=8cc3021fa80749b5, dirty=1 (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --svg out.svg
 # writes a deterministic SVG 1.1 snapshot (stdout unchanged)
+./target/debug/opurom-render ../opurom-spec/counter.opuir.json 320 240 out.ppm --commands commands.json
+# writes the exact R6 display list (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --transition slide --tick 16
 # deterministic transition digest (stdout still exactly digest=... and dirty=...)
 ```
 
-Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg]`.
+Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json]`.
 `--state` repeats; values are parsed against the declared state type. `--tick`
 sets the animation clock position in milliseconds, accepts `0..=4000`, and
 rejects non-numeric or out-of-range values with a readable diagnostic; the
@@ -55,7 +58,14 @@ always reports `dirty=1` (first frame = whole surface); unchanged state within
 one `Renderer` yields zero dirty rects. `--a11y <out.json>` writes a separate
 deterministic JSON accessibility tree (see below), and `--svg <out.svg>` a
 deterministic SVG 1.1 snapshot; neither adds stdout lines and neither is
-composited by `--transition`.
+composited by `--transition`. `--commands <out.json>` records the exact raster
+display list as deterministic JSON: solid rects, rounded rects and two-stop
+vertical gradients with integer bounds/colours in draw order, plus the viewport
+and opaque background. Bitmap glyph runs are decomposed on the CPU into solid
+rect commands; there is no GPU glyph atlas or GPU text shaping. CPU-only page
+transitions cannot be represented as this display list, so `--commands` and
+`--transition` together fail with a readable diagnostic. The flag adds no
+stdout lines and does not change the PPM or golden digests.
 
 ## Architecture
 
@@ -68,7 +78,9 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
                                                │
                                ├──▶ raster::Canvas (rounded fills/borders + 5x7 glyphs) ──▶ Vec<u8> RGBA8
                                │                       │
-                               │       Renderer::render diff vs previous buffer ──▶ Frame { dirty }
+                               │                       ├──▶ Vec<Command> ──▶ DisplayList JSON (R6)
+                                │                       │
+                                │       Renderer::render diff vs previous buffer ──▶ Frame { dirty }
                                │                       │
                                │               Frame::view() ──▶ FrameView<'_> for adapters
                                │
@@ -88,7 +100,10 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   a–z, 0–9, punctuation). Unsupported codepoints consume a blank advance.
 - `src/raster.rs` — filled rounded rectangles (integer quarter-circle test), 1 px
   borders, gradients, shadows, glass fills, scaled glyph blocks, opaque RGBA with
-  integer alpha blending, plus the eight R4 primitive drawings.
+  integer alpha blending, the eight R4 primitive drawings and exact R6 command
+  recording.
+- `src/display.rs` — fixed-shape deterministic R6 display-list JSON with integer
+  bounds/colours, draw order, viewport and opaque background.
 - `src/anim.rs` — the fixed-timestep animation clock, spring/ease curves, R5
   page transitions, gesture progress, fixed-seed particles and quality tiers.
 - `src/lib.rs` — `Rgba`, `StateView`, `Renderer`, `Frame`, `FrameView`, inline FNV-1a
@@ -293,20 +308,26 @@ Golden digests (unchanged by R2, R3, R4 and R5):
 layout of `ADAPTER_CONTRACT.md`. It is a local struct: adapters do not gain a
 compile-time dependency on this crate, and this crate does not import theirs.
 
-## Where a GPU backend slots in
+## R6 GPU display-list proof
 
-The pixel contract is fixed now, so a GPU backend would be a **replacement for
-the raster stage only**. `layout()` stays the source of `Vec<LaidOut>`; a
-Metal/Vulkan/ANGLE backend would translate those boxes/glyph runs into draw
-calls and copy the result into the same `Frame { width, height, pixels, dirty }`.
-`Frame::view()` already matches the adapter ABI, so `present(FrameView)` is
-unchanged. A backend must pass the same golden digest to be considered
-conformant; the headless software raster is the conformance oracle. Dirty rects
-remain a property of the diff stage, not of the backend. The R4 SVG backend and
-R5 animation compositor are *software* siblings of the raster, not this GPU
-path.
+The R6 GPU backend lives in the independent `opurom-gpu` repository. This crate
+exports the exact raster command stream with `--commands`; `opurom-gpu raster
+<commands.json> <out.ppm>` uploads that stream to a real Metal compute kernel,
+dispatches one thread per viewport pixel, reads back RGBA8 and writes the same
+P6 PPM format. For the rect/gradient fixture, the independent software PPM and
+Metal PPM are byte-identical: `cmp` exits 0. The golden `counter.opuir.json`
+frame is also covered because CPU-decomposed glyph blocks are recorded as solid
+rect commands. This is a real cross-repo GPU/software pixel proof, not a
+self-comparison.
 
-## Honest status (round 5)
+Honest scope: layout, glyph decomposition and page transitions remain CPU-side;
+the GPU kernel executes generic solid/rounded/gradient rectangles only. There is
+no GPU glyph atlas, full-scene GPU text, GPU presentation to a window,
+Vulkan/ANGLE/D3D backend, device matrix or fps claim. `Frame::view()` and dirty
+rects are unchanged; `--transition` composes whole CPU frames and cannot be
+exported as this display list.
+
+## Honest status (round 6)
 
 Verified now, by tests in this crate: IR parsing/validation, adaptive breakpoints +
 Row collapse + fluid sizing, all 32 node kinds, theme tokens with per-token
@@ -319,14 +340,15 @@ deterministic pre-order accessibility tree with roles, labels, bounds and hidden
 flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
 `data-role`, hidden markers), eight distinct deterministic primitives, R5
 slide/fade/scale frame composition with monotonic ticks and settling, gesture
-digest sequences, integer fixed-seed particles, quality budget tiers, CLI
-transition validation and unchanged V0.1 golden digests.
-`cargo test --offline` (81 tests) is green with fixed golden digests and zero
-warnings.
+digest sequences, fixed-seed particles, quality budget tiers, CLI transition
+validation, exact R6 display-list serialization/clipping/draw order, and
+unchanged V0.1 golden digests. `cargo test --offline` (87 tests) is green with
+fixed golden digests and zero warnings.
 
 Not implemented / not measured — later rounds: a Metal/Vulkan/ANGLE GPU raster
-or hardware-accelerated presentation inside this crate; any fps claim (there is
-no device matrix and the software raster has not been profiled); real gesture
+or hardware-accelerated presentation inside this crate (the R6 Metal compute
+path is cross-repo and headless); any fps claim (there is no device matrix and
+the software raster has not been profiled); real gesture
 hardware or an OS gesture recognizer; runtime device profiling in the renderer
 (`opurom profile` remains the measured source); real image decoding; real font
 shaping (text is a 5x7 bitmap font by design, so no Unicode shaping, no hinting
@@ -341,10 +363,10 @@ software backends, NOT Metal/Vulkan/ANGLE GPU backends.
 
 ## Gaps / known limits
 
-- `shortcut: 5x7 ASCII-only bitmap font, upgrade to a shaped font atlas when the GPU backend lands`.
+- `shortcut: 5x7 ASCII-only bitmap font, upgrade to a shaped font atlas when a GPU glyph path exists`.
 - `shortcut: Image renders a deterministic colour placeholder, upgrade when resource loading exists`.
 - `shortcut: dirty rects are capped at 64 (fallback: one full-frame rect), refine with a tile quadtree when a real presenter exists`.
-- `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient with the GPU backend`.
+- `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient when the IR supports it`.
 - `shortcut: glass is a colour blend, not a real blur (a blur needs a render target)`.
 - `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
 - `shortcut: R5 transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.

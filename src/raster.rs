@@ -1,6 +1,7 @@
 //! Deterministic RGBA8 software raster: rounded fills/borders, R2 effects and
 //! bitmap text. Every pixel write is integer arithmetic; the frame is opaque.
 
+use crate::display::Command;
 use crate::layout::Control;
 use crate::{font, Align, Kind, LaidOut, Rect, Rgba};
 
@@ -21,6 +22,8 @@ pub struct Canvas {
     pub pixels: Vec<u8>,
     /// Optional clip rectangle (R2 `Scroll` viewport).
     pub clip: Option<Rect>,
+    capture: bool,
+    commands: Vec<Command>,
 }
 
 impl Canvas {
@@ -35,28 +38,89 @@ impl Canvas {
             height,
             pixels,
             clip: None,
+            capture: false,
+            commands: Vec::new(),
         }
     }
 
-    pub fn set(&mut self, x: i64, y: i64, c: Rgba) {
+    /// Capture the exact high-level draw commands for the R6 display list.
+    pub fn capturing(width: u32, height: u32, bg: Rgba) -> Canvas {
+        let mut canvas = Canvas::new(width, height, bg);
+        canvas.capture = true;
+        canvas
+    }
+
+    pub fn into_commands(self) -> Vec<Command> {
+        self.commands
+    }
+
+    fn effective_clip(&self) -> Rect {
+        let full = Rect {
+            x: 0,
+            y: 0,
+            w: self.width as i64,
+            h: self.height as i64,
+        };
+        match self.clip {
+            None => full,
+            Some(c) => {
+                let x0 = c.x.max(0);
+                let y0 = c.y.max(0);
+                let x1 = c.x.saturating_add(c.w).min(full.w);
+                let y1 = c.y.saturating_add(c.h).min(full.h);
+                Rect {
+                    x: x0,
+                    y: y0,
+                    w: (x1 - x0).max(0),
+                    h: (y1 - y0).max(0),
+                }
+            }
+        }
+    }
+
+    fn visible_rect(&self, r: Rect, c: Rgba) -> bool {
+        if c.a == 0 || r.w <= 0 || r.h <= 0 {
+            return false;
+        }
+        let clip = self.effective_clip();
+        let x0 = r.x.max(clip.x).max(0);
+        let y0 = r.y.max(clip.y).max(0);
+        let x1 =
+            r.x.saturating_add(r.w)
+                .min(clip.x.saturating_add(clip.w))
+                .min(self.width as i64);
+        let y1 =
+            r.y.saturating_add(r.h)
+                .min(clip.y.saturating_add(clip.h))
+                .min(self.height as i64);
+        x1 > x0 && y1 > y0
+    }
+
+    fn emit(&mut self, command: Command) {
+        if self.capture {
+            self.commands.push(command);
+        }
+    }
+
+    fn set_quiet(&mut self, x: i64, y: i64, c: Rgba) -> bool {
         if x < 0 || y < 0 || x >= self.width as i64 || y >= self.height as i64 {
-            return;
+            return false;
         }
         if let Some(clip) = self.clip {
             if x < clip.x || y < clip.y || x >= clip.x + clip.w || y >= clip.y + clip.h {
-                return;
+                return false;
             }
         }
         let i = (y as usize * self.width as usize + x as usize) * 4;
         if c.a == 0 {
-            return;
+            return false;
         }
         if c.a == 255 {
             self.pixels[i] = c.r;
             self.pixels[i + 1] = c.g;
             self.pixels[i + 2] = c.b;
             self.pixels[i + 3] = 255;
-            return;
+            return true;
         }
         let a = c.a as u32;
         let inv = 255 - a;
@@ -66,14 +130,39 @@ impl Canvas {
             self.pixels[i + k] = ((src[k] as u32 * a + dst * inv) / 255) as u8;
         }
         self.pixels[i + 3] = 255;
+        true
+    }
+
+    pub fn set(&mut self, x: i64, y: i64, c: Rgba) {
+        let wrote = self.set_quiet(x, y, c);
+        if wrote && self.capture {
+            let clip = self.effective_clip();
+            self.emit(Command::Solid {
+                rect: Rect { x, y, w: 1, h: 1 },
+                clip,
+                color: c,
+            });
+        }
     }
 
     pub fn fill_rect(&mut self, r: Rect, c: Rgba) {
+        if self.capture && self.visible_rect(r, c) {
+            let clip = self.effective_clip();
+            self.emit(Command::Solid {
+                rect: r,
+                clip,
+                color: c,
+            });
+        }
+        self.fill_rect_raw(r, c);
+    }
+
+    fn fill_rect_raw(&mut self, r: Rect, c: Rgba) {
         let x1 = (r.x + r.w).min(self.width as i64);
         let y1 = (r.y + r.h).min(self.height as i64);
         for y in r.y.max(0)..y1 {
             for x in r.x.max(0)..x1 {
-                self.set(x, y, c);
+                self.set_quiet(x, y, c);
             }
         }
     }
@@ -116,12 +205,21 @@ impl Canvas {
             self.fill_rect(r, c);
             return;
         }
+        if self.capture && self.visible_rect(r, c) {
+            let clip = self.effective_clip();
+            self.emit(Command::Rounded {
+                rect: r,
+                clip,
+                radius: rad,
+                color: c,
+            });
+        }
         for y in r.y.max(0)..y1 {
             for x in r.x.max(0)..x1 {
                 if Self::outside_round(r, x, y, rad) {
                     continue;
                 }
-                self.set(x, y, c);
+                self.set_quiet(x, y, c);
             }
         }
     }
@@ -142,6 +240,18 @@ impl Canvas {
         let x1 = (r.x + r.w).min(self.width as i64);
         let y1 = (r.y + r.h).min(self.height as i64);
         let last = r.h - 1;
+        let alpha_u8 = ((alpha.clamp(0, UNIT) * 255) / UNIT) as u8;
+        if self.capture && alpha_u8 > 0 && self.visible_rect(r, top) {
+            let clip = self.effective_clip();
+            self.emit(Command::Gradient {
+                rect: r,
+                clip,
+                radius: rad,
+                top,
+                bottom,
+                alpha: alpha_u8,
+            });
+        }
         for y in r.y.max(0)..y1 {
             let t = if last <= 0 {
                 UNIT
@@ -154,7 +264,7 @@ impl Canvas {
                 if Self::outside_round(r, x, y, rad) {
                     continue;
                 }
-                self.set(x, y, c);
+                self.set_quiet(x, y, c);
             }
         }
     }

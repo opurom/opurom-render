@@ -1,11 +1,11 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
-//! `--a11y` additionally writes the deterministic R3 accessibility tree and
-//! `--svg` a deterministic SVG 1.1 vector snapshot of the same layout.
-//! `--transition` composes the frame at tick 0 with the settled frame; the
-//! stdout shape is unchanged.
+//! `--a11y` additionally writes the deterministic R3 accessibility tree,
+//! `--svg` a deterministic SVG 1.1 vector snapshot, and `--commands` the exact
+//! R6 raster display list. `--transition` composes the frame at tick 0 with the
+//! settled frame; the stdout shape is unchanged.
 
 use opurom_render::{
     a11y_json_at, digest_hex, parse_ir, svg_at, Frame, IrError, Renderer, StateValue, StateView,
@@ -39,7 +39,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json]"
                 .to_string(),
         );
     }
@@ -58,6 +58,7 @@ fn run() -> Result<(), String> {
     let mut transition_kind: Option<TransitionKind> = None;
     let mut a11y_path: Option<String> = None;
     let mut svg_path: Option<String> = None;
+    let mut commands_path: Option<String> = None;
 
     let mut i = 4usize;
     while i < args.len() {
@@ -115,12 +116,26 @@ fn run() -> Result<(), String> {
                 svg_path = Some(spec.clone());
                 i += 2;
             }
+            "--commands" => {
+                let spec = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--commands requires an output JSON path".to_string())?;
+                commands_path = Some(spec.clone());
+                i += 2;
+            }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --tick 0..={SETTLED_MS}, --transition slide|fade|scale, --a11y out.json or --svg out.svg"
+                    "unexpected argument {other:?}: expected --state name=value, --tick 0..={SETTLED_MS}, --transition slide|fade|scale, --a11y out.json, --svg out.svg or --commands out.json"
                 ));
             }
         }
+    }
+
+    if commands_path.is_some() && transition_kind.is_some() {
+        return Err(
+            "--commands is unavailable with --transition: transitions composite whole CPU frames"
+                .to_string(),
+        );
     }
 
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
@@ -149,6 +164,13 @@ fn run() -> Result<(), String> {
         ppm.extend_from_slice(&px[..3]);
     }
     fs::write(&args[3], ppm).map_err(|e| format!("cannot write {:?}: {e}", args[3]))?;
+    if let Some(path) = commands_path {
+        let json = renderer
+            .display_list_at(&ir, &state, elapsed_ms)
+            .to_json()
+            .map_err(|e| e.to_string())?;
+        fs::write(&path, json).map_err(|e| format!("cannot write {:?}: {e}", path))?;
+    }
     if let Some(path) = a11y_path {
         let json = a11y_json_at(&ir, &state, width, height, elapsed_ms);
         fs::write(&path, json).map_err(|e| format!("cannot write {:?}: {e}", path))?;

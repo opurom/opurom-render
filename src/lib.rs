@@ -11,10 +11,12 @@
 //! distinct primitives and a deterministic SVG 1.1 vector backend (a second
 //! software backend, not a GPU backend). R5 adds deterministic page transitions,
 //! gesture progress, fixed-seed particles and caller-supplied quality tiers.
-//! All of them are opt-in: a v0.1 IR renders byte-identically to round 1.
+//! R6 adds an exact display-list snapshot of the software raster stage. All of
+//! them are opt-in: a v0.1 IR renders byte-identically to round 1.
 
 pub mod a11y;
 pub mod anim;
+pub mod display;
 pub mod font;
 pub mod ir;
 pub mod layout;
@@ -26,6 +28,7 @@ pub use anim::{
     choose_quality, Animator, Curve, GestureAnim, Particle, ParticleSystem, Quality, Transition,
     TransitionKind, ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, TRANSITION_MS,
 };
+pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
 pub use ir::{
     parse_ir, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props, Role, StateDecl,
     StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
@@ -178,6 +181,28 @@ impl Renderer {
             raster::draw(&mut canvas, n);
         }
         canvas.pixels
+    }
+
+    /// Pure display list at the settled animation clock position.
+    pub fn display_list(&self, ir: &Ir, state: &StateView) -> DisplayList {
+        self.display_list_at(ir, state, SETTLED_MS)
+    }
+
+    /// Record the exact raster commands, including CPU-decomposed glyph blocks,
+    /// without changing the software frame or the incremental renderer state.
+    pub fn display_list_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> DisplayList {
+        let pal = Palette::from_theme(&ir.theme);
+        let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
+        let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.bg);
+        for n in &laid {
+            raster::draw(&mut canvas, n);
+        }
+        DisplayList {
+            width: self.width,
+            height: self.height,
+            background: pal.bg,
+            commands: canvas.into_commands(),
+        }
     }
 
     /// Render and diff against the previous frame. Unchanged pixels => empty
