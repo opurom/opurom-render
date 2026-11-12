@@ -412,6 +412,11 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
             let scale = n.text_scale.clamp(1, 8);
             let adv = font::advance(scale);
             let th = font::GLYPH_H * scale;
+            // High-contrast mode sets text_color even for nodes with no text.
+            let label_color = match n.text_color {
+                Some(c) => with_alpha(c, alpha),
+                None => accent,
+            };
             let mut x = n.rect.x + 2;
             for (i, label) in labels.iter().enumerate() {
                 let w = (label.chars().count() as i64) * adv;
@@ -426,7 +431,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                         accent,
                     );
                 }
-                draw_glyphs(canvas, label, x, n.rect.y + 2, scale, accent);
+                draw_glyphs(canvas, label, x, n.rect.y + 2, scale, label_color);
                 x += w + 8;
             }
             let _ = th;
