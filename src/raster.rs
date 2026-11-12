@@ -1,5 +1,6 @@
-//! Deterministic RGBA8 software raster: rounded fills/borders, R2 effects and
-//! bitmap text. Every pixel write is integer arithmetic; the frame is opaque.
+//! Deterministic RGBA8 software raster: rounded fills/borders, R2 effects,
+//! bitmap text and R8 framebuffer effects. Every pixel write is integer
+//! arithmetic; the frame is opaque.
 
 use crate::display::Command;
 use crate::layout::Control;
@@ -54,7 +55,11 @@ impl Canvas {
         self.commands
     }
 
-    fn effective_clip(&self) -> Rect {
+    pub(crate) fn is_capturing(&self) -> bool {
+        self.capture
+    }
+
+    pub(crate) fn effective_clip(&self) -> Rect {
         let full = Rect {
             x: 0,
             y: 0,
@@ -168,25 +173,27 @@ impl Canvas {
     }
 
     /// Integer corner test: `true` when the pixel is outside the rounded box.
-    fn outside_round(r: Rect, x: i64, y: i64, rad: i64) -> bool {
+    pub(crate) fn outside_round(r: Rect, x: i64, y: i64, rad: i64) -> bool {
         if rad <= 0 {
             return false;
         }
         let cr = rad - 1;
-        let limit = cr * cr;
-        let dx = x - r.x;
-        let cx = if dx < rad {
-            cr - dx
-        } else if dx >= r.w - rad {
-            dx - (r.w - rad)
+        let limit = cr as i128 * cr as i128;
+        let dx = x.saturating_sub(r.x);
+        let right = r.w.saturating_sub(rad);
+        let cx: i128 = if dx < rad {
+            cr as i128 - dx as i128
+        } else if dx >= right {
+            dx as i128 - right as i128
         } else {
             -1
         };
-        let dy = y - r.y;
-        let cy = if dy < rad {
-            cr - dy
-        } else if dy >= r.h - rad {
-            dy - (r.h - rad)
+        let dy = y.saturating_sub(r.y);
+        let bottom = r.h.saturating_sub(rad);
+        let cy: i128 = if dy < rad {
+            cr as i128 - dy as i128
+        } else if dy >= bottom {
+            dy as i128 - bottom as i128
         } else {
             -1
         };
@@ -393,14 +400,23 @@ fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
 }
 
 /// Draw one laid-out node. Box first, glyphs on top; children are drawn later
-/// because `layout()` emits pre-order.
+/// because `layout()` emits pre-order. R8 local effects use a frame snapshot
+/// taken before this node; whole-frame blur passes run after all nodes.
 pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
     let prev_clip = canvas.clip;
     canvas.clip = n.clip;
+    let backdrop = if !canvas.is_capturing() && crate::effects::has_local_effects(n) {
+        Some(canvas.pixels.clone())
+    } else {
+        None
+    };
     draw_shadow(canvas, n);
     draw_box(canvas, n);
     draw_control(canvas, n);
     draw_text(canvas, n);
+    if let Some(backdrop) = backdrop {
+        crate::effects::apply_node(canvas, n, &backdrop);
+    }
     canvas.clip = prev_clip;
 }
 

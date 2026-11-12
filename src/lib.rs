@@ -11,12 +11,15 @@
 //! distinct primitives and a deterministic SVG 1.1 vector backend (a second
 //! software backend, not a GPU backend). R5 adds deterministic page transitions,
 //! gesture progress, fixed-seed particles and caller-supplied quality tiers.
-//! R6 adds an exact display-list snapshot of the software raster stage. All of
-//! them are opt-in: a v0.1 IR renders byte-identically to round 1.
+//! R6 adds an exact display-list snapshot of the software raster stage. R8
+//! adds five optional deterministic framebuffer effects. All of them are
+//! opt-in: a v0.1 IR renders byte-identically to round 1, and effect-free
+//! `--commands` output stays byte-identical to R6.
 
 pub mod a11y;
 pub mod anim;
 pub mod display;
+pub mod effects;
 pub mod font;
 pub mod ir;
 pub mod layout;
@@ -29,6 +32,9 @@ pub use anim::{
     TransitionKind, ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, TRANSITION_MS,
 };
 pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
+pub use effects::{
+    VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
+};
 pub use ir::{
     parse_ir, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props, Role, StateDecl,
     StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
@@ -180,6 +186,7 @@ impl Renderer {
         for n in &laid {
             raster::draw(&mut canvas, n);
         }
+        effects::apply_frame_blurs(&mut canvas, &laid);
         canvas.pixels
     }
 

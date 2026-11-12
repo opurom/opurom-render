@@ -2,6 +2,7 @@
 //! no floats, no time, no randomness, no host queries.
 
 use crate::anim::{self, Curve};
+use crate::effects::VisualEffect;
 use crate::ir::Contrast;
 use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateView, Theme, ThemeMode};
 
@@ -136,6 +137,8 @@ pub struct LaidOut {
     pub text_scale: i64,
     pub text_align: Align,
     pub effects: Effects,
+    /// R8 typed software effects, in IR array order.
+    pub visual_effects: Vec<VisualEffect>,
     pub control: Option<Control>,
     /// Clip rectangle inherited from a `Scroll` viewport.
     pub clip: Option<Rect>,
@@ -761,6 +764,7 @@ fn place(
         text_scale: scale,
         text_align,
         effects,
+        visual_effects: n.props.effects.clone(),
         control: control_of(n, state),
         clip,
         text_origin: None,

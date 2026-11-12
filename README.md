@@ -2,8 +2,9 @@
 
 Independent Rust crate: IR v0.1 → adaptive layout → deterministic RGBA8 software
 raster → incremental dirty rects, plus a deterministic SVG 1.1 **vector software
-backend**, deterministic R5 animation primitives and an exact R6 display-list
-export. This folder is its own git repository; it has no source dependency on
+backend**, deterministic R5 animation primitives, an exact R6 display-list
+export and five R8 deterministic framebuffer effects. This folder is its own
+git repository; it has no source dependency on
 any other OPUROM layer, only on the frozen IR/ABI contracts
 (`IR_SCHEMA.md`, `ADAPTER_CONTRACT.md`) and local `FrameView` shape
 compatibility.
@@ -18,7 +19,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 87 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 104 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -64,7 +65,9 @@ vertical gradients with integer bounds/colours in draw order, plus the viewport
 and opaque background. Bitmap glyph runs are decomposed on the CPU into solid
 rect commands; there is no GPU glyph atlas or GPU text shaping. CPU-only page
 transitions cannot be represented as this display list, so `--commands` and
-`--transition` together fail with a readable diagnostic. The flag adds no
+`--transition` together fail with a readable diagnostic. R8 software effects
+also cannot be represented, so `--commands` with effect props fails; effect-free
+output stays byte-identical to R6. The flag adds no
 stdout lines and does not change the PPM or golden digests.
 
 ## Architecture
@@ -76,7 +79,7 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
                                                │
                       layout(Ir, StateView, viewport) ──▶ Vec<LaidOut>  (pre-order)
                                                │
-                               ├──▶ raster::Canvas (rounded fills/borders + 5x7 glyphs) ──▶ Vec<u8> RGBA8
+                               ├──▶ raster::Canvas (rounded fills/borders + 5x7 glyphs + local R8 effects) ──▶ final R8 frame blurs ──▶ Vec<u8> RGBA8
                                │                       │
                                │                       ├──▶ Vec<Command> ──▶ DisplayList JSON (R6)
                                 │                       │
@@ -102,6 +105,8 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   borders, gradients, shadows, glass fills, scaled glyph blocks, opaque RGBA with
   integer alpha blending, the eight R4 primitive drawings and exact R6 command
   recording.
+- `src/effects.rs` — R8 integer RGBA framebuffer effects: separable box blur,
+  silhouette shadow/glow, frosted backdrop glass and a specular liquid gradient.
 - `src/display.rs` — fixed-shape deterministic R6 display-list JSON with integer
   bounds/colours, draw order, viewport and opaque background.
 - `src/anim.rs` — the fixed-timestep animation clock, spring/ease curves, R5
@@ -325,9 +330,61 @@ the GPU kernel executes generic solid/rounded/gradient rectangles only. There is
 no GPU glyph atlas, full-scene GPU text, GPU presentation to a window,
 Vulkan/ANGLE/D3D backend, device matrix or fps claim. `Frame::view()` and dirty
 rects are unchanged; `--transition` composes whole CPU frames and cannot be
-exported as this display list.
+exported as this display list. R8 adds no effect commands: effect-free
+`--commands` output stays byte-identical to R6, and the CLI rejects
+`--commands` for an IR that contains visual effects with a readable diagnostic.
 
-## Honest status (round 6)
+## R8 deterministic software visual effects
+
+All R8 effects are **opt-in** through a node's `props.effects` array. Effects
+absent leave the three V0.1 golden digests and the R6 display list unchanged.
+Example:
+
+```json
+"props": {
+  "width": 120,
+  "height": 48,
+  "effects": [
+    {"kind":"blur","radius":4},
+    {"kind":"shadow","dx":6,"dy":6,"alpha":512},
+    {"kind":"glass","radius":3,"alpha":384,"color":"#FFFFFF"}
+  ]
+}
+```
+
+| Field | Type / default | Meaning |
+| --- | --- | --- |
+| `kind` | required string | One of `blur`, `shadow`, `glow`, `glass`, `liquid`. |
+| `radius` | integer, default `3`, clamped to `0..=32` | Box-blur / silhouette / backdrop radius. Ignored by `liquid`. |
+| `dx`, `dy` | integer, default `radius / 2`, clamped to `-64..=64` | Shadow silhouette offset. |
+| `alpha` | integer fixed point, default `512` (`0.5`), clamped to `0..=1024` | Converted to byte alpha with `(alpha * 255 + 512) / 1024`. |
+| `color` | optional `#RRGGBB` | Shadow defaults to black, glow to the node's drawn ink (text colour, then border, fill, then accent), glass/liquid tint to white. |
+
+Unknown fields in an effect object are ignored. A non-array `effects` prop,
+unknown `kind`, non-integer numeric field or invalid colour is a readable parse
+error. Local effects are applied in array order at the node's draw step; each
+`blur` is a final whole-frame pass in pre-order layout order, so children drawn
+after a blur node are included. No float arithmetic, wall clock, randomness,
+threads or external crate is used. Alpha compositing is integer half-up:
+`(src * a + dst * (255 - a) + 127) / 255`.
+
+| Kind | Deterministic software operation |
+| --- | --- |
+| `blur` | Separable horizontal then vertical integer box blur over the complete RGBA8 frame. Window ends are clamped to the frame, so edge windows have fewer samples and out-of-bounds samples are omitted, not repeated. For each channel, `(sum + count / 2) / count` is the exact half-up rounding rule (ties round up); alpha stays 255. |
+| `shadow` | A radius-softened binary silhouette of the node is offset by `dx`/`dy` and alpha-composited behind the node with a dark colour. |
+| `glow` | The same silhouette is box-blurred; coverage outside the node scales an alpha-composited halo in the node's ink colour. |
+| `glass` | The backdrop snapshot taken before the node is box-blurred and alpha-composited with a translucent tint inside the node's rounded bounds. This replaces the node's opaque fill; child nodes still draw afterwards. The old R2 `glass: true` prop remains a colour blend, not a blur. |
+| `liquid` | A diagonal triangular specular band, `band = 1024 - abs(3 * t - 1024)` with `t = diagonal * 1024 / (width + height - 2)`, scales a fixed-point white/highlight alpha over the node bounds. |
+
+**Honest scope:** these are CPU RGBA framebuffer effects only, not GPU effect
+kernels and not a compositor layer tree. `liquid` is a stylized specular
+gradient, not real lens refraction or physically based transmission; `glass`
+uses a framebuffer snapshot, not real depth-aware refraction. There is no
+real-time 120fps claim, no measured frame rate and no GPU effect path. Effects
+are not represented in `--commands`, the R4 SVG snapshot or the R3 a11y tree.
+GPU effect kernels, hardware presentation and real lens optics remain R9+.
+
+## Honest status (round 8)
 
 Verified now, by tests in this crate: IR parsing/validation, adaptive breakpoints +
 Row collapse + fluid sizing, all 32 node kinds, theme tokens with per-token
@@ -341,25 +398,29 @@ flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
 `data-role`, hidden markers), eight distinct deterministic primitives, R5
 slide/fade/scale frame composition with monotonic ticks and settling, gesture
 digest sequences, fixed-seed particles, quality budget tiers, CLI transition
-validation, exact R6 display-list serialization/clipping/draw order, and
-unchanged V0.1 golden digests. `cargo test --offline` (87 tests) is green with
-fixed golden digests and zero warnings.
+validation, exact R6 display-list serialization/clipping/draw order, the five
+R8 software effects with determinism, pairwise distinct pixels, clamping,
+overflow and `--commands` boundary tests, and unchanged V0.1 golden digests.
+`cargo test --offline` (104 tests) is green with fixed golden digests and zero
+warnings.
 
 Not implemented / not measured — later rounds: a Metal/Vulkan/ANGLE GPU raster
 or hardware-accelerated presentation inside this crate (the R6 Metal compute
-path is cross-repo and headless); any fps claim (there is no device matrix and
-the software raster has not been profiled); real gesture
-hardware or an OS gesture recognizer; runtime device profiling in the renderer
-(`opurom profile` remains the measured source); real image decoding; real font
-shaping (text is a 5x7 bitmap font by design, so no Unicode shaping, no hinting
-and no subpixel positioning; the SVG `<text>` is a generic monospace
-approximation); OS screen-reader integration (the R3 tree is data only: no
-ARIA/AT-SPI bridge, no focus order, no hit testing and no live announcements);
-DPI scaling (`fontScale` scales logical pixels, not physical DPI); native widget
-embedding; blur behind glass (the frosted fill is a colour blend, not a blur);
-GPU-side shadows. Bitmap glyphs are blocky by design. PPM drops alpha because
-all palette colours are opaque. The SVG backend and R5 animation compositor are
-software backends, NOT Metal/Vulkan/ANGLE GPU backends.
+path is cross-repo and headless); any fps claim, including a real-time 120fps
+claim (there is no device matrix and the software raster has not been profiled);
+real gesture hardware or an OS gesture recognizer; runtime device profiling in
+the renderer (`opurom profile` remains the measured source); real image
+decoding; real font shaping (text is a 5x7 bitmap font by design, so no Unicode
+shaping, no hinting and no subpixel positioning; the SVG `<text>` is a generic
+monospace approximation); OS screen-reader integration (the R3 tree is data
+only: no ARIA/AT-SPI bridge, no focus order, no hit testing and no live
+announcements); DPI scaling (`fontScale` scales logical pixels, not physical
+DPI); native widget embedding; GPU effect kernels, GPU-side shadows and real
+lens refraction (R9+). The R2 `glass: true` prop remains a colour blend; the
+R8 `effects` glass path is a real CPU framebuffer blur, not refraction. Bitmap
+glyphs are blocky by design. PPM drops alpha because all palette colours are
+opaque. The SVG backend and R5 animation compositor are software backends, NOT
+Metal/Vulkan/ANGLE GPU backends.
 
 ## Gaps / known limits
 
@@ -367,7 +428,7 @@ software backends, NOT Metal/Vulkan/ANGLE GPU backends.
 - `shortcut: Image renders a deterministic colour placeholder, upgrade when resource loading exists`.
 - `shortcut: dirty rects are capped at 64 (fallback: one full-frame rect), refine with a tile quadtree when a real presenter exists`.
 - `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient when the IR supports it`.
-- `shortcut: glass is a colour blend, not a real blur (a blur needs a render target)`.
+- `shortcut: R2 glass is a colour blend; R8 glass blurs a framebuffer snapshot, upgrade to compositor layers and real refraction in R9+`.
 - `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
 - `shortcut: R5 transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.
 - `shortcut: gesture input is integer L1 deltas, upgrade when real hardware gesture events exist`.

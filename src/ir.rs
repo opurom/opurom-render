@@ -5,11 +5,14 @@
 //!
 //! R2/R3 are additive: `theme.tokens`, the optional node field `when`, the
 //! canonical style props, sixteen new node kinds and the accessibility props
-//! are accepted. Unknown props are ignored and an unknown kind falls back to
-//! Container/Text, so a file from a newer compiler still renders instead of
-//! failing.
+//! are accepted. R8 adds an optional `effects` array of typed software effects.
+//! Unknown props are ignored and an unknown kind falls back to Container/Text,
+//! so a file from a newer compiler still renders instead of failing.
 
 use crate::anim::Curve;
+use crate::effects::{
+    VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
+};
 use crate::Rgba;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,6 +38,13 @@ pub struct Ir {
     pub state: Vec<StateDecl>,
     pub tree: Node,
     pub theme: Theme,
+}
+
+impl Ir {
+    /// True when any node, visible or hidden, carries an R8 effect prop.
+    pub fn has_visual_effects(&self) -> bool {
+        self.tree.has_visual_effects()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -340,6 +350,8 @@ pub struct Props {
     pub values: Vec<i64>,
     /// Row count for `Table` / `Calendar` grids.
     pub rows: Option<i64>,
+    // R8 optional software visual effects.
+    pub effects: Vec<VisualEffect>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -380,6 +392,12 @@ pub struct Node {
     pub events: Vec<Event>,
     /// R2: the node is visible only while this bool state is true.
     pub when: Option<String>,
+}
+
+impl Node {
+    pub fn has_visual_effects(&self) -> bool {
+        !self.props.effects.is_empty() || self.children.iter().any(|c| c.has_visual_effects())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -831,6 +849,54 @@ fn values_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Vec<i64>
     }
 }
 
+fn effect_integer(
+    o: &Map<String, Value>,
+    key: &str,
+    what: &str,
+    default: i64,
+) -> Result<i64, IrError> {
+    match o.get(key) {
+        Some(v) => integer(v, &format!("{what}.{key}")),
+        None => Ok(default),
+    }
+}
+
+/// Validate the optional R8 `effects` array. Unknown effect fields are ignored
+/// like other IR props; numeric fields are clamped here so raster arithmetic
+/// never sees an unbounded value.
+fn effects_prop(o: &Map<String, Value>, what: &str) -> Result<Vec<VisualEffect>, IrError> {
+    let Some(v) = o.get("effects") else {
+        return Ok(Vec::new());
+    };
+    let items = v
+        .as_array()
+        .ok_or_else(|| bad(format!("{what}.effects must be an array")))?;
+    let mut out = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let path = format!("{what}.effects[{i}]");
+        let fx = object(item, &path)?;
+        let kind_s = string_field(fx, "kind", &path)?;
+        let kind = VisualEffectKind::parse(&kind_s)
+            .ok_or_else(|| bad(format!("{path}.kind has unknown value {kind_s:?}")))?;
+        let radius = effect_integer(fx, "radius", &path, 3)?.clamp(0, EFFECT_MAX_RADIUS);
+        let dx = effect_integer(fx, "dx", &path, radius / 2)?
+            .clamp(-EFFECT_MAX_OFFSET, EFFECT_MAX_OFFSET);
+        let dy = effect_integer(fx, "dy", &path, radius / 2)?
+            .clamp(-EFFECT_MAX_OFFSET, EFFECT_MAX_OFFSET);
+        let alpha = effect_integer(fx, "alpha", &path, EFFECT_UNIT / 2)?.clamp(0, EFFECT_UNIT);
+        let color = color_prop(fx, "color", &path)?;
+        out.push(VisualEffect {
+            kind,
+            radius,
+            dx,
+            dy,
+            alpha,
+            color,
+        });
+    }
+    Ok(out)
+}
+
 fn state_value(v: &Value, expected: Option<ValueType>, what: &str) -> Result<StateValue, IrError> {
     let value = if let Some(s) = v.as_str() {
         StateValue::Str(s.to_string())
@@ -942,6 +1008,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         role,
         values: values_prop(o, "values", what)?,
         rows: opt_integer(o, "rows", what)?,
+        effects: effects_prop(o, what)?,
     })
 }
 
