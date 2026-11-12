@@ -1,12 +1,13 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--a11y out.json]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json] [--svg out.svg]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
-//! `--a11y` additionally writes the deterministic R3 accessibility tree.
+//! `--a11y` additionally writes the deterministic R3 accessibility tree and
+//! `--svg` a deterministic SVG 1.1 vector snapshot of the same layout.
 
 use opurom_render::{
-    a11y_json_at, digest_hex, parse_ir, IrError, Renderer, StateValue, StateView, ValueType,
-    SETTLED_MS,
+    a11y_json_at, digest_hex, parse_ir, svg_at, IrError, Renderer, StateValue, StateView,
+    ValueType, SETTLED_MS,
 };
 use std::{env, fs, process};
 
@@ -36,7 +37,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json] [--svg out.svg]"
                 .to_string(),
         );
     }
@@ -53,6 +54,7 @@ fn run() -> Result<(), String> {
     // Animation clock position in milliseconds (R2).
     let mut elapsed_ms: i64 = SETTLED_MS;
     let mut a11y_path: Option<String> = None;
+    let mut svg_path: Option<String> = None;
 
     let mut i = 4usize;
     while i < args.len() {
@@ -88,9 +90,16 @@ fn run() -> Result<(), String> {
                 a11y_path = Some(spec.clone());
                 i += 2;
             }
+            "--svg" => {
+                let spec = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--svg requires an output SVG path".to_string())?;
+                svg_path = Some(spec.clone());
+                i += 2;
+            }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --tick ms or --a11y out.json"
+                    "unexpected argument {other:?}: expected --state name=value, --tick ms, --a11y out.json or --svg out.svg"
                 ));
             }
         }
@@ -108,6 +117,10 @@ fn run() -> Result<(), String> {
     if let Some(path) = a11y_path {
         let json = a11y_json_at(&ir, &state, width, height, elapsed_ms);
         fs::write(&path, json).map_err(|e| format!("cannot write {:?}: {e}", path))?;
+    }
+    if let Some(path) = svg_path {
+        let doc = svg_at(&ir, &state, width, height, elapsed_ms);
+        fs::write(&path, doc).map_err(|e| format!("cannot write {:?}: {e}", path))?;
     }
 
     println!("digest={}", digest_hex(&frame.pixels));

@@ -98,8 +98,9 @@ pub struct StateDecl {
     pub init: StateValue,
 }
 
-/// The 24 IR node kinds. `Other` is a kind this renderer does not know: it is
-/// rendered with the documented fallback (Container with children, else Text).
+/// The 32 IR node kinds (v0.1 eight + R2 sixteen + R4 eight). `Other` is a kind
+/// this renderer does not know: it is rendered with the documented fallback
+/// (Container with children, else Text).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Column,
@@ -126,6 +127,15 @@ pub enum Kind {
     Scroll,
     Avatar,
     Spinner,
+    // R4 distinct primitives (drawn, not delegated to the fallback).
+    Table,
+    Chart,
+    Calendar,
+    RichText,
+    Player,
+    Map,
+    Menu,
+    Tooltip,
     Other,
 }
 
@@ -156,6 +166,14 @@ impl Kind {
             Kind::Scroll => "Scroll",
             Kind::Avatar => "Avatar",
             Kind::Spinner => "Spinner",
+            Kind::Table => "Table",
+            Kind::Chart => "Chart",
+            Kind::Calendar => "Calendar",
+            Kind::RichText => "RichText",
+            Kind::Player => "Player",
+            Kind::Map => "Map",
+            Kind::Menu => "Menu",
+            Kind::Tooltip => "Tooltip",
             Kind::Other => "Other",
         }
     }
@@ -187,6 +205,14 @@ impl Kind {
             "Scroll" => Kind::Scroll,
             "Avatar" => Kind::Avatar,
             "Spinner" => Kind::Spinner,
+            "Table" => Kind::Table,
+            "Chart" => Kind::Chart,
+            "Calendar" => Kind::Calendar,
+            "RichText" => Kind::RichText,
+            "Player" => Kind::Player,
+            "Map" => Kind::Map,
+            "Menu" => Kind::Menu,
+            "Tooltip" => Kind::Tooltip,
             _ => Kind::Other,
         }
     }
@@ -210,6 +236,14 @@ impl Kind {
                 | Kind::Radio
                 | Kind::Avatar
                 | Kind::Spinner
+                | Kind::Table
+                | Kind::Chart
+                | Kind::Calendar
+                | Kind::RichText
+                | Kind::Player
+                | Kind::Map
+                | Kind::Menu
+                | Kind::Tooltip
         )
     }
 }
@@ -301,6 +335,11 @@ pub struct Props {
     pub font_scale: Option<i64>,
     pub high_contrast: bool,
     pub role: Option<Role>,
+    // R4 primitive data props.
+    /// Integer series for `Chart` bar heights (also usable by other primitives).
+    pub values: Vec<i64>,
+    /// Row count for `Table` / `Calendar` grids.
+    pub rows: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -767,6 +806,31 @@ fn labels_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Vec<Stri
     }
 }
 
+/// Integer series: an array of JSON integers or one comma-separated string.
+/// Deterministic: no floats reach the raster; a fractional literal is rejected.
+fn values_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Vec<i64>, IrError> {
+    match o.get(key) {
+        None => Ok(Vec::new()),
+        Some(Value::Array(items)) => items
+            .iter()
+            .enumerate()
+            .map(|(i, v)| integer(v, &format!("{what}.{key}[{i}]")))
+            .collect(),
+        Some(Value::String(s)) => s
+            .split(',')
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .map(|p| {
+                p.parse::<i64>()
+                    .map_err(|_| bad(format!("{what}.{key} must be a list of integers")))
+            })
+            .collect(),
+        Some(_) => Err(bad(format!(
+            "{what}.{key} must be an array of integers or a comma-separated string"
+        ))),
+    }
+}
+
 fn state_value(v: &Value, expected: Option<ValueType>, what: &str) -> Result<StateValue, IrError> {
     let value = if let Some(s) = v.as_str() {
         StateValue::Str(s.to_string())
@@ -876,6 +940,8 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         font_scale: font_scale_prop(o, "fontScale", what)?,
         high_contrast: opt_bool(o, "highContrast", what)?,
         role,
+        values: values_prop(o, "values", what)?,
+        rows: opt_integer(o, "rows", what)?,
     })
 }
 

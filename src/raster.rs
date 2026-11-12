@@ -7,6 +7,14 @@ use crate::{font, Align, Kind, LaidOut, Rect, Rgba};
 /// Fixed-point unit: 1024 == fully opaque.
 const UNIT: i64 = 1024;
 
+// R4 primitives use theme-independent, deterministic ink colours. They are
+// only ever drawn for the eight new kinds, so they cannot affect v0.1 goldens.
+const INK: Rgba = Rgba::rgb(0x1b, 0x1f, 0x27);
+const LINE: Rgba = Rgba::rgb(0x90, 0x98, 0xa8);
+const LIGHT: Rgba = Rgba::rgb(0xff, 0xff, 0xff);
+const LAND: Rgba = Rgba::rgb(0xdf, 0xe6, 0xd8);
+const BUBBLE: Rgba = Rgba::rgb(0x24, 0x2a, 0x38);
+
 pub struct Canvas {
     pub width: u32,
     pub height: u32,
@@ -321,6 +329,82 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
     }
 }
 
+/// Solid right-pointing triangle: vertical left edge, apex at right-middle.
+fn triangle_right(canvas: &mut Canvas, r: Rect, c: Rgba) {
+    if r.w <= 0 || r.h <= 0 {
+        return;
+    }
+    let half = r.h / 2;
+    for y in 0..r.h {
+        let d = (y - half).abs();
+        let w = (r.w.saturating_mul((half - d).max(0)) * 2) / r.h.max(1);
+        canvas.fill_rect(
+            Rect {
+                x: r.x,
+                y: r.y + y,
+                w,
+                h: 1,
+            },
+            c,
+        );
+    }
+}
+
+/// Solid down-pointing triangle: horizontal top edge, apex at bottom-middle.
+fn triangle_down(canvas: &mut Canvas, r: Rect, c: Rgba) {
+    if r.w <= 0 || r.h <= 0 {
+        return;
+    }
+    let half = r.w / 2;
+    for x in 0..r.w {
+        let d = (x - half).abs();
+        let h = (r.h.saturating_mul((half - d).max(0)) * 2) / r.w.max(1);
+        canvas.fill_rect(
+            Rect {
+                x: r.x + x,
+                y: r.y,
+                w: 1,
+                h,
+            },
+            c,
+        );
+    }
+}
+
+/// Greedy word wrap at `max` built-in glyph columns; overlong words are chunked.
+fn wrap_text(text: &str, max: usize) -> Vec<String> {
+    let max = max.max(1);
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        let mut rest = word.to_string();
+        while rest.chars().count() > max {
+            if !cur.is_empty() {
+                lines.push(std::mem::take(&mut cur));
+            }
+            let chunk: String = rest.chars().take(max).collect();
+            lines.push(chunk);
+            rest = rest.chars().skip(max).collect();
+        }
+        if rest.is_empty() {
+            continue;
+        }
+        if cur.is_empty() {
+            cur = rest;
+        } else if cur.chars().count() + 1 + rest.chars().count() <= max {
+            cur.push(' ');
+            cur.push_str(&rest);
+        } else {
+            lines.push(std::mem::take(&mut cur));
+            cur = rest;
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
 /// Kind-specific widget drawing.
 fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
     let alpha = n.effects.opacity;
@@ -461,6 +545,362 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                     accent,
                 );
             }
+        }
+        (
+            Some(Control::Table {
+                columns,
+                rows,
+                headers,
+            }),
+            _,
+        ) => {
+            let cols = (*columns).max(1);
+            let rows = (*rows).max(1);
+            let cw = n.rect.w / cols;
+            let rh = n.rect.h / (rows + 1);
+            if cw > 0 && rh > 0 {
+                let ink = with_alpha(INK, alpha);
+                let line = with_alpha(LINE, alpha);
+                let head = with_alpha(n.accent, alpha);
+                let on = with_alpha(n.on_accent, alpha);
+                canvas.fill_rect(
+                    Rect {
+                        x: n.rect.x,
+                        y: n.rect.y,
+                        w: n.rect.w,
+                        h: rh,
+                    },
+                    head,
+                );
+                for c in 0..cols {
+                    if let Some(label) = headers.get(c as usize) {
+                        let ty = n.rect.y + ((rh - font::GLYPH_H) / 2).max(0);
+                        draw_glyphs(canvas, label, n.rect.x + c * cw + 2, ty, 1, on);
+                    }
+                }
+                for c in 1..cols {
+                    canvas.fill_rect(
+                        Rect {
+                            x: n.rect.x + c * cw,
+                            y: n.rect.y,
+                            w: 1,
+                            h: n.rect.h,
+                        },
+                        line,
+                    );
+                }
+                for r in 1..=rows {
+                    canvas.fill_rect(
+                        Rect {
+                            x: n.rect.x,
+                            y: n.rect.y + r * rh,
+                            w: n.rect.w,
+                            h: 1,
+                        },
+                        line,
+                    );
+                }
+                let mut num = 1i64;
+                for r in 0..rows {
+                    for c in 0..cols {
+                        let s = num.to_string();
+                        draw_glyphs(
+                            canvas,
+                            &s,
+                            n.rect.x + c * cw + 2,
+                            n.rect.y + (r + 1) * rh + 2,
+                            1,
+                            ink,
+                        );
+                        num += 1;
+                    }
+                }
+            }
+        }
+        (Some(Control::Chart { values }), _) => {
+            let count = values.len() as i64;
+            if count > 0 && n.rect.w > 0 && n.rect.h > 0 {
+                let max = values.iter().map(|v| (*v).max(0)).max().unwrap_or(1).max(1);
+                let bw = (n.rect.w / count).max(1);
+                let base = n.rect.y + n.rect.h - 1;
+                let axis = with_alpha(INK, alpha);
+                let a2 = with_alpha(crate::layout::lerp_color(n.accent, LIGHT, UNIT / 2), alpha);
+                canvas.fill_rect(
+                    Rect {
+                        x: n.rect.x,
+                        y: base,
+                        w: n.rect.w,
+                        h: 1,
+                    },
+                    axis,
+                );
+                for (i, v) in values.iter().enumerate() {
+                    let h = n.rect.h.saturating_sub(2) * (*v).max(0) / max;
+                    if h > 0 {
+                        let col = if i % 2 == 0 { accent } else { a2 };
+                        canvas.fill_rect(
+                            Rect {
+                                x: n.rect.x + i as i64 * bw,
+                                y: base - h,
+                                w: (bw - 1).max(1),
+                                h,
+                            },
+                            col,
+                        );
+                    }
+                }
+            }
+        }
+        (Some(Control::Calendar { columns, rows }), _) => {
+            let cols = (*columns).max(1);
+            let rows = (*rows).max(1);
+            let cw = n.rect.w / cols;
+            let rh = n.rect.h / (rows + 1);
+            if cw > 0 && rh > 0 {
+                let ink = with_alpha(INK, alpha);
+                let line = with_alpha(LINE, alpha);
+                let head = with_alpha(n.accent, alpha);
+                let on = with_alpha(n.on_accent, alpha);
+                let wd = ["S", "M", "T", "W", "T", "F", "S"];
+                canvas.fill_rect(
+                    Rect {
+                        x: n.rect.x,
+                        y: n.rect.y,
+                        w: n.rect.w,
+                        h: rh,
+                    },
+                    head,
+                );
+                for c in 0..cols {
+                    draw_glyphs(
+                        canvas,
+                        wd[(c as usize) % 7],
+                        n.rect.x + c * cw + (cw / 2 - 3).max(0),
+                        n.rect.y + 2,
+                        1,
+                        on,
+                    );
+                }
+                for c in 1..cols {
+                    canvas.fill_rect(
+                        Rect {
+                            x: n.rect.x + c * cw,
+                            y: n.rect.y,
+                            w: 1,
+                            h: n.rect.h,
+                        },
+                        line,
+                    );
+                }
+                for r in 1..=rows {
+                    canvas.fill_rect(
+                        Rect {
+                            x: n.rect.x,
+                            y: n.rect.y + r * rh,
+                            w: n.rect.w,
+                            h: 1,
+                        },
+                        line,
+                    );
+                }
+                // A deterministic "today" highlight, drawn before the day numbers.
+                let (hc, hr) = (1 % cols, 2 % rows);
+                canvas.fill_circle(
+                    inset(
+                        Rect {
+                            x: n.rect.x + hc * cw,
+                            y: n.rect.y + (hr + 1) * rh,
+                            w: cw,
+                            h: rh,
+                        },
+                        1,
+                    ),
+                    with_alpha(n.accent, alpha),
+                );
+                let mut day = 1i64;
+                for r in 0..rows {
+                    for c in 0..cols {
+                        let s = day.to_string();
+                        let col = if c == hc && r == hr { on } else { ink };
+                        draw_glyphs(
+                            canvas,
+                            &s,
+                            n.rect.x + c * cw + 2,
+                            n.rect.y + (r + 1) * rh + 2,
+                            1,
+                            col,
+                        );
+                        day += 1;
+                    }
+                }
+            }
+        }
+        (Some(Control::RichText { text }), _) => {
+            let scale = n.text_scale.clamp(1, 8);
+            let line_h = font::GLYPH_H * scale + 2;
+            let max_chars =
+                (n.rect.w.saturating_sub(4) / font::advance(scale).max(1)).max(1) as usize;
+            let ink = with_alpha(n.text_color.unwrap_or(INK), alpha);
+            for (i, wrapped) in wrap_text(text, max_chars).iter().enumerate() {
+                let y = n.rect.y + 2 + i as i64 * line_h;
+                if y >= n.rect.y + n.rect.h {
+                    break;
+                }
+                draw_glyphs(canvas, wrapped, n.rect.x + 2, y, scale, ink);
+            }
+        }
+        (Some(Control::Player), _) => {
+            let line = with_alpha(LINE, alpha);
+            let cy = n.rect.y + n.rect.h / 2;
+            let track = Rect {
+                x: n.rect.x + 4,
+                y: cy - 1,
+                w: (n.rect.w - 8).max(0),
+                h: 2,
+            };
+            canvas.fill_rect(track, line);
+            let progress = track.w * 2 / 5;
+            canvas.fill_rect(
+                Rect {
+                    x: track.x,
+                    y: cy - 1,
+                    w: progress,
+                    h: 2,
+                },
+                accent,
+            );
+            let t = n.rect.h.min(n.rect.w) / 2;
+            triangle_right(
+                canvas,
+                Rect {
+                    x: n.rect.x + 6,
+                    y: n.rect.y + (n.rect.h - t) / 2,
+                    w: (t / 2).max(1),
+                    h: t,
+                },
+                accent,
+            );
+            canvas.fill_circle(
+                Rect {
+                    x: track.x + progress - 3,
+                    y: cy - 3,
+                    w: 6,
+                    h: 6,
+                },
+                accent,
+            );
+        }
+        (Some(Control::Map), _) => {
+            let road = with_alpha(LINE, alpha);
+            canvas.fill_rect(n.rect, with_alpha(LAND, alpha));
+            for f in 1..4 {
+                canvas.fill_rect(
+                    Rect {
+                        x: n.rect.x + n.rect.w * f / 4,
+                        y: n.rect.y,
+                        w: 2,
+                        h: n.rect.h,
+                    },
+                    road,
+                );
+                canvas.fill_rect(
+                    Rect {
+                        x: n.rect.x,
+                        y: n.rect.y + n.rect.h * f / 4,
+                        w: n.rect.w,
+                        h: 2,
+                    },
+                    road,
+                );
+            }
+            line(
+                canvas,
+                n.rect.x,
+                n.rect.y + n.rect.h / 3,
+                n.rect.x + n.rect.w,
+                n.rect.y + 2 * n.rect.h / 3,
+                accent,
+                2,
+            );
+            let d = (n.rect.h.min(n.rect.w) / 5).max(2);
+            let marker = Rect {
+                x: n.rect.x + n.rect.w * 5 / 8 - d / 2,
+                y: n.rect.y + n.rect.h * 3 / 8 - d / 2,
+                w: d,
+                h: d,
+            };
+            canvas.fill_circle(marker, accent);
+            canvas.stroke_circle(marker, with_alpha(LIGHT, alpha), 2);
+        }
+        (Some(Control::Menu { items }), _) => {
+            let count = items.len() as i64;
+            let ih = if count > 0 { n.rect.h / count } else { 0 };
+            if ih > 0 {
+                let ink = with_alpha(INK, alpha);
+                let line = with_alpha(LINE, alpha);
+                let hi = with_alpha(n.accent, alpha);
+                let on = with_alpha(n.on_accent, alpha);
+                canvas.fill_rect(
+                    Rect {
+                        x: n.rect.x,
+                        y: n.rect.y,
+                        w: n.rect.w,
+                        h: ih,
+                    },
+                    hi,
+                );
+                for (i, item) in items.iter().enumerate() {
+                    let y = n.rect.y + i as i64 * ih;
+                    let col = if i == 0 { on } else { ink };
+                    draw_glyphs(
+                        canvas,
+                        item,
+                        n.rect.x + 4,
+                        y + ((ih - font::GLYPH_H) / 2).max(0),
+                        1,
+                        col,
+                    );
+                    if i + 1 < items.len() {
+                        canvas.fill_rect(
+                            Rect {
+                                x: n.rect.x,
+                                y: y + ih,
+                                w: n.rect.w,
+                                h: 1,
+                            },
+                            line,
+                        );
+                    }
+                }
+            }
+        }
+        (Some(Control::Tooltip { text }), _) => {
+            let bubble = with_alpha(BUBBLE, alpha);
+            let on = with_alpha(LIGHT, alpha);
+            let tail_h = (n.rect.h / 5).max(2);
+            let body = Rect {
+                x: n.rect.x,
+                y: n.rect.y,
+                w: n.rect.w,
+                h: (n.rect.h - tail_h).max(1),
+            };
+            canvas.fill_rounded(body, bubble, n.radius.min(body.h / 2).max(0));
+            let tw = (n.rect.w / 6).max(4);
+            triangle_down(
+                canvas,
+                Rect {
+                    x: n.rect.x + (n.rect.w - tw) / 2,
+                    y: body.y + body.h - 1,
+                    w: tw,
+                    h: tail_h,
+                },
+                bubble,
+            );
+            let scale = n.text_scale.clamp(1, 8);
+            let tlen = (text.chars().count() as i64) * font::advance(scale);
+            let tx = body.x + ((body.w - tlen) / 2).max(2);
+            let ty = body.y + ((body.h - font::GLYPH_H * scale) / 2).max(0);
+            draw_glyphs(canvas, text, tx, ty, scale, on);
         }
         _ => {}
     }

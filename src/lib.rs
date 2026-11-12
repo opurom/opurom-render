@@ -7,8 +7,10 @@
 //!
 //! R2 adds theme tokens, canonical style effects, conditional `when` visibility,
 //! sixteen new node kinds and a fixed-timestep animation clock. R3 adds optional
-//! accessibility props and a data-only accessibility tree. All of them are
-//! opt-in: a v0.1 IR renders byte-identically to round 1.
+//! accessibility props and a data-only accessibility tree. R4 adds eight more
+//! distinct primitives and a deterministic SVG 1.1 vector backend (a second
+//! software backend, not a GPU backend). All of them are opt-in: a v0.1 IR
+//! renders byte-identically to round 1.
 
 pub mod a11y;
 pub mod anim;
@@ -16,6 +18,7 @@ pub mod font;
 pub mod ir;
 pub mod layout;
 pub mod raster;
+pub mod svg;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use anim::{Animator, Curve};
@@ -26,6 +29,7 @@ pub use ir::{
 pub use layout::{
     layout, layout_at, Breakpoint, Control, Direction, Effects, LaidOut, Palette, Rect, SETTLED_MS,
 };
+pub use svg::{svg, svg_at};
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

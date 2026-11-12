@@ -94,6 +94,30 @@ pub enum Control {
         selected: usize,
     },
     Spinner,
+    // R4 distinct primitives: each carries the data its raster routine needs.
+    Table {
+        columns: i64,
+        rows: i64,
+        headers: Vec<String>,
+    },
+    Chart {
+        values: Vec<i64>,
+    },
+    Calendar {
+        columns: i64,
+        rows: i64,
+    },
+    RichText {
+        text: String,
+    },
+    Player,
+    Map,
+    Menu {
+        items: Vec<String>,
+    },
+    Tooltip {
+        text: String,
+    },
 }
 
 /// One laid-out node; the raster draws these in pre-order with no further decisions.
@@ -258,6 +282,14 @@ pub(crate) fn node_text(n: &Node, state: &StateView) -> String {
             .next()
             .map(|c| c.to_string())
             .unwrap_or_default(),
+        Kind::RichText => state.interpolate(n.props.value.as_deref().unwrap_or("")),
+        Kind::Tooltip => state.interpolate(
+            n.props
+                .label
+                .as_deref()
+                .or(n.props.value.as_deref())
+                .unwrap_or(""),
+        ),
         Kind::Other => fallback_text(n, state),
         _ => String::new(),
     }
@@ -346,6 +378,10 @@ fn natural_w(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
         Kind::Tabs => tabs_width(n, scale),
         Kind::Avatar => 24,
         Kind::Spinner => 16,
+        Kind::Table | Kind::Chart | Kind::Map => 160,
+        Kind::Calendar => 140,
+        Kind::RichText | Kind::Player => 160,
+        Kind::Menu | Kind::Tooltip => 120,
         Kind::Other => {
             if leaf_like(n) {
                 text_width(&node_text(n, state), scale)
@@ -379,6 +415,10 @@ fn natural_h(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
         Kind::Tabs => font::GLYPH_H.saturating_mul(scale).saturating_add(8),
         Kind::Avatar => 24,
         Kind::Spinner => 16,
+        Kind::Table | Kind::Chart | Kind::Map => 100,
+        Kind::Calendar => 120,
+        Kind::RichText | Kind::Menu => 100,
+        Kind::Player | Kind::Tooltip => 40,
         Kind::Other => {
             if leaf_like(n) {
                 font::GLYPH_H.saturating_mul(scale)
@@ -505,6 +545,45 @@ fn control_of(n: &Node, state: &StateView) -> Option<Control> {
             Some(Control::Tabs { labels, selected })
         }
         Kind::Spinner => Some(Control::Spinner),
+        Kind::Table => Some(Control::Table {
+            columns: n.props.columns.unwrap_or(3).clamp(1, 16),
+            rows: n.props.rows.unwrap_or(3).clamp(1, 16),
+            headers: n.props.labels.clone(),
+        }),
+        Kind::Chart => {
+            let mut values = n.props.values.clone();
+            if values.is_empty() {
+                // shortcut: deterministic stand-in bars, upgrade when a data source exists
+                values = vec![3, 8, 5, 10, 6, 4];
+            }
+            Some(Control::Chart { values })
+        }
+        Kind::Calendar => Some(Control::Calendar {
+            columns: n.props.columns.unwrap_or(7).clamp(1, 9),
+            rows: n.props.rows.unwrap_or(5).clamp(1, 9),
+        }),
+        Kind::RichText => Some(Control::RichText {
+            text: state.interpolate(n.props.value.as_deref().unwrap_or("")),
+        }),
+        Kind::Player => Some(Control::Player),
+        Kind::Map => Some(Control::Map),
+        Kind::Menu => {
+            let items = if n.props.labels.is_empty() {
+                vec!["File".into(), "Edit".into(), "View".into()]
+            } else {
+                n.props.labels.clone()
+            };
+            Some(Control::Menu { items })
+        }
+        Kind::Tooltip => Some(Control::Tooltip {
+            text: state.interpolate(
+                n.props
+                    .label
+                    .as_deref()
+                    .or(n.props.value.as_deref())
+                    .unwrap_or(""),
+            ),
+        }),
         _ => None,
     }
 }
@@ -581,6 +660,18 @@ fn place(
         ),
         Kind::Avatar => (Some(n.props.color.unwrap_or(pal.accent)), n.props.border, 0),
         Kind::Spinner => (None, None, 0),
+        Kind::Table
+        | Kind::Chart
+        | Kind::Calendar
+        | Kind::RichText
+        | Kind::Player
+        | Kind::Map
+        | Kind::Menu
+        | Kind::Tooltip => (
+            Some(n.props.color.unwrap_or(pal.surface)),
+            Some(n.props.border.unwrap_or(pal.border)),
+            1,
+        ),
         Kind::Other => {
             if leaf_like(n) {
                 (None, None, 0)

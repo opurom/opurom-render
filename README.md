@@ -1,27 +1,29 @@
 # opurom-render
 
 Independent Rust crate: IR v0.1 → adaptive layout → deterministic RGBA8 software
-raster → incremental dirty rects. This folder is its own git repository; it has no
-source dependency on any other OPUROM layer, only on the frozen IR/ABI contracts
-(`IR_SCHEMA.md`, `ADAPTER_CONTRACT.md`) and local `FrameView` shape compatibility.
+raster → incremental dirty rects, plus a deterministic SVG 1.1 **vector software
+backend**. This folder is its own git repository; it has no source dependency on
+any other OPUROM layer, only on the frozen IR/ABI contracts (`IR_SCHEMA.md`,
+`ADAPTER_CONTRACT.md`) and local `FrameView` shape compatibility.
 
 ## Verify
 
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
 cd opurom-render
+cargo fmt --all
 cargo fmt --check
-cargo test
+cargo test --offline
 ```
 
-`cargo test` runs 57 tests (unit + integration). All pass, zero warnings. Only
-`serde_json` is used; it is pinned to the locally cached `=1.0.154`, so the build
-needs no network.
+`cargo test --offline` runs 70 tests (unit + integration). All pass, zero
+warnings. Only `serde_json` is used; it is pinned to the locally cached
+`=1.0.154`, so the build needs no network.
 
 CLI (integration surface for `opurom-cli` and the e2e suite):
 
 ```sh
-cargo build
+cargo build --offline
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm
 # digest=8cc3021fa80749b5
 # dirty=1
@@ -29,9 +31,11 @@ cargo build
 # digest=e7aad51c98d9cf21
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --a11y tree.json
 # digest=8cc3021fa80749b5, dirty=1 (stdout unchanged)
+./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --svg out.svg
+# writes a deterministic SVG 1.1 snapshot (stdout unchanged)
 ```
 
-Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json]`.
+Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json] [--svg out.svg]`.
 `--state` repeats; values are parsed against the declared state type. `--tick`
 sets the animation clock position in milliseconds (default: the settled end
 state, so a v0.1 IR renders exactly as in round 1). Output is a P6 PPM (RGB; the
@@ -41,26 +45,29 @@ opaque alpha byte is dropped). Stdout has exactly two lines:
 diagnostic with exit code 1, never a panic. A fresh process always reports
 `dirty=1` (first frame = whole surface); unchanged state within one `Renderer`
 yields zero dirty rects. `--a11y <out.json>` writes a separate deterministic
-JSON accessibility tree (see below) and does not add stdout lines.
+JSON accessibility tree (see below), and `--svg <out.svg>` a deterministic SVG
+1.1 snapshot; neither adds stdout lines.
 
 ## Architecture
 
 ```
 serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, theme }
-                                              │
-                          StateView (flat BTreeMap, {name} interpolation)
-                                              │
-                     layout(Ir, StateView, viewport) ──▶ Vec<LaidOut>  (pre-order)
-                                              │
-              raster::Canvas (rounded fills/borders + 5x7 glyphs) ──▶ Vec<u8> RGBA8
-                                              │
-              Renderer::render diff vs previous buffer ──▶ Frame { dirty }
-                                              │
-                              Frame::view() ──▶ FrameView<'_> for adapters
+                                               │
+                           StateView (flat BTreeMap, {name} interpolation)
+                                               │
+                      layout(Ir, StateView, viewport) ──▶ Vec<LaidOut>  (pre-order)
+                                               │
+                               ├──▶ raster::Canvas (rounded fills/borders + 5x7 glyphs) ──▶ Vec<u8> RGBA8
+                               │                       │
+                               │       Renderer::render diff vs previous buffer ──▶ Frame { dirty }
+                               │                       │
+                               │               Frame::view() ──▶ FrameView<'_> for adapters
+                               │
+                               └──▶ svg::svg_at (same Vec<LaidOut>) ──▶ deterministic SVG 1.1 bytes
 ```
 
 - `src/ir.rs` — strictly validates `ir == "0.1"`, state decls/types/inits, pre-order
-  node ids, the 24 node kinds, known props, event actions (targets/types) and the
+  node ids, the 32 node kinds, known props, event actions (targets/types) and the
   theme. Unknown props are ignored. Errors are `IrError(String)` values.
 - `src/layout.rs` — pure integer layout. Breakpoints on **logical px**: compact
   `<600`, medium `<900`, expanded `>=900`. `Row` collapses to a vertical stack in
@@ -72,11 +79,13 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   a–z, 0–9, punctuation). Unsupported codepoints consume a blank advance.
 - `src/raster.rs` — filled rounded rectangles (integer quarter-circle test), 1 px
   borders, gradients, shadows, glass fills, scaled glyph blocks, opaque RGBA with
-  integer alpha blending.
+  integer alpha blending, plus the eight R4 primitive drawings.
 - `src/anim.rs` — the fixed-timestep animation clock and the spring/ease curves.
 - `src/lib.rs` — `Rgba`, `StateView`, `Renderer`, `Frame`, `FrameView`, inline FNV-1a
   digest, and row/column dirty-rect diffing.
-- `src/a11y.rs` — R3 pre-order accessibility tree and its deterministic JSON serializer.
+- `src/a11y.rs` — R3 pre-order accessibility tree, its deterministic JSON serializer,
+  and the shared `role_of` helper used by the SVG `data-role` backend.
+- `src/svg.rs` — R4 deterministic SVG 1.1 vector snapshot of the same layout.
 - `src/main.rs` — the CLI described above.
 
 ## R2 features (IR_R2_ADDENDUM)
@@ -89,7 +98,7 @@ to round 1 — the three golden digests below are unchanged.
 | Theme tokens | `theme.tokens.surface` / `.onSurface` / `.font` override the `mode` defaults; every token falls back independently. The `font` token is recorded but never selects a host font: text always uses the built-in bitmap font. |
 | Style effects | `gradient` (two-stop vertical linear gradient, integer lerp), `glass` (surface blended with the accent), `shadow` (0..8, offset darkening), `opacity` (0..1, exact fixed point 0..1024), `border` (1 px colour), `radius` (rounded corners), `margin`. Effects apply to every kind that owns a box (Container, Card, Button, …). |
 | Conditional visibility | The optional node field `when: "<boolState>"` hides the node **and its subtree** from layout and from the raster while the state is false. A `when` on a non-bool or undeclared state is a parse error. |
-| Node kinds | All 24 kinds render: the eight v0.1 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
+| Node kinds | All 24 R2 kinds render: the eight v0.1 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
 | Animation | `animate: spring\|ease\|none` on a node drives an entry animation (box grows from its centre while fading in). The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
 
 Unknown props are ignored and never fatal; an unknown kind degrades instead of
@@ -133,18 +142,81 @@ screen-reader integration, NO ARIA/AT-SPI bridge, NO focus order or hit
 testing, NO real font shaping, NO DPI scaling (`fontScale` scales logical
 pixels of the built-in bitmap font) and NO GPU backend.
 
+## R4 SVG 1.1 vector backend (R4_ADDENDUM §4)
+
+`opurom-render <ir> <w> <h> <out.ppm> --svg <out.svg>` (or the `svg`/`svg_at`
+library functions) writes a **byte-deterministic SVG 1.1 snapshot of the same
+`layout()` pre-order boxes**:
+
+- `<svg ... viewBox="0 0 W H">` root with a `version="1.1"` declaration and a
+  background `<rect>` from the theme palette.
+- One `<rect>` per box-owning node with `x/y/width/height`, `rx/ry` (rounded
+  corners), `fill` (or a `stroke`/`stroke-width` border), and `opacity` for the
+  fixed-point alpha.
+- A `<defs>` `<linearGradient>` (two `<stop>`s) whenever a node has `gradient`;
+  the rect then uses `fill="url(#gN)"`. Gradient ids are assigned in layout
+  order, so the document is stable.
+- `<text>` for text nodes, positioned and sized from the **built-in font
+  metrics** (`font-size = GLYPH_H * text_scale`), with XML escaping and
+  `{name}` interpolation already applied by layout.
+- `data-id` and `data-role` on every element; the role is the shared a11y role
+  (`role_of`). Hidden `when` nodes are omitted from the drawing and recorded as
+  `<g ... data-hidden="true"/>` markers.
+
+Same IR + viewport + state + theme + animation tick ⇒ byte-identical SVG bytes
+across runs (integer formatting over a deterministic pre-order layout; no time,
+randomness, host queries or external crate). Verified by tests for
+determinism, gradient defs, text, `data-role`, and hidden nodes.
+
+**Honest scope:** the SVG path is a **second software backend**, NOT a
+Metal/Vulkan/ANGLE GPU backend and not a hardware presenter. It does **no real
+font shaping** — `<text>` uses a generic `monospace` face and the built-in
+5x7 font's metrics, so glyph widths/positions are an approximation, not a
+pixel-exact match to the raster — and it does **no image decoding** (box colours
+come from the layout palette; `Image` stays a deterministic placeholder). It is
+a vector *snapshot* of the layout, not a replacement for the RGBA conformance
+oracle.
+
+## R4 eight new distinct primitives (R4_ADDENDUM §4)
+
+R4 adds eight **distinct, drawn** primitives (not aliases and not the
+Container/Text fallback), bringing the total to **32 known node kinds**. Each
+has a documented prop schema, a distinct deterministic raster, an a11y default
+role, and a test asserting its pixels differ from the fallback and are
+deterministic. All are leaves; all new props are optional and opt-in, so a
+v0.1 IR renders byte-identically to round 1.
+
+| Kind | Prop schema (all optional) | Deterministic drawing | Default a11y role |
+| --- | --- | --- | --- |
+| `Table` | `columns` (int, default 3), `rows` (int, default 3), `labels` (header strings), `values` (cell ints) | header band + rows/columns grid lines + numbered cells | `none` |
+| `Chart` | `values` (int array or `"a,b,c"` string; default deterministic bars `[3,8,5,10,6,4]`) | baseline + vertical bars scaled to the max value, alternating accent/lerp shades | `image` |
+| `Calendar` | `columns` (int, default 7), `rows` (int, default 5) | weekday header + month grid of day numbers + a deterministic "today" highlight | `none` |
+| `RichText` | `value` (text) | greedy word-wrapped multi-line segments using the built-in font | `text` |
+| `Player` | — | horizontal track + progress fill + play triangle + knob | `button` |
+| `Map` | — | land fill + grid roads + diagonal route + ringed marker | `image` |
+| `Menu` | `labels` (item strings; default `File/Edit/View`) | stacked item rows with separators and a highlighted first row | `none` |
+| `Tooltip` | `value` or `label` (text) | rounded dark bubble + downward tail triangle + centered text | `text` |
+
+New typed props: `values` (`Vec<i64>`), `rows` (`Option<i64>`); `columns` and
+`labels` are reused from R2. Unknown props remain ignored; an unknown kind still
+degrades to the documented fallback. The 108-name component catalog gains eight
+names mapping onto these primitives (that catalog lives in the compiler repo,
+outside this crate).
+
 ## Determinism guarantee
 
 Same IR + same viewport + same state + same animation tick ⇒ byte-identical RGBA
-pixels on every host. Mechanisms: all layout and raster arithmetic is integer
-(`i64`/`i128`, no float ordering, no `f32` rounding); state lives in a `BTreeMap`;
-events are visited in sorted key order; `theme.mode == "system"` resolves to light
-instead of querying the host; no time, randomness, threads, environment variables
-or resource I/O affect the frame (`Image` uses a stable hash of `src` as a
-placeholder colour); the animation clock only moves when the caller ticks it, so
-two identical tick sequences produce identical digest sequences.
+pixels on every host (and, for `--svg`, byte-identical SVG). Mechanisms: all
+layout and raster arithmetic is integer (`i64`/`i128`, no float ordering, no
+`f32` rounding); state lives in a `BTreeMap`; events are visited in sorted key
+order; `theme.mode == "system"` resolves to light instead of querying the host;
+no time, randomness, threads, environment variables or resource I/O affect the
+frame (`Image` uses a stable hash of `src` as a placeholder colour); the
+animation clock only moves when the caller ticks it, so two identical tick
+sequences produce identical digest sequences. The SVG backend applies the same
+rules to its element/attribute ordering.
 
-Golden digests (unchanged by R2 and R3):
+Golden digests (unchanged by R2, R3 and R4):
 
 | Fixture | Viewport | Digest |
 | --- | --- | --- |
@@ -165,32 +237,37 @@ into the same `Frame { width, height, pixels, dirty }`. `Frame::view()` already
 matches the adapter ABI, so `present(FrameView)` is unchanged. A backend must pass
 the same golden digest to be considered conformant; the headless software raster is
 the conformance oracle. Dirty rects remain a property of the diff stage, not of the
-backend.
+backend. The R4 SVG backend is a *software* sibling of the raster, not this GPU
+path.
 
-## Honest status (round 3)
+## Honest status (round 4)
 
 Verified now, by tests in this crate: IR parsing/validation, adaptive breakpoints +
-Row collapse + fluid sizing, all 24 node kinds, theme tokens with per-token
+Row collapse + fluid sizing, all 32 node kinds, theme tokens with per-token
 fallback, the six canonical style effects, conditional `when` visibility with
 bounded dirty rects, light/dark theme + accent, built-in 5x7 font, deterministic
 RGBA8 software raster, incremental dirty-rect diffing with coverage and bound
 tests, interpolation from `StateView`, `FrameView` shape, the PPM CLI, integer
-`fontScale`, high-contrast rendering, the `theme.tokens.contrast` token, and a
+`fontScale`, high-contrast rendering, the `theme.tokens.contrast` token, a
 deterministic pre-order accessibility tree with roles, labels, bounds and hidden
-flags. `cargo test` is green with fixed golden digests and zero warnings.
+flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
+`data-role`, hidden markers), and eight distinct deterministic primitives.
+`cargo test --offline` (70 tests) is green with fixed golden digests and zero
+warnings.
 
 Not implemented / not measured — later rounds: Metal, Vulkan and ANGLE GPU
 backends; any hardware-accelerated presentation; the 120 fps target (**no measured
 fps is claimed here** — there is no GPU backend or device matrix yet, and the
 software raster has not been profiled on any device); particles; real image
 decoding; real font shaping (text is a 5x7 bitmap font by design, so no
-Unicode shaping, no hinting and no subpixel positioning); OS screen-reader
-integration (the R3 tree is data only: no ARIA/AT-SPI bridge, no focus order,
-no hit testing and no live announcements); DPI scaling (`fontScale` scales
-logical pixels, not physical DPI); native widget embedding; blur behind glass
-(the frosted fill is a colour blend, not a blur); GPU-side shadows. Bitmap
-glyphs are blocky by design. PPM drops alpha because all palette colours are
-opaque.
+Unicode shaping, no hinting and no subpixel positioning; the SVG `<text>` is a
+generic monospace approximation); OS screen-reader integration (the R3 tree is
+data only: no ARIA/AT-SPI bridge, no focus order, no hit testing and no live
+announcements); DPI scaling (`fontScale` scales logical pixels, not physical
+DPI); native widget embedding; blur behind glass (the frosted fill is a colour
+blend, not a blur); GPU-side shadows. Bitmap glyphs are blocky by design. PPM
+drops alpha because all palette colours are opaque. The SVG backend is a second
+software backend, NOT a Metal/Vulkan/ANGLE GPU backend.
 
 ## Gaps / known limits
 
@@ -201,5 +278,7 @@ opaque.
 - `shortcut: glass is a colour blend, not a real blur (a blur needs a render target)`.
 - `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
 - `shortcut: the accessibility tree is layout-derived data, upgrade to a platform bridge when a native adapter exists`.
+- `shortcut: SVG <text> uses a generic monospace face and built-in metrics, upgrade to real shaping when a font atlas exists`.
+- `shortcut: SVG has no external crate and no image/font decoding; it is a software vector snapshot, not a GPU backend`.
 - No cross-repo runtime link: the adapter crate's `FrameView` is matched by layout,
   not shared by type. That is intentional per `ADAPTER_CONTRACT.md`.

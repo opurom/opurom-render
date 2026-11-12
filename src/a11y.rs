@@ -31,8 +31,19 @@ fn default_role(n: &Node) -> Role {
         Kind::Image => Role::Image,
         Kind::Switch | Kind::Checkbox => Role::Checkbox,
         Kind::Slider => Role::Slider,
+        // R4 primitives: explicit, honest defaults from the R3 role set.
+        Kind::Chart | Kind::Map => Role::Image,
+        Kind::RichText | Kind::Tooltip => Role::Text,
+        Kind::Player => Role::Button,
+        Kind::Table | Kind::Calendar | Kind::Menu => Role::None,
         _ => Role::None,
     }
+}
+
+/// Effective role of a node: an explicit `role` prop wins, else the kind's
+/// default. Shared by the a11y tree and the SVG `data-role` backend.
+pub fn role_of(n: &Node) -> Role {
+    n.props.role.unwrap_or_else(|| default_role(n))
 }
 
 fn label_of(n: &Node, state: &StateView) -> String {
@@ -96,7 +107,7 @@ fn walk(
     });
     out.push(A11yNode {
         id: n.id,
-        role: n.props.role.unwrap_or_else(|| default_role(n)),
+        role: role_of(n),
         label: label_of(n, state),
         bounds: [r.x, r.y, r.w, r.h],
         hidden,
