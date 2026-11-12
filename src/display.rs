@@ -35,6 +35,52 @@ pub enum Command {
         /// Alpha already reduced from fixed point to the software raster's u8.
         alpha: u8,
     },
+    /// Snapshot the frame before a node's ordinary draw commands.
+    EffectBackdrop,
+    /// Snapshot the node's silhouette before any local effect runs.
+    EffectMask {
+        rect: Rect,
+        clip: Rect,
+        bounds: Rect,
+        shape_radius: i64,
+        shape: bool,
+    },
+    EffectShadow {
+        bounds: Rect,
+        radius: i64,
+        dx: i64,
+        dy: i64,
+        alpha: i64,
+        color: Rgba,
+    },
+    EffectGlow {
+        bounds: Rect,
+        radius: i64,
+        alpha: i64,
+        color: Rgba,
+    },
+    EffectGlass {
+        rect: Rect,
+        clip: Rect,
+        bounds: Rect,
+        shape_radius: i64,
+        radius: i64,
+        alpha: i64,
+        color: Rgba,
+    },
+    EffectLiquid {
+        rect: Rect,
+        clip: Rect,
+        bounds: Rect,
+        shape_radius: i64,
+        denom: i64,
+        alpha: i64,
+        color: Rgba,
+    },
+    /// Whole-frame box blur, applied after every node in layout order.
+    EffectBlur {
+        radius: i64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,6 +121,87 @@ fn write_rgba(out: &mut String, key: &str, c: Rgba, alpha: u8) -> fmt::Result {
     write!(out, "\"{key}\":[{},{},{},{}]", c.r, c.g, c.b, alpha)
 }
 
+fn fmt_err(e: fmt::Error) -> IrError {
+    bad(format!("cannot format display list: {e}"))
+}
+
+fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
+    let what = &format!("commands[{index}].effect");
+    let mut values: Vec<i64> = Vec::with_capacity(24);
+    let push_rect = |values: &mut Vec<i64>, r: Rect| {
+        values.extend_from_slice(&[r.x, r.y, r.w, r.h]);
+    };
+    match *command {
+        Command::EffectBackdrop => return Ok(()),
+        Command::EffectBlur { radius } => values.push(radius),
+        Command::EffectMask {
+            rect,
+            clip,
+            bounds,
+            shape_radius,
+            shape,
+        } => {
+            push_rect(&mut values, rect);
+            push_rect(&mut values, clip);
+            push_rect(&mut values, bounds);
+            values.extend_from_slice(&[shape_radius, i64::from(shape)]);
+        }
+        Command::EffectShadow {
+            bounds,
+            radius,
+            dx,
+            dy,
+            alpha,
+            ..
+        } => {
+            push_rect(&mut values, bounds);
+            values.extend_from_slice(&[radius, dx, dy, alpha]);
+        }
+        Command::EffectGlow {
+            bounds,
+            radius,
+            alpha,
+            ..
+        } => {
+            push_rect(&mut values, bounds);
+            values.extend_from_slice(&[radius, alpha]);
+        }
+        Command::EffectGlass {
+            rect,
+            clip,
+            bounds,
+            shape_radius,
+            radius,
+            alpha,
+            ..
+        } => {
+            push_rect(&mut values, rect);
+            push_rect(&mut values, clip);
+            push_rect(&mut values, bounds);
+            values.extend_from_slice(&[shape_radius, radius, alpha]);
+        }
+        Command::EffectLiquid {
+            rect,
+            clip,
+            bounds,
+            shape_radius,
+            denom,
+            alpha,
+            ..
+        } => {
+            push_rect(&mut values, rect);
+            push_rect(&mut values, clip);
+            push_rect(&mut values, bounds);
+            values.extend_from_slice(&[shape_radius, denom, alpha]);
+        }
+        _ => unreachable!("regular commands are validated above"),
+    }
+    for value in values {
+        validate_coord(value, what)?;
+    }
+    Ok(())
+}
+
 impl DisplayList {
     pub fn to_json(&self) -> Result<String, IrError> {
         if self.width == 0
@@ -102,6 +229,10 @@ impl DisplayList {
                 | Command::Gradient {
                     rect, clip, radius, ..
                 } => (*rect, *clip, *radius),
+                _ => {
+                    validate_effect(command, index)?;
+                    continue;
+                }
             };
             validate_rect(rect, &format!("commands[{index}].rect"), true)?;
             validate_rect(clip, &format!("commands[{index}].clip"), false)?;
@@ -173,6 +304,107 @@ impl DisplayList {
                         .map_err(|e| bad(format!("cannot format display list: {e}")))?;
                     write!(&mut out, ",\"alpha\":{alpha}}}")
                         .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                }
+                Command::EffectBackdrop => out.push_str("{\"kind\":\"effect_backdrop\"}"),
+                Command::EffectBlur { radius } => {
+                    write!(&mut out, "{{\"kind\":\"effect_blur\",\"radius\":{radius}}}")
+                        .map_err(fmt_err)?;
+                }
+                Command::EffectMask {
+                    rect,
+                    clip,
+                    bounds,
+                    shape_radius,
+                    shape,
+                } => {
+                    out.push_str("{\"kind\":\"effect_mask\",");
+                    write_rect(&mut out, "rect", *rect).map_err(fmt_err)?;
+                    out.push(',');
+                    write_rect(&mut out, "clip", *clip).map_err(fmt_err)?;
+                    out.push(',');
+                    write_rect(&mut out, "bounds", *bounds).map_err(fmt_err)?;
+                    write!(
+                        &mut out,
+                        ",\"shape_radius\":{shape_radius},\"shape\":{}}}",
+                        u8::from(*shape)
+                    )
+                    .map_err(fmt_err)?;
+                }
+                Command::EffectShadow {
+                    bounds,
+                    radius,
+                    dx,
+                    dy,
+                    alpha,
+                    color,
+                } => {
+                    out.push_str("{\"kind\":\"effect_shadow\",");
+                    write_rect(&mut out, "bounds", *bounds).map_err(fmt_err)?;
+                    write!(
+                        &mut out,
+                        ",\"radius\":{radius},\"dx\":{dx},\"dy\":{dy},\"alpha\":{alpha},"
+                    )
+                    .map_err(fmt_err)?;
+                    write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
+                    out.push('}');
+                }
+                Command::EffectGlow {
+                    bounds,
+                    radius,
+                    alpha,
+                    color,
+                } => {
+                    out.push_str("{\"kind\":\"effect_glow\",");
+                    write_rect(&mut out, "bounds", *bounds).map_err(fmt_err)?;
+                    write!(&mut out, ",\"radius\":{radius},\"alpha\":{alpha},").map_err(fmt_err)?;
+                    write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
+                    out.push('}');
+                }
+                Command::EffectGlass {
+                    rect,
+                    clip,
+                    bounds,
+                    shape_radius,
+                    radius,
+                    alpha,
+                    color,
+                } => {
+                    out.push_str("{\"kind\":\"effect_glass\",");
+                    write_rect(&mut out, "rect", *rect).map_err(fmt_err)?;
+                    out.push(',');
+                    write_rect(&mut out, "clip", *clip).map_err(fmt_err)?;
+                    out.push(',');
+                    write_rect(&mut out, "bounds", *bounds).map_err(fmt_err)?;
+                    write!(
+                        &mut out,
+                        ",\"shape_radius\":{shape_radius},\"radius\":{radius},\"alpha\":{alpha},"
+                    )
+                    .map_err(fmt_err)?;
+                    write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
+                    out.push('}');
+                }
+                Command::EffectLiquid {
+                    rect,
+                    clip,
+                    bounds,
+                    shape_radius,
+                    denom,
+                    alpha,
+                    color,
+                } => {
+                    out.push_str("{\"kind\":\"effect_liquid\",");
+                    write_rect(&mut out, "rect", *rect).map_err(fmt_err)?;
+                    out.push(',');
+                    write_rect(&mut out, "clip", *clip).map_err(fmt_err)?;
+                    out.push(',');
+                    write_rect(&mut out, "bounds", *bounds).map_err(fmt_err)?;
+                    write!(
+                        &mut out,
+                        ",\"shape_radius\":{shape_radius},\"denom\":{denom},\"alpha\":{alpha},"
+                    )
+                    .map_err(fmt_err)?;
+                    write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
+                    out.push('}');
                 }
             }
         }

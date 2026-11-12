@@ -1,5 +1,5 @@
 //! R8 software effects: prop schema, determinism, distinct pixels, clamping,
-//! display-list boundaries and V0.1 golden regressions.
+//! R9 effect-command export and V0.1 golden regressions.
 
 use opurom_render::{
     digest_hex, layout, parse_ir, Renderer, Rgba, StateValue, StateView, VisualEffectKind,
@@ -381,7 +381,7 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
 }
 
 #[test]
-fn cli_commands_rejects_visual_effects() {
+fn cli_commands_accepts_visual_effects() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let ir_path = dir.join("r8-command-effect.opuir.json");
     let ppm = dir.join("r8-command-effect.ppm");
@@ -389,31 +389,22 @@ fn cli_commands_rejects_visual_effects() {
     fs::write(&ir_path, ir_of(Some(BLUR))).unwrap();
     let _ = fs::remove_file(&commands);
 
-    let rejected = ProcessCommand::new(env!("CARGO_BIN_EXE_opurom-render"))
+    let accepted = ProcessCommand::new(env!("CARGO_BIN_EXE_opurom-render"))
         .arg(&ir_path)
         .args(["96", "64"])
         .arg(&ppm)
         .args(["--commands", commands.to_str().unwrap()])
         .output()
         .unwrap();
-    assert_eq!(rejected.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&rejected.stderr).contains("unavailable with visual effects"),
-        "unexpected diagnostic: {}",
-        String::from_utf8_lossy(&rejected.stderr)
-    );
-    assert!(!commands.exists());
-
-    let rendered = ProcessCommand::new(env!("CARGO_BIN_EXE_opurom-render"))
-        .arg(&ir_path)
-        .args(["96", "64"])
-        .arg(&ppm)
-        .output()
-        .unwrap();
-    assert!(
-        rendered.status.success(),
+        accepted.status.success(),
         "{}",
-        String::from_utf8_lossy(&rendered.stderr)
+        String::from_utf8_lossy(&accepted.stderr)
     );
-    assert!(String::from_utf8_lossy(&rendered.stdout).starts_with("digest="));
+    assert!(String::from_utf8_lossy(&accepted.stdout).starts_with("digest="));
+    let json = fs::read_to_string(&commands).unwrap();
+    assert!(
+        json.contains("\"kind\":\"effect_blur\",\"radius\":3"),
+        "R9 blur command missing: {json}"
+    );
 }

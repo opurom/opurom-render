@@ -1,9 +1,10 @@
-//! R8 visual effects: deterministic RGBA8 integer compositing.
+//! R9 visual effects: deterministic RGBA8 integer compositing and the command
+//! stream that reproduces it on the independent Metal compute backend.
 //!
-//! Effects read and write the software framebuffer directly. They are not R6
-//! display-list commands: the R6 command stream remains a pure rect/gradient
-//! snapshot, and the CLI refuses `--commands` for an IR with visual effects.
+//! The software framebuffer uses integer arithmetic only. Effect-free IR emits
+//! no effect commands, so the R6 command stream stays byte-identical.
 
+use crate::display::Command;
 use crate::raster::Canvas;
 use crate::{LaidOut, Rect, Rgba};
 
@@ -110,7 +111,13 @@ pub(crate) fn apply_node(canvas: &mut Canvas, n: &LaidOut, backdrop: &[u8]) {
         .max()
         .unwrap_or(0)
         .min(EFFECT_MAX_RADIUS + EFFECT_MAX_OFFSET);
-    let bounds = clipped_area(canvas, n.rect, pad);
+    let bounds = clipped_area(
+        canvas.width,
+        canvas.height,
+        canvas.effective_clip(),
+        n.rect,
+        pad,
+    );
     if bounds.w <= 0 || bounds.h <= 0 {
         return;
     }
@@ -156,6 +163,109 @@ pub(crate) fn apply_frame_blurs(canvas: &mut Canvas, laid: &[LaidOut]) {
             }
         }
     }
+}
+
+/// Geometry and colours the R9 effect commands need for one node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EffectFrame {
+    pub has_local: bool,
+    pub rect: Rect,
+    pub clip: Rect,
+    pub bounds: Rect,
+    pub inner: Rect,
+    pub shape_radius: i64,
+    pub shape: bool,
+    pub ink: Rgba,
+}
+
+impl EffectFrame {
+    pub(crate) fn new(width: u32, height: u32, n: &LaidOut) -> EffectFrame {
+        let local: Vec<&VisualEffect> = n
+            .visual_effects
+            .iter()
+            .filter(|e| e.kind != VisualEffectKind::Blur)
+            .collect();
+        let clip = effective_clip(width, height, n.clip);
+        let pad = local
+            .iter()
+            .map(|e| e.pad())
+            .max()
+            .unwrap_or(0)
+            .min(EFFECT_MAX_RADIUS + EFFECT_MAX_OFFSET);
+        EffectFrame {
+            has_local: !local.is_empty(),
+            rect: n.rect,
+            clip,
+            bounds: clipped_area(width, height, clip, n.rect, pad),
+            inner: clipped_area(width, height, clip, n.rect, 0),
+            shape_radius: shape_radius(n),
+            shape: n.fill.is_some(),
+            ink: ink(n),
+        }
+    }
+}
+
+/// The mask snapshot followed by one command per local effect, in IR order.
+pub(crate) fn local_commands(frame: EffectFrame, effects: &[VisualEffect]) -> Vec<Command> {
+    let mut out = vec![Command::EffectMask {
+        rect: frame.rect,
+        clip: frame.clip,
+        bounds: frame.bounds,
+        shape_radius: frame.shape_radius,
+        shape: frame.shape,
+    }];
+    for e in effects.iter().filter(|e| e.kind != VisualEffectKind::Blur) {
+        let color = match e.kind {
+            VisualEffectKind::Shadow => e.color.unwrap_or(DARK),
+            VisualEffectKind::Glow => e.color.unwrap_or(frame.ink),
+            _ => e.color.unwrap_or(LIGHT),
+        };
+        out.push(match e.kind {
+            VisualEffectKind::Shadow => Command::EffectShadow {
+                bounds: frame.bounds,
+                radius: e.radius(),
+                dx: e.dx(),
+                dy: e.dy(),
+                alpha: e.alpha(),
+                color,
+            },
+            VisualEffectKind::Glow => Command::EffectGlow {
+                bounds: frame.bounds,
+                radius: e.radius(),
+                alpha: e.alpha(),
+                color,
+            },
+            VisualEffectKind::Glass => Command::EffectGlass {
+                rect: frame.rect,
+                clip: frame.clip,
+                bounds: frame.inner,
+                shape_radius: frame.shape_radius,
+                radius: e.radius(),
+                alpha: e.alpha(),
+                color,
+            },
+            VisualEffectKind::Liquid => Command::EffectLiquid {
+                rect: frame.rect,
+                clip: frame.clip,
+                bounds: frame.inner,
+                shape_radius: frame.shape_radius,
+                denom: liquid_denom(frame.rect),
+                alpha: e.alpha(),
+                color,
+            },
+            VisualEffectKind::Blur => unreachable!("blur is a frame pass"),
+        });
+    }
+    out
+}
+
+/// Whole-frame blur passes in pre-order layout order, after every node.
+pub(crate) fn frame_blur_commands(laid: &[LaidOut]) -> Vec<Command> {
+    laid.iter()
+        .flat_map(|n| n.visual_effects.iter())
+        .filter(|e| e.kind == VisualEffectKind::Blur)
+        .map(|e| Command::EffectBlur { radius: e.radius() })
+        .collect()
 }
 
 /// Separable box blur over an N-channel byte plane. Window ends are clamped to
@@ -242,20 +352,44 @@ fn put(canvas: &mut Canvas, x: i64, y: i64, c: [u8; 4]) {
     canvas.pixels[i..i + 4].copy_from_slice(&c);
 }
 
-fn clipped_area(canvas: &Canvas, r: Rect, pad: i64) -> Rect {
-    let clip = canvas.effective_clip();
+/// The clip a canvas applies to its own draws, normalized to the viewport.
+pub(crate) fn effective_clip(width: u32, height: u32, clip: Option<Rect>) -> Rect {
+    let full = Rect {
+        x: 0,
+        y: 0,
+        w: width as i64,
+        h: height as i64,
+    };
+    match clip {
+        None => full,
+        Some(c) => {
+            let x0 = c.x.max(0);
+            let y0 = c.y.max(0);
+            let x1 = c.x.saturating_add(c.w).min(full.w);
+            let y1 = c.y.saturating_add(c.h).min(full.h);
+            Rect {
+                x: x0,
+                y: y0,
+                w: (x1 - x0).max(0),
+                h: (y1 - y0).max(0),
+            }
+        }
+    }
+}
+
+fn clipped_area(width: u32, height: u32, clip: Rect, r: Rect, pad: i64) -> Rect {
     let x0 = r.x.saturating_sub(pad).max(clip.x).max(0);
     let y0 = r.y.saturating_sub(pad).max(clip.y).max(0);
     let x1 =
         r.x.saturating_add(r.w.max(0))
             .saturating_add(pad)
             .min(clip.x.saturating_add(clip.w))
-            .min(canvas.width as i64);
+            .min(width as i64);
     let y1 =
         r.y.saturating_add(r.h.max(0))
             .saturating_add(pad)
             .min(clip.y.saturating_add(clip.h))
-            .min(canvas.height as i64);
+            .min(height as i64);
     Rect {
         x: x0,
         y: y0,
@@ -380,7 +514,13 @@ fn glass(canvas: &mut Canvas, n: &LaidOut, backdrop: &[u8], e: &VisualEffect) {
     let h = canvas.height as usize;
     let mut blurred = vec![0u8; backdrop.len()];
     box_blur_plane::<4>(backdrop, &mut blurred, w, h, e.radius());
-    let bounds = clipped_area(canvas, n.rect, 0);
+    let bounds = clipped_area(
+        canvas.width,
+        canvas.height,
+        canvas.effective_clip(),
+        n.rect,
+        0,
+    );
     let rad = shape_radius(n);
     let tint = e.color.unwrap_or(LIGHT);
     let a = alpha_u8(e.alpha());
@@ -395,18 +535,25 @@ fn glass(canvas: &mut Canvas, n: &LaidOut, backdrop: &[u8], e: &VisualEffect) {
     }
 }
 
+fn liquid_denom(r: Rect) -> i64 {
+    r.w.max(1)
+        .saturating_add(r.h.max(1))
+        .saturating_sub(2)
+        .max(1)
+}
+
 fn liquid(canvas: &mut Canvas, n: &LaidOut, e: &VisualEffect) {
-    let bounds = clipped_area(canvas, n.rect, 0);
+    let bounds = clipped_area(
+        canvas.width,
+        canvas.height,
+        canvas.effective_clip(),
+        n.rect,
+        0,
+    );
     let rad = shape_radius(n);
     let highlight = e.color.unwrap_or(LIGHT);
     let base = alpha_u8(e.alpha()) as i64;
-    let denom = n
-        .rect
-        .w
-        .max(1)
-        .saturating_add(n.rect.h.max(1))
-        .saturating_sub(2)
-        .max(1);
+    let denom = liquid_denom(n.rect);
     for y in bounds.y..bounds.y.saturating_add(bounds.h) {
         for x in bounds.x..bounds.x.saturating_add(bounds.w) {
             if !inside_shape(n, x, y, rad) {

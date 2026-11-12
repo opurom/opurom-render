@@ -3,7 +3,8 @@
 Independent Rust crate: IR v0.1 → adaptive layout → deterministic RGBA8 software
 raster → incremental dirty rects, plus a deterministic SVG 1.1 **vector software
 backend**, deterministic R5 animation primitives, an exact R6 display-list
-export and five R8 deterministic framebuffer effects. This folder is its own
+export and five R8 deterministic framebuffer effects, plus R9 optional effect
+commands that reproduce them on the cross-repo Metal compute backend. This folder is its own
 git repository; it has no source dependency on
 any other OPUROM layer, only on the frozen IR/ABI contracts
 (`IR_SCHEMA.md`, `ADAPTER_CONTRACT.md`) and local `FrameView` shape
@@ -19,7 +20,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 104 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 111 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -38,6 +39,8 @@ cargo build --offline
 # writes a deterministic SVG 1.1 snapshot (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 320 240 out.ppm --commands commands.json
 # writes the exact R6 display list (stdout unchanged)
+./target/debug/opurom-render tests/fixtures/r9_effect.opuir.json 96 64 fx.ppm --commands fx.commands.json
+# writes the R6 display list plus R9 effect commands (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --transition slide --tick 16
 # deterministic transition digest (stdout still exactly digest=... and dirty=...)
 ```
@@ -65,10 +68,14 @@ vertical gradients with integer bounds/colours in draw order, plus the viewport
 and opaque background. Bitmap glyph runs are decomposed on the CPU into solid
 rect commands; there is no GPU glyph atlas or GPU text shaping. CPU-only page
 transitions cannot be represented as this display list, so `--commands` and
-`--transition` together fail with a readable diagnostic. R8 software effects
-also cannot be represented, so `--commands` with effect props fails; effect-free
-output stays byte-identical to R6. The flag adds no
-stdout lines and does not change the PPM or golden digests.
+`--transition` together fail with a readable diagnostic. R9 adds optional
+effect commands for IR carrying R8 visual effects: `effect_backdrop` and
+`effect_mask` snapshot the frame and the node silhouette, `effect_shadow`,
+`effect_glow`, `effect_glass` and `effect_liquid` carry the clamped integer
+parameters (radius, dx/dy, fixed-point alpha, colour, bounds, shape radius),
+and `effect_blur` is a whole-frame pass appended after all nodes. Effect-free
+IR emits none of them, so the frozen R6 command fixture stays byte-identical.
+The flag adds no stdout lines and does not change the PPM or golden digests.
 
 ## Architecture
 
@@ -330,9 +337,8 @@ the GPU kernel executes generic solid/rounded/gradient rectangles only. There is
 no GPU glyph atlas, full-scene GPU text, GPU presentation to a window,
 Vulkan/ANGLE/D3D backend, device matrix or fps claim. `Frame::view()` and dirty
 rects are unchanged; `--transition` composes whole CPU frames and cannot be
-exported as this display list. R8 adds no effect commands: effect-free
-`--commands` output stays byte-identical to R6, and the CLI rejects
-`--commands` for an IR that contains visual effects with a readable diagnostic.
+exported as this display list. R9 adds optional effect commands on top of this
+stream; effect-free `--commands` output stays byte-identical to R6.
 
 ## R8 deterministic software visual effects
 
@@ -376,15 +382,48 @@ threads or external crate is used. Alpha compositing is integer half-up:
 | `glass` | The backdrop snapshot taken before the node is box-blurred and alpha-composited with a translucent tint inside the node's rounded bounds. This replaces the node's opaque fill; child nodes still draw afterwards. The old R2 `glass: true` prop remains a colour blend, not a blur. |
 | `liquid` | A diagonal triangular specular band, `band = 1024 - abs(3 * t - 1024)` with `t = diagonal * 1024 / (width + height - 2)`, scales a fixed-point white/highlight alpha over the node bounds. |
 
-**Honest scope:** these are CPU RGBA framebuffer effects only, not GPU effect
-kernels and not a compositor layer tree. `liquid` is a stylized specular
-gradient, not real lens refraction or physically based transmission; `glass`
-uses a framebuffer snapshot, not real depth-aware refraction. There is no
-real-time 120fps claim, no measured frame rate and no GPU effect path. Effects
-are not represented in `--commands`, the R4 SVG snapshot or the R3 a11y tree.
-GPU effect kernels, hardware presentation and real lens optics remain R9+.
+**Honest scope:** the CPU RGBA implementation is a framebuffer effect path, not
+a compositor layer tree. `liquid` is a stylized specular gradient, not real lens
+refraction or physically based transmission; `glass` uses a framebuffer
+snapshot, not real depth-aware refraction. There is no real-time 120fps claim
+and no measured frame rate. Effects are not represented in the R4 SVG snapshot
+or the R3 a11y tree. R9 adds a Metal compute path for the five effects (see
+below); presentation, GPU text and real lens optics remain out of scope.
 
-## Honest status (round 8)
+## R9 GPU effect kernels (cross-repo proof)
+
+`--commands` now accepts effect IR. The command stream gains seven fixed-shape
+effect commands with integer parameters only: `effect_backdrop` (snapshot the
+frame before a node's draws), `effect_mask` (snapshot the rounded silhouette
+from the frame/backdrop diff), `effect_shadow`, `effect_glow`, `effect_glass`,
+`effect_liquid` (one per local effect in IR order), and `effect_blur` (whole-frame
+passes appended after all nodes, in pre-order layout order). Effect-free IR emits
+none of them: `tests/fixtures/r6_counter_commands.json` still matches
+byte-for-byte, and the three V0.1 golden digests are unchanged.
+
+The independent `opurom-gpu` repository executes that stream in real MSL
+compute kernels: one thread per viewport pixel, multiple dispatched passes for
+frame snapshots, silhouette masks, local effects and separable whole-frame
+blurs, with real buffer readback. For the committed effect fixture
+`tests/fixtures/r9_effect.opuir.json` at `96 64`, the real cross-repo proof is:
+
+```sh
+./target/debug/opurom-render tests/fixtures/r9_effect.opuir.json 96 64 cpu.ppm \
+  --commands fx.commands.json     # digest=eb9ce1cec41bac13, dirty=1
+../opurom-gpu/target/debug/opurom-gpu raster fx.commands.json gpu.ppm
+cmp cpu.ppm gpu.ppm                # exit 0, byte-identical
+```
+
+Measured result: `cmp` exits 0, both PPMs are 18445 bytes, and the FNV-1a 64
+digest of the PPM bytes is `b493cd0714a4fb64` (all five effect kinds active).
+`tests/r9.rs` also proves the same equality at `64 48`. This is a real
+comparison against the independent software renderer, not a self-comparison.
+
+**Honest scope:** compute kernels only. There is no GPU presentation to a
+window, no GPU text (glyphs remain CPU-decomposed rects), no Vulkan/ANGLE/D3D
+backend and no fps claim. The CPU renderer remains the reference oracle.
+
+## Honest status (round 9)
 
 Verified now, by tests in this crate: IR parsing/validation, adaptive breakpoints +
 Row collapse + fluid sizing, all 32 node kinds, theme tokens with per-token
@@ -400,9 +439,10 @@ slide/fade/scale frame composition with monotonic ticks and settling, gesture
 digest sequences, fixed-seed particles, quality budget tiers, CLI transition
 validation, exact R6 display-list serialization/clipping/draw order, the five
 R8 software effects with determinism, pairwise distinct pixels, clamping,
-overflow and `--commands` boundary tests, and unchanged V0.1 golden digests.
-`cargo test --offline` (104 tests) is green with fixed golden digests and zero
-warnings.
+overflow, R9 effect-command export for all five kinds with integer parameters,
+draw order, bounds, R6 fixture invariance, and unchanged V0.1 golden digests.
+`cargo test --offline` (111 tests) is green with fixed golden digests and zero
+warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 Not implemented / not measured — later rounds: a Metal/Vulkan/ANGLE GPU raster
 or hardware-accelerated presentation inside this crate (the R6 Metal compute
@@ -415,8 +455,9 @@ shaping, no hinting and no subpixel positioning; the SVG `<text>` is a generic
 monospace approximation); OS screen-reader integration (the R3 tree is data
 only: no ARIA/AT-SPI bridge, no focus order, no hit testing and no live
 announcements); DPI scaling (`fontScale` scales logical pixels, not physical
-DPI); native widget embedding; GPU effect kernels, GPU-side shadows and real
-lens refraction (R9+). The R2 `glass: true` prop remains a colour blend; the
+DPI); native widget embedding; hardware presentation, GPU text, Vulkan/ANGLE/D3D
+backends and real lens refraction (R10+). The R9 GPU effect path is a headless
+cross-repo compute backend, not a presenter inside this crate. The R2 `glass: true` prop remains a colour blend; the
 R8 `effects` glass path is a real CPU framebuffer blur, not refraction. Bitmap
 glyphs are blocky by design. PPM drops alpha because all palette colours are
 opaque. The SVG backend and R5 animation compositor are software backends, NOT
@@ -428,7 +469,7 @@ Metal/Vulkan/ANGLE GPU backends.
 - `shortcut: Image renders a deterministic colour placeholder, upgrade when resource loading exists`.
 - `shortcut: dirty rects are capped at 64 (fallback: one full-frame rect), refine with a tile quadtree when a real presenter exists`.
 - `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient when the IR supports it`.
-- `shortcut: R2 glass is a colour blend; R8 glass blurs a framebuffer snapshot, upgrade to compositor layers and real refraction in R9+`.
+- `shortcut: R2 glass is a colour blend; R8 glass blurs a framebuffer snapshot, upgrade to compositor layers and real refraction in R10+`.
 - `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
 - `shortcut: R5 transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.
 - `shortcut: gesture input is integer L1 deltas, upgrade when real hardware gesture events exist`.

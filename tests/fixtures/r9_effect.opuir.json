@@ -1,0 +1,60 @@
+{
+  "ir": "0.1",
+  "app": "R9EffectProof",
+  "state": [],
+  "tree": {
+    "id": 0,
+    "kind": "Column",
+    "props": { "gap": 6, "padding": 6, "align": "center" },
+    "children": [
+      {
+        "id": 1,
+        "kind": "Container",
+        "props": {
+          "width": 80,
+          "height": 24,
+          "radius": 4,
+          "color": "#E5464F",
+          "effects": [ { "kind": "blur", "radius": 2 } ]
+        },
+        "children": [],
+        "events": {}
+      },
+      {
+        "id": 2,
+        "kind": "Container",
+        "props": {
+          "width": 96,
+          "height": 40,
+          "radius": 6,
+          "color": "#112233",
+          "effects": [
+            { "kind": "shadow", "radius": 2, "dx": 5, "dy": 4, "alpha": 768, "color": "#000000" },
+            { "kind": "glow", "radius": 3, "alpha": 640, "color": "#FFCC00" },
+            { "kind": "glass", "radius": 2, "alpha": 384, "color": "#FFFFFF" },
+            { "kind": "liquid", "alpha": 700, "color": "#FFFFFF" }
+          ]
+        },
+        "children": [
+          {
+            "id": 3,
+            "kind": "Text",
+            "props": { "value": "R9", "size": 12, "color": "#FFFFFF" },
+            "children": [],
+            "events": {}
+          }
+        ],
+        "events": {}
+      },
+      {
+        "id": 4,
+        "kind": "Container",
+        "props": { "width": 60, "height": 20, "color": "#445566" },
+        "children": [],
+        "events": {}
+      }
+    ],
+    "events": {}
+  },
+  "theme": { "mode": "dark", "accent": "#4F46E5", "radius": 4 }
+}
