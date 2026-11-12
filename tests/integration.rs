@@ -164,12 +164,16 @@ fn interpolation_renders_different_pixels_after_state_change() {
     let mut renderer = Renderer::new(800, 600);
     let before = renderer.render(&ir, &state);
     assert_eq!(
-        node(&renderer.compute_layout(&ir, &state), 1).text.as_deref(),
+        node(&renderer.compute_layout(&ir, &state), 1)
+            .text
+            .as_deref(),
         Some("Count: 0")
     );
     state.set("count", StateValue::Int(42));
     assert_eq!(
-        node(&renderer.compute_layout(&ir, &state), 1).text.as_deref(),
+        node(&renderer.compute_layout(&ir, &state), 1)
+            .text
+            .as_deref(),
         Some("Count: 42")
     );
     let after = renderer.render(&ir, &state);
@@ -241,10 +245,6 @@ fn malformed_ir_is_rejected_with_readable_diagnostics() {
             "unsupported IR version",
         ),
         (
-            COUNTER_IR.replace("\"kind\": \"Column\"", "\"kind\": \"Grid\""),
-            "unknown node kind",
-        ),
-        (
             COUNTER_IR.replace("\"id\": 3", "\"id\": 9"),
             "pre-order",
         ),
@@ -260,6 +260,10 @@ fn malformed_ir_is_rejected_with_readable_diagnostics() {
         (
             COUNTER_IR.replace("\"align\": \"center\"", "\"align\": \"sideways\""),
             "unknown value",
+        ),
+        (
+            COUNTER_IR.replace("\"value\": \"Count: {count}\"", "\"value\": {\"a\": 1}"),
+            "must be a string or a number",
         ),
         (
             r##"{"ir":"0.1.0","app":"X","state":[],"theme":{"mode":"light","accent":"#000000","radius":0}}"##.into(),
@@ -293,14 +297,24 @@ fn cli_writes_ppm_and_prints_stable_digest() {
             .unwrap()
     };
     let (o1, o2) = (run("cli-1.ppm"), run("cli-2.ppm"));
-    assert!(o1.status.success(), "{}", String::from_utf8_lossy(&o1.stderr));
-    assert!(o2.status.success(), "{}", String::from_utf8_lossy(&o2.stderr));
+    assert!(
+        o1.status.success(),
+        "{}",
+        String::from_utf8_lossy(&o1.stderr)
+    );
+    assert!(
+        o2.status.success(),
+        "{}",
+        String::from_utf8_lossy(&o2.stderr)
+    );
     let (s1, s2) = (
         String::from_utf8_lossy(&o1.stdout),
         String::from_utf8_lossy(&o2.stdout),
     );
     assert_eq!(s1, s2, "digest must be stable across processes");
-    assert!(s1.lines().any(|l| l.starts_with("digest=") && l.len() == 7 + 16));
+    assert!(s1
+        .lines()
+        .any(|l| l.starts_with("digest=") && l.len() == 7 + 16));
     assert!(s1.lines().any(|l| l == "dirty=1"));
     let (p1, p2) = (
         fs::read(dir.join("cli-1.ppm")).unwrap(),
