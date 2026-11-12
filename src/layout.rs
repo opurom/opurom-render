@@ -2,6 +2,7 @@
 //! no floats, no time, no randomness, no host queries.
 
 use crate::anim::{self, Curve};
+use crate::ir::Contrast;
 use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateView, Theme, ThemeMode};
 
 /// Elapsed time at which every animation curve has settled.
@@ -131,6 +132,7 @@ pub struct Palette {
     pub accent: Rgba,
     pub on_accent: Rgba,
     pub radius: i64,
+    pub high_contrast: bool,
 }
 
 impl Palette {
@@ -159,6 +161,7 @@ impl Palette {
             accent: theme.accent,
             on_accent: Rgba::rgb(0xff, 0xff, 0xff),
             radius: theme.radius,
+            high_contrast: theme.tokens.contrast == Contrast::High,
         }
     }
 }
@@ -172,6 +175,17 @@ pub fn lerp_color(a: Rgba, b: Rgba, t: i64) -> Rgba {
     Rgba::rgb(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b))
 }
 
+/// High-contrast ink: pure black or pure white from the integer luminance of
+/// the background (no float, no host colour profile).
+fn contrast_text(bg: Rgba) -> Rgba {
+    let l = (bg.r as i64 * 299 + bg.g as i64 * 587 + bg.b as i64 * 114) / 1000;
+    if l < 128 {
+        Rgba::rgb(255, 255, 255)
+    } else {
+        Rgba::rgb(0, 0, 0)
+    }
+}
+
 /// Row collapses into a vertical stack in the compact breakpoint.
 fn direction(kind: Kind, bp: Breakpoint) -> Direction {
     match kind {
@@ -181,8 +195,17 @@ fn direction(kind: Kind, bp: Breakpoint) -> Direction {
     }
 }
 
+/// Effective font size in integer logical pixels after `fontScale` (fixed point).
+pub(crate) fn text_size(p: &Props, default_size: i64) -> i64 {
+    let base = p.size.unwrap_or(default_size);
+    match p.font_scale {
+        Some(f) => ((base as i128 * f as i128 + 512) / 1024).clamp(0, i64::MAX as i128) as i64,
+        None => base,
+    }
+}
+
 fn font_scale(p: &Props, default_size: i64) -> i64 {
-    ((p.size.unwrap_or(default_size) + 3) / 7).clamp(1, 8)
+    (text_size(p, default_size).saturating_add(3) / 7).clamp(1, 8)
 }
 
 fn text_width(text: &str, scale: i64) -> i64 {
@@ -215,7 +238,7 @@ fn fallback_text(n: &Node, state: &StateView) -> String {
     String::new()
 }
 
-fn node_text(n: &Node, state: &StateView) -> String {
+pub(crate) fn node_text(n: &Node, state: &StateView) -> String {
     match n.kind {
         Kind::Text => state.interpolate(n.props.value.as_deref().unwrap_or("")),
         Kind::Button => state.interpolate(n.props.label.as_deref().unwrap_or("")),
@@ -513,7 +536,7 @@ fn place(
     .max(0)
     .min(rect.w.min(rect.h).max(0) / 2);
 
-    let (fill, border, border_w) = match n.kind {
+    let (mut fill, mut border, mut border_w) = match n.kind {
         Kind::Column
         | Kind::Row
         | Kind::Container
@@ -571,10 +594,15 @@ fn place(
         }
     };
     // Glass is a frosted fill: the base colour blended with the accent.
-    let fill = match (fill, n.props.glass) {
+    fill = match (fill, n.props.glass) {
         (Some(c), true) => Some(lerp_color(c, pal.accent, UNIT / 4)),
         (f, _) => f,
     };
+    let contrast = n.props.high_contrast || pal.high_contrast;
+    if contrast && fill.is_some() {
+        border = Some(contrast_text(pal.bg));
+        border_w = 2;
+    }
 
     let (text, text_color, text_align) = match n.kind {
         Kind::Text => (
@@ -614,6 +642,11 @@ fn place(
             inherited_align,
         ),
         _ => (None, None, Align::Start),
+    };
+    let text_color = if contrast {
+        Some(contrast_text(fill.unwrap_or(pal.bg)))
+    } else {
+        text_color
     };
 
     let effects = Effects {

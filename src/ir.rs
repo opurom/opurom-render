@@ -3,10 +3,11 @@
 //! JSON is parsed into `serde_json::Value` and then checked field by field, so a
 //! malformed document always produces a readable `IrError` instead of a panic.
 //!
-//! R2 is additive: `theme.tokens`, the optional node field `when`, the canonical
-//! style props and sixteen new node kinds are accepted. Unknown props are
-//! ignored and an unknown kind falls back to Container/Text, so a file from a
-//! newer compiler still renders instead of failing.
+//! R2/R3 are additive: `theme.tokens`, the optional node field `when`, the
+//! canonical style props, sixteen new node kinds and the accessibility props
+//! are accepted. Unknown props are ignored and an unknown kind falls back to
+//! Container/Text, so a file from a newer compiler still renders instead of
+//! failing.
 
 use crate::anim::Curve;
 use crate::Rgba;
@@ -213,6 +214,45 @@ impl Kind {
     }
 }
 
+/// R3 accessible role of a node. `None` is also an explicit `role: "none"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Button,
+    Text,
+    Image,
+    Checkbox,
+    Slider,
+    Heading,
+    None,
+}
+
+impl Role {
+    pub fn name(self) -> &'static str {
+        match self {
+            Role::Button => "button",
+            Role::Text => "text",
+            Role::Image => "image",
+            Role::Checkbox => "checkbox",
+            Role::Slider => "slider",
+            Role::Heading => "heading",
+            Role::None => "none",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Role> {
+        match s {
+            "button" => Some(Role::Button),
+            "text" => Some(Role::Text),
+            "image" => Some(Role::Image),
+            "checkbox" => Some(Role::Checkbox),
+            "slider" => Some(Role::Slider),
+            "heading" => Some(Role::Heading),
+            "none" => Some(Role::None),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Align {
     Start,
@@ -256,6 +296,11 @@ pub struct Props {
     pub labels: Vec<String>,
     pub min: Option<i64>,
     pub max: Option<i64>,
+    // R3 accessibility props.
+    /// Fixed-point font multiplier: 1024 == 1.0.
+    pub font_scale: Option<i64>,
+    pub high_contrast: bool,
+    pub role: Option<Role>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -306,11 +351,24 @@ pub enum ThemeMode {
 }
 
 /// R2 theme tokens; missing tokens fall back to `mode`/`accent`/`radius`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Contrast {
+    Normal,
+    High,
+}
+
+impl Default for Contrast {
+    fn default() -> Self {
+        Contrast::Normal
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ThemeTokens {
     pub surface: Option<Rgba>,
     pub on_surface: Option<Rgba>,
     pub font: Option<String>,
+    pub contrast: Contrast,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -632,6 +690,43 @@ fn unit_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<i64
     Ok(Some(fixed))
 }
 
+fn font_scale_diag(what: &str, key: &str) -> IrError {
+    bad(format!("{what}.{key} must be a number between 0.5 and 3.0"))
+}
+
+/// `fontScale` is a JSON number in 0.5..3.0, stored as exact fixed point
+/// (1024 == 1.0). The range test compares the decimal parts, not the rounded
+/// fixed-point value, so a value just outside the range is rejected.
+fn font_scale_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<i64>, IrError> {
+    let Some(v) = o.get(key) else {
+        return Ok(None);
+    };
+    let text = v
+        .as_number()
+        .map(|n| n.to_string())
+        .ok_or_else(|| font_scale_diag(what, key))?;
+    let parts = decimal_parts(&text).ok_or_else(|| font_scale_diag(what, key))?;
+    if !font_scale_in_range(parts) {
+        return Err(font_scale_diag(what, key));
+    }
+    Ok(Some(
+        fixed_from_parts(parts, 1024).ok_or_else(|| font_scale_diag(what, key))?,
+    ))
+}
+
+/// Exact comparison of `mant / 10^scale` with 0.5 and 3 (no float rounding).
+fn font_scale_in_range(parts: (bool, i128, i32)) -> bool {
+    let (negative, mant, scale) = parts;
+    if negative || mant == 0 || !(0..=18).contains(&scale) {
+        return false;
+    }
+    let mut den: i128 = 1;
+    for _ in 0..scale {
+        den *= 10;
+    }
+    2 * mant >= den && mant <= 3 * den
+}
+
 /// `#RRGGBB,#RRGGBB` -> the two gradient stops.
 fn gradient_prop(
     o: &Map<String, Value>,
@@ -743,6 +838,12 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         }
     };
     let (value_num, value_frac) = numeric_value(o, "value", what)?;
+    let role = match opt_string(o, "role", what)? {
+        Some(s) => Some(
+            Role::parse(&s).ok_or_else(|| bad(format!("{what}.role has unknown value {s:?}")))?,
+        ),
+        None => None,
+    };
     Ok(Props {
         gap: opt_integer(o, "gap", what)?.unwrap_or(0),
         padding: opt_integer(o, "padding", what)?.unwrap_or(0),
@@ -772,6 +873,9 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         labels: labels_prop(o, "labels", what)?,
         min: opt_signed_integer(o, "min", what)?,
         max: opt_signed_integer(o, "max", what)?,
+        font_scale: font_scale_prop(o, "fontScale", what)?,
+        high_contrast: opt_bool(o, "highContrast", what)?,
+        role,
     })
 }
 
@@ -937,10 +1041,20 @@ fn tokens(v: &Value) -> Result<ThemeTokens, IrError> {
     let Some(o) = v.as_object() else {
         return Err(bad("theme.tokens must be a JSON object"));
     };
+    let contrast = match opt_string(o, "contrast", "theme.tokens")?.as_deref() {
+        None | Some("normal") => Contrast::Normal,
+        Some("high") => Contrast::High,
+        Some(other) => {
+            return Err(bad(format!(
+                "theme.tokens.contrast has unknown value {other:?}"
+            )));
+        }
+    };
     Ok(ThemeTokens {
         surface: color_prop(o, "surface", "theme.tokens")?,
         on_surface: color_prop(o, "onSurface", "theme.tokens")?,
         font: opt_string(o, "font", "theme.tokens")?,
+        contrast,
     })
 }
 
@@ -971,6 +1085,15 @@ fn theme(v: &Value) -> Result<Theme, IrError> {
     })
 }
 
+/// `highContrast` on a node applies to its whole subtree (R3 additive prop).
+fn inherit_high_contrast(n: &mut Node, parent: bool) {
+    let high = parent || n.props.high_contrast;
+    n.props.high_contrast = high;
+    for c in &mut n.children {
+        inherit_high_contrast(c, high);
+    }
+}
+
 /// Parse and fully validate one IR v0.1 document.
 pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
     let v: Value = serde_json::from_str(text).map_err(|e| bad(format!("invalid IR JSON: {e}")))?;
@@ -984,7 +1107,8 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
     let app = string_field(o, "app", "IR root")?;
     let state = state_decls(required(o, "state", "IR root")?)?;
     let mut next_id = 0u32;
-    let tree = node(required(o, "tree", "IR root")?, &mut next_id, &state)?;
+    let mut tree = node(required(o, "tree", "IR root")?, &mut next_id, &state)?;
+    inherit_high_contrast(&mut tree, false);
     let theme = theme(required(o, "theme", "IR root")?)?;
     Ok(Ir {
         version,

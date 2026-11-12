@@ -14,7 +14,7 @@ cargo fmt --check
 cargo test
 ```
 
-`cargo test` runs 47 tests (unit + integration). All pass, zero warnings. Only
+`cargo test` runs 57 tests (unit + integration). All pass, zero warnings. Only
 `serde_json` is used; it is pinned to the locally cached `=1.0.154`, so the build
 needs no network.
 
@@ -27,9 +27,11 @@ cargo build
 # dirty=1
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --state count=7
 # digest=e7aad51c98d9cf21
+./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --a11y tree.json
+# digest=8cc3021fa80749b5, dirty=1 (stdout unchanged)
 ```
 
-Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms]`.
+Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json]`.
 `--state` repeats; values are parsed against the declared state type. `--tick`
 sets the animation clock position in milliseconds (default: the settled end
 state, so a v0.1 IR renders exactly as in round 1). Output is a P6 PPM (RGB; the
@@ -38,7 +40,8 @@ opaque alpha byte is dropped). Stdout has exactly two lines:
 `dirty=<rect count>`. Malformed IR or a bad viewport is a readable stderr
 diagnostic with exit code 1, never a panic. A fresh process always reports
 `dirty=1` (first frame = whole surface); unchanged state within one `Renderer`
-yields zero dirty rects.
+yields zero dirty rects. `--a11y <out.json>` writes a separate deterministic
+JSON accessibility tree (see below) and does not add stdout lines.
 
 ## Architecture
 
@@ -73,6 +76,7 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
 - `src/anim.rs` — the fixed-timestep animation clock and the spring/ease curves.
 - `src/lib.rs` — `Rgba`, `StateView`, `Renderer`, `Frame`, `FrameView`, inline FNV-1a
   digest, and row/column dirty-rect diffing.
+- `src/a11y.rs` — R3 pre-order accessibility tree and its deterministic JSON serializer.
 - `src/main.rs` — the CLI described above.
 
 ## R2 features (IR_R2_ADDENDUM)
@@ -92,6 +96,43 @@ Unknown props are ignored and never fatal; an unknown kind degrades instead of
 rejecting the file. Multi-action events (`{"actions": [...]}`) and
 `valueFrom` are accepted as well, so an R2 compiler output renders here.
 
+## R3 accessibility (R3_ADDENDUM §2)
+
+All R3 keys are **additive and opt-in**; a v0.1 IR without them renders
+byte-identically to round 1 (the three golden digests below are unchanged).
+
+| Key | Type | Effect |
+| --- | --- | --- |
+| `fontScale` | number `0.5..3.0` | multiplies text size in integer logical pixels using exact fixed point (1024 = 1.0); the 5x7 bitmap glyph block grows in whole pixels. Out-of-range or non-number values are a readable parse diagnostic with exit 1. |
+| `highContrast` | bool | forces pure black/white text and 2 px black/white borders on box-owning nodes; a node flag applies to its whole subtree. |
+| `label` | string | accessible name; defaults to drawn text, then `label`/`value`/`title`/`name`/`placeholder`, then the empty string. |
+| `role` | string | `button`, `text`, `image`, `checkbox`, `slider`, `heading`, `none`; an unknown value is a parse diagnostic. |
+| `theme.tokens.contrast` | `"normal"\|"high"` | theme-wide high contrast, independent of the `mode` tokens. |
+
+Default roles: `Button` -> `button`, `Text` -> `text` (or `heading` when its
+effective size is >= 24 logical px), `Image` -> `image`, `Switch`/`Checkbox` ->
+`checkbox`, `Slider` -> `slider`, everything else -> `none`. An explicit `role`
+always wins, including `role: "none"`.
+
+CLI:
+
+```sh
+./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --a11y tree.json
+```
+
+`--a11y <out.json>` writes a deterministic pre-order JSON array; stdout stays
+exactly `digest=...` and `dirty=...`. Each entry has the shape
+`{"id":0,"role":"none","label":"","bounds":[0,0,800,600],"hidden":false}`:
+integer bounds are the node's laid-out `[x,y,w,h]` in logical pixels. Hidden
+`when` nodes and their descendants appear with `hidden:true`; their bounds come
+from a second layout with every bool state forced true, or from zeros when that
+layout cannot place them. The JSON is byte-identical across identical runs.
+
+Status: this is a **data-only** accessibility tree. There is NO OS
+screen-reader integration, NO ARIA/AT-SPI bridge, NO focus order or hit
+testing, NO real font shaping, NO DPI scaling (`fontScale` scales logical
+pixels of the built-in bitmap font) and NO GPU backend.
+
 ## Determinism guarantee
 
 Same IR + same viewport + same state + same animation tick ⇒ byte-identical RGBA
@@ -103,7 +144,7 @@ or resource I/O affect the frame (`Image` uses a stable hash of `src` as a
 placeholder colour); the animation clock only moves when the caller ticks it, so
 two identical tick sequences produce identical digest sequences.
 
-Golden digests (unchanged by R2):
+Golden digests (unchanged by R2 and R3):
 
 | Fixture | Viewport | Digest |
 | --- | --- | --- |
@@ -126,26 +167,30 @@ the same golden digest to be considered conformant; the headless software raster
 the conformance oracle. Dirty rects remain a property of the diff stage, not of the
 backend.
 
-## Honest status (round 2)
+## Honest status (round 3)
 
 Verified now, by tests in this crate: IR parsing/validation, adaptive breakpoints +
 Row collapse + fluid sizing, all 24 node kinds, theme tokens with per-token
 fallback, the six canonical style effects, conditional `when` visibility with
 bounded dirty rects, light/dark theme + accent, built-in 5x7 font, deterministic
 RGBA8 software raster, incremental dirty-rect diffing with coverage and bound
-tests, interpolation from `StateView`, `FrameView` shape, and the PPM CLI.
-`cargo test` is green with a fixed golden digest and zero warnings.
+tests, interpolation from `StateView`, `FrameView` shape, the PPM CLI, integer
+`fontScale`, high-contrast rendering, the `theme.tokens.contrast` token, and a
+deterministic pre-order accessibility tree with roles, labels, bounds and hidden
+flags. `cargo test` is green with fixed golden digests and zero warnings.
 
 Not implemented / not measured — later rounds: Metal, Vulkan and ANGLE GPU
 backends; any hardware-accelerated presentation; the 120 fps target (**no measured
 fps is claimed here** — there is no GPU backend or device matrix yet, and the
 software raster has not been profiled on any device); particles; real image
 decoding; real font shaping (text is a 5x7 bitmap font by design, so no
-Unicode shaping, no hinting and no subpixel positioning); accessibility (no ARIA
-tree, no focus order, no screen-reader semantics); DPI scaling; native widget
-embedding; blur behind glass (the frosted fill is a colour blend, not a blur);
-GPU-side shadows. Bitmap glyphs are blocky by design. PPM drops alpha because all
-palette colours are opaque.
+Unicode shaping, no hinting and no subpixel positioning); OS screen-reader
+integration (the R3 tree is data only: no ARIA/AT-SPI bridge, no focus order,
+no hit testing and no live announcements); DPI scaling (`fontScale` scales
+logical pixels, not physical DPI); native widget embedding; blur behind glass
+(the frosted fill is a colour blend, not a blur); GPU-side shadows. Bitmap
+glyphs are blocky by design. PPM drops alpha because all palette colours are
+opaque.
 
 ## Gaps / known limits
 
@@ -155,5 +200,6 @@ palette colours are opaque.
 - `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient with the GPU backend`.
 - `shortcut: glass is a colour blend, not a real blur (a blur needs a render target)`.
 - `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
+- `shortcut: the accessibility tree is layout-derived data, upgrade to a platform bridge when a native adapter exists`.
 - No cross-repo runtime link: the adapter crate's `FrameView` is matched by layout,
   not shared by type. That is intentional per `ADAPTER_CONTRACT.md`.

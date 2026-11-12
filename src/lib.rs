@@ -6,19 +6,22 @@
 //! queries (`theme.mode == "system"` deterministically resolves to light).
 //!
 //! R2 adds theme tokens, canonical style effects, conditional `when` visibility,
-//! sixteen new node kinds and a fixed-timestep animation clock. All of them are
+//! sixteen new node kinds and a fixed-timestep animation clock. R3 adds optional
+//! accessibility props and a data-only accessibility tree. All of them are
 //! opt-in: a v0.1 IR renders byte-identically to round 1.
 
+pub mod a11y;
 pub mod anim;
 pub mod font;
 pub mod ir;
 pub mod layout;
 pub mod raster;
 
+pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use anim::{Animator, Curve};
 pub use ir::{
-    parse_ir, Action, Align, Event, Ir, IrError, Kind, Node, Op, Props, StateDecl, StateValue,
-    StateView, Theme, ThemeMode, ThemeTokens, ValueType,
+    parse_ir, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props, Role, StateDecl,
+    StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
 };
 pub use layout::{
     layout, layout_at, Breakpoint, Control, Direction, Effects, LaidOut, Palette, Rect, SETTLED_MS,

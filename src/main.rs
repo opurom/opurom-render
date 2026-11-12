@@ -1,10 +1,12 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--a11y out.json]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
+//! `--a11y` additionally writes the deterministic R3 accessibility tree.
 
 use opurom_render::{
-    digest_hex, parse_ir, IrError, Renderer, StateValue, StateView, ValueType, SETTLED_MS,
+    a11y_json_at, digest_hex, parse_ir, IrError, Renderer, StateValue, StateView, ValueType,
+    SETTLED_MS,
 };
 use std::{env, fs, process};
 
@@ -34,7 +36,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick ms] [--a11y out.json]"
                 .to_string(),
         );
     }
@@ -50,6 +52,7 @@ fn run() -> Result<(), String> {
     let mut state = StateView::from_ir(&ir);
     // Animation clock position in milliseconds (R2).
     let mut elapsed_ms: i64 = SETTLED_MS;
+    let mut a11y_path: Option<String> = None;
 
     let mut i = 4usize;
     while i < args.len() {
@@ -78,9 +81,16 @@ fn run() -> Result<(), String> {
                     .map_err(|_| format!("invalid tick {:?}: expected milliseconds", spec))?;
                 i += 2;
             }
+            "--a11y" => {
+                let spec = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--a11y requires an output JSON path".to_string())?;
+                a11y_path = Some(spec.clone());
+                i += 2;
+            }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value or --tick ms"
+                    "unexpected argument {other:?}: expected --state name=value, --tick ms or --a11y out.json"
                 ));
             }
         }
@@ -95,6 +105,10 @@ fn run() -> Result<(), String> {
         ppm.extend_from_slice(&px[..3]);
     }
     fs::write(&args[3], ppm).map_err(|e| format!("cannot write {:?}: {e}", args[3]))?;
+    if let Some(path) = a11y_path {
+        let json = a11y_json_at(&ir, &state, width, height, elapsed_ms);
+        fs::write(&path, json).map_err(|e| format!("cannot write {:?}: {e}", path))?;
+    }
 
     println!("digest={}", digest_hex(&frame.pixels));
     println!("dirty={}", frame.dirty.len());
