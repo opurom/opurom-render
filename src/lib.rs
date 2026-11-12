@@ -180,7 +180,14 @@ impl Renderer {
 fn diff_rects(prev: &[u8], next: &[u8], width: u32, height: u32) -> Vec<DirtyRect> {
     let w = width as usize;
     let h = height as usize;
-    let full = || vec![DirtyRect { x: 0, y: 0, w: width, h: height }];
+    let full = || {
+        vec![DirtyRect {
+            x: 0,
+            y: 0,
+            w: width,
+            h: height,
+        }]
+    };
     if prev.len() != next.len() || next.len() != w * h * 4 {
         return full();
     }
@@ -318,9 +325,9 @@ mod tests {
                 let i = (y as usize * w as usize + x as usize) * 4;
                 if a[i..i + 4] != b[i..i + 4] {
                     assert!(
-                        rects.iter().any(|r| {
-                            x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
-                        }),
+                        rects
+                            .iter()
+                            .any(|r| { x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h }),
                         "changed pixel ({x},{y}) not covered by {rects:?}"
                     );
                 }

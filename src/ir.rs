@@ -254,11 +254,7 @@ fn object<'a>(v: &'a Value, what: &str) -> Result<&'a Map<String, Value>, IrErro
         .ok_or_else(|| bad(format!("{what} must be a JSON object")))
 }
 
-fn required<'a>(
-    o: &'a Map<String, Value>,
-    key: &str,
-    what: &str,
-) -> Result<&'a Value, IrError> {
+fn required<'a>(o: &'a Map<String, Value>, key: &str, what: &str) -> Result<&'a Value, IrError> {
     o.get(key)
         .ok_or_else(|| bad(format!("{what} is missing required field {key:?}")))
 }
@@ -284,11 +280,7 @@ fn integer(v: &Value, what: &str) -> Result<i64, IrError> {
     Err(bad(format!("{what} must be an integer")))
 }
 
-fn opt_integer(
-    o: &Map<String, Value>,
-    key: &str,
-    what: &str,
-) -> Result<Option<i64>, IrError> {
+fn opt_integer(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<i64>, IrError> {
     match o.get(key) {
         Some(v) => {
             let n = integer(v, &format!("{what}.{key}"))?;
@@ -301,11 +293,7 @@ fn opt_integer(
     }
 }
 
-fn opt_string(
-    o: &Map<String, Value>,
-    key: &str,
-    what: &str,
-) -> Result<Option<String>, IrError> {
+fn opt_string(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<String>, IrError> {
     match o.get(key) {
         Some(v) => v
             .as_str()
@@ -325,7 +313,9 @@ fn state_value(v: &Value, expected: Option<ValueType>, what: &str) -> Result<Sta
     };
     if let Some(t) = expected {
         if value.typ() != t {
-            return Err(bad(format!("{what} type does not match declared type {t:?}")));
+            return Err(bad(format!(
+                "{what} type does not match declared type {t:?}"
+            )));
         }
     }
     Ok(value)
@@ -353,7 +343,11 @@ fn state_decls(v: &Value) -> Result<Vec<StateDecl>, IrError> {
             "string" => ValueType::Str,
             other => return Err(bad(format!("{what}.type has unknown value {other:?}"))),
         };
-        let init = state_value(required(o, "init", &what)?, Some(typ), &format!("{what}.init"))?;
+        let init = state_value(
+            required(o, "init", &what)?,
+            Some(typ),
+            &format!("{what}.init"),
+        )?;
         out.push(StateDecl { name, typ, init });
     }
     Ok(out)
@@ -405,10 +399,11 @@ fn events(o: &Map<String, Value>, decls: &[StateDecl]) -> Result<Vec<Event>, IrE
             other => return Err(bad(format!("{what}.op has unknown value {other:?}"))),
         };
         let target = string_field(a, "target", &what)?;
-        let decl = decls
-            .iter()
-            .find(|d| d.name == target)
-            .ok_or_else(|| bad(format!("{what}.target refers to undeclared state {target:?}")))?;
+        let decl = decls.iter().find(|d| d.name == target).ok_or_else(|| {
+            bad(format!(
+                "{what}.target refers to undeclared state {target:?}"
+            ))
+        })?;
         let value = match a.get("value") {
             Some(v) => Some(state_value(v, None, &format!("{what}.value"))?),
             None => None,
@@ -416,7 +411,9 @@ fn events(o: &Map<String, Value>, decls: &[StateDecl]) -> Result<Vec<Event>, IrE
         match op {
             Op::Add => {
                 if decl.typ != ValueType::Int || !matches!(value, Some(StateValue::Int(_))) {
-                    return Err(bad(format!("{what}: add needs an int target and numeric value")));
+                    return Err(bad(format!(
+                        "{what}: add needs an int target and numeric value"
+                    )));
                 }
             }
             Op::Toggle => {
@@ -456,8 +453,7 @@ fn node(v: &Value, next_id: &mut u32, decls: &[StateDecl]) -> Result<Node, IrErr
         .checked_add(1)
         .ok_or_else(|| bad("tree node id overflow"))?;
     let kind_s = string_field(o, "kind", "tree node")?;
-    let kind = Kind::parse(&kind_s)
-        .ok_or_else(|| bad(format!("unknown node kind {kind_s:?}")))?;
+    let kind = Kind::parse(&kind_s).ok_or_else(|| bad(format!("unknown node kind {kind_s:?}")))?;
     let p = props(object(required(o, "props", "tree node")?, "props")?)?;
     let children_v = required(o, "children", "tree node")?
         .as_array()
@@ -466,7 +462,10 @@ fn node(v: &Value, next_id: &mut u32, decls: &[StateDecl]) -> Result<Node, IrErr
     for c in children_v {
         children.push(node(c, next_id, decls)?);
     }
-    let e = events(object(required(o, "events", "tree node")?, "events")?, decls)?;
+    let e = events(
+        object(required(o, "events", "tree node")?, "events")?,
+        decls,
+    )?;
     Ok(Node {
         id,
         kind,
@@ -500,8 +499,7 @@ fn theme(v: &Value) -> Result<Theme, IrError> {
 
 /// Parse and fully validate one IR v0.1 document.
 pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
-    let v: Value =
-        serde_json::from_str(text).map_err(|e| bad(format!("invalid IR JSON: {e}")))?;
+    let v: Value = serde_json::from_str(text).map_err(|e| bad(format!("invalid IR JSON: {e}")))?;
     let o = object(&v, "IR root")?;
     let version = string_field(o, "ir", "IR root")?;
     if version != "0.1" {

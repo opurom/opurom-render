@@ -195,12 +195,8 @@ fn natural_h(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
     let scale = font_scale(&n.props, 16);
     match n.kind {
         Kind::Text => font::GLYPH_H.saturating_mul(scale),
-        Kind::Button => font::GLYPH_H
-            .saturating_mul(scale)
-            .saturating_add(20),
-        Kind::Input => font::GLYPH_H
-            .saturating_mul(scale)
-            .saturating_add(20),
+        Kind::Button => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
+        Kind::Input => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
         Kind::Image => 64,
         Kind::Spacer => 8,
         _ => container_extent(n, bp, state, false),
@@ -386,10 +382,7 @@ fn place(
         } else {
             (c.props.width, c.props.height)
         };
-        let main = main_override
-            .unwrap_or(sizes[i])
-            .min(content_main)
-            .max(0);
+        let main = main_override.unwrap_or(sizes[i]).min(content_main).max(0);
         let cross = cross_override
             .unwrap_or_else(|| {
                 if c.kind.is_leaf() {
