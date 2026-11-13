@@ -113,8 +113,9 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   borders, gradients, shadows, glass fills, supersampled anti-aliased glyphs,
   opaque RGBA with integer alpha blending, the eight data primitive drawings and
   exact command recording. Text coverage is 4x4 bilinear supersampling of the
-  5x7 pattern with a ~1 px feather; advance metrics, line wrapping and SVG
-  metrics are unchanged. The rasterizer operates on the built-in bitmap pattern with deterministic integer coverage.
+  5x7 pattern with a ~1 px feather; advance metrics and SVG metrics are
+  unchanged. The rasterizer operates on the built-in bitmap pattern with
+  deterministic integer coverage.
 - `src/effects.rs` — integer RGBA framebuffer effects: separable box blur,
   silhouette shadow/glow, frosted backdrop glass and a specular liquid gradient.
 - `src/particles.rs` — the opt-in particle field: bounded integer parameters,
@@ -130,6 +131,17 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   and the shared `role_of` helper used by the SVG `data-role` backend.
 - `src/svg.rs` — deterministic SVG 1.1 vector snapshot of the same layout.
 - `src/main.rs` — the CLI described above.
+
+## Text wrapping and clipping
+
+A text node whose measured glyph width exceeds its laid-out rectangle is broken
+into lines that fit the node's inner width: the break is taken at a space where
+one exists and a word longer than the line is hard-broken. The resulting lines
+are stacked inside the node, and any glyph pixel outside the node rectangle is
+not painted. This reuses the renderer's existing canvas clip, so an overflowing
+line is clipped and a node too short for its wrapped lines clips the excess
+rather than overlapping the next node. Text that already fits keeps its
+historical single-line placement, so the pinned golden frames remain byte-identical.
 
 ## Interactive UI features (IR_ADDITIONS)
 
