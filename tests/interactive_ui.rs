@@ -579,6 +579,82 @@ fn add_without_value_or_value_from_is_rejected() {
 }
 
 #[test]
+fn sub_action_parses_and_subtracts_state_at_event_time() {
+    let ir = ir_of(
+        r##"{
+  "ir": "0.1", "app": "E",
+  "state": [
+    { "name": "total", "type": "int", "init": 10 },
+    { "name": "sum", "type": "int", "init": 10 },
+    { "name": "step", "type": "int", "init": 3 }
+  ],
+  "tree": { "id": 0, "kind": "Button", "props": { "label": "go" }, "children": [],
+    "events": { "tap": { "actions": [
+      { "op": "sub", "target": "total", "valueFrom": "step" },
+      { "op": "add", "target": "sum", "valueFrom": "step" }
+    ] } } },
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
+}"##,
+    );
+    let actions = &ir.tree.events[0].actions;
+    assert_eq!(actions[0].op, Op::Sub);
+    assert_eq!(actions[0].target, "total");
+    assert_eq!(actions[0].value, None);
+    assert_eq!(actions[0].value_from.as_deref(), Some("step"));
+    assert_eq!(actions[1].op, Op::Add);
+
+    // Hosts apply the parsed actions against the current state view.
+    fn int(view: &StateView, name: &str) -> i64 {
+        match view.get(name) {
+            Some(StateValue::Int(n)) => *n,
+            other => panic!("expected int state {name}, got {other:?}"),
+        }
+    }
+    let mut state = StateView::from_ir(&ir);
+    for action in actions {
+        let rhs = match action.value.as_ref() {
+            Some(StateValue::Int(n)) => *n,
+            _ => int(&state, action.value_from.as_deref().unwrap()),
+        };
+        let next = if action.op == Op::Sub {
+            int(&state, &action.target).saturating_sub(rhs)
+        } else {
+            int(&state, &action.target).saturating_add(rhs)
+        };
+        state.set(action.target.clone(), StateValue::Int(next));
+    }
+    assert_eq!(state.get("total"), Some(&StateValue::Int(7)), "10 - 3 = 7");
+    assert_eq!(state.get("sum"), Some(&StateValue::Int(13)), "10 + 3 = 13");
+}
+
+#[test]
+fn sub_without_value_or_value_from_is_rejected() {
+    let missing = r##"{
+  "ir": "0.1", "app": "E",
+  "state": [ { "name": "a", "type": "int", "init": 1 }, { "name": "b", "type": "int", "init": 2 } ],
+  "tree": { "id": 0, "kind": "Button", "props": { "label": "go" }, "children": [],
+    "events": { "tap": { "op": "sub", "target": "a" } } },
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
+}"##;
+    let err = parse_ir(missing).expect_err("a sub with no value must be rejected");
+    assert!(err.to_string().contains("sub needs"));
+
+    let non_int = missing.replace(
+        r#"{ "op": "sub", "target": "a" }"#,
+        r#"{ "op": "sub", "target": "a", "value": "x", "valueFrom": "b" }"#,
+    );
+    let err = parse_ir(&non_int).expect_err("a non-int sub value must be rejected");
+    assert!(err.to_string().contains("sub needs"));
+
+    let bool_target = missing.replace(
+        r#"{ "name": "a", "type": "int", "init": 1 }"#,
+        r#"{ "name": "a", "type": "bool", "init": false }"#,
+    );
+    let err = parse_ir(&bool_target).expect_err("a sub on a bool target must be rejected");
+    assert!(err.to_string().contains("sub needs"));
+}
+
+#[test]
 fn value_from_type_mismatch_is_rejected() {
     let bad = r##"{
   "ir": "0.1", "app": "E",
