@@ -36,8 +36,8 @@ pub mod svg;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use anim::{
-    choose_quality, Animator, Curve, GestureAnim, Particle, ParticleSystem, Quality, Transition,
-    TransitionKind, ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, TRANSITION_MS,
+    choose_quality, Animator, Curve, GestureAnim, Particle, ParticleSystem, Quality, StepMode,
+    Transition, TransitionKind, ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, TRANSITION_MS,
 };
 pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
 pub use effects::{
