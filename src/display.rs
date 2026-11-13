@@ -1,4 +1,4 @@
-//! Deterministic R6 display list: the exact raster commands in draw order.
+//! Deterministic display list: the exact raster commands in draw order.
 //!
 //! The JSON shape is intentionally fixed so the independent GPU crate can parse
 //! it with a small standard-library parser and no extra dependency.
@@ -97,7 +97,7 @@ fn bad(message: impl Into<String>) -> IrError {
 
 fn validate_coord(value: i64, what: &str) -> Result<(), IrError> {
     if !(-COORD_LIMIT..=COORD_LIMIT).contains(&value) {
-        return Err(bad(format!("{what} {value} exceeds the R6 integer range")));
+        return Err(bad(format!("{what} {value} exceeds the integer range")));
     }
     Ok(())
 }
@@ -210,13 +210,13 @@ impl DisplayList {
             || self.height > MAX_DIMENSION
         {
             return Err(bad(format!(
-                "invalid R6 viewport {}x{}: dimensions must be 1..={MAX_DIMENSION}",
+                "invalid viewport {}x{}: dimensions must be 1..={MAX_DIMENSION}",
                 self.width, self.height
             )));
         }
         if self.commands.len() > MAX_COMMANDS {
             return Err(bad(format!(
-                "R6 display list has too many commands: {}",
+                "display list has too many commands: {}",
                 self.commands.len()
             )));
         }

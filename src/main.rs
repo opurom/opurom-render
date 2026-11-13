@@ -2,9 +2,9 @@
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
-//! `--a11y` additionally writes the deterministic R3 accessibility tree,
+//! `--a11y` additionally writes the deterministic accessibility tree,
 //! `--svg` a deterministic SVG 1.1 vector snapshot, and `--commands` the exact
-//! R6 raster display list plus optional R9 effect commands. `--transition` composes the frame at tick 0 with the
+//! raster display list plus optional effect commands. `--transition` composes the frame at tick 0 with the
 //! settled frame; the stdout shape is unchanged.
 
 use opurom_render::{
@@ -53,7 +53,7 @@ fn run() -> Result<(), String> {
         .map_err(|e| format!("cannot read IR file {:?}: {e}", args[0]))?;
     let ir = parse_ir(&text).map_err(|e: IrError| e.to_string())?;
     let mut state = StateView::from_ir(&ir);
-    // Animation clock position in milliseconds (R2); also drives R5 transitions.
+    // Animation clock position in milliseconds; also drives transitions.
     let mut elapsed_ms: i64 = SETTLED_MS;
     let mut transition_kind: Option<TransitionKind> = None;
     let mut a11y_path: Option<String> = None;

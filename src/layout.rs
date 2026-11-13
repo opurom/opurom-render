@@ -46,7 +46,7 @@ pub enum Direction {
     Horizontal,
 }
 
-/// R2 style effects. Every value is integer-only.
+/// Style effects. Every value is integer-only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Effects {
     /// Two-stop linear gradient (top to bottom).
@@ -95,7 +95,7 @@ pub enum Control {
         selected: usize,
     },
     Spinner,
-    // R4 distinct primitives: each carries the data its raster routine needs.
+    // Data primitives: each carries the data its raster routine needs.
     Table {
         columns: i64,
         rows: i64,
@@ -119,8 +119,8 @@ pub enum Control {
     Tooltip {
         text: String,
     },
-    // R10 extended primitive: its code and integer series drive the drawing.
-    R10 {
+    // Extended primitive: its code and integer series drive the drawing.
+    Extended {
         code: u16,
         values: Vec<i64>,
     },
@@ -142,7 +142,7 @@ pub struct LaidOut {
     pub text_scale: i64,
     pub text_align: Align,
     pub effects: Effects,
-    /// R8 typed software effects, in IR array order.
+    /// Typed software effects, in IR array order.
     pub visual_effects: Vec<VisualEffect>,
     pub control: Option<Control>,
     /// Clip rectangle inherited from a `Scroll` viewport.
@@ -184,7 +184,7 @@ impl Palette {
                 Rgba::rgb(0xd8, 0xdc, 0xe4),
             ),
         };
-        // R2 tokens override the mode defaults; missing tokens fall back to them.
+        // Tokens override the mode defaults; missing tokens fall back to them.
         Palette {
             bg,
             fg: theme.tokens.on_surface.unwrap_or(fg),
@@ -594,7 +594,7 @@ fn control_of(n: &Node, state: &StateView) -> Option<Control> {
                     .unwrap_or(""),
             ),
         }),
-        Kind::Extended(code) => Some(Control::R10 {
+        Kind::Extended(code) => Some(Control::Extended {
             code,
             values: n.props.values.clone(),
         }),

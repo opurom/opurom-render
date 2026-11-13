@@ -1,22 +1,21 @@
-//! R10 extended primitive library: 68 additional DISTINCT drawn widget kinds.
+//! Extended primitive library: 68 additional DISTINCT drawn widget kinds.
 //!
 //! Each [`Spec`] in [`SPECS`] names one primitive kind, its catalog family, a
 //! documented prop schema, an a11y default role and one of 25 distinct
 //! geometric motifs. [`draw`] renders the motif plus a unique identity band
 //! derived from the kind's code. Codes are unique, so no two kinds coincide.
 //!
-//! Honest scope: one deterministic software drawing per kind, integer-only
-//! (`i64`/`i128`), no wall clock, no randomness, no new crate. There is no real
-//! font shaping, no image decoding, no platform-native widget and no frame-rate
-//! claim. Props are validated by the compiler and parsed into `ir::Props`; the
-//! geometry uses the `values` series when present and otherwise a deterministic
-//! integer sequence seeded by the kind code.
+//! Each kind has one deterministic software drawing, integer-only
+//! (`i64`/`i128`), no wall clock, no randomness and no new crate. Props are
+//! validated by the compiler and parsed into `ir::Props`; the geometry uses the
+//! `values` series when present and otherwise a deterministic integer sequence
+//! seeded by the kind code.
 
 use crate::ir::Role;
 use crate::raster::Canvas;
 use crate::{Rect, Rgba};
 
-/// Number of R10 extended primitive kinds.
+/// Number of extended primitive kinds.
 pub const COUNT: usize = 68;
 
 const INK: Rgba = Rgba::rgb(0x1b, 0x1f, 0x27);

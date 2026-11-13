@@ -1,4 +1,4 @@
-//! R4 deterministic SVG 1.1 vector backend: a second *software* backend that
+//! Deterministic SVG 1.1 vector backend: a second *software* backend that
 //! snapshots the same `layout_at` boxes into vector elements. This is NOT a
 //! GPU backend (no Metal/Vulkan/ANGLE), does no font shaping and decodes no
 //! images: `<text>` uses the built-in 5x7 font metrics with a generic monospace

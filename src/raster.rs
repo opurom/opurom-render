@@ -1,5 +1,5 @@
-//! Deterministic RGBA8 software raster: rounded fills/borders, R2 effects,
-//! bitmap text and R8 framebuffer effects. Every pixel write is integer
+//! Deterministic RGBA8 software raster: rounded fills/borders, canonical style
+//! effects, bitmap text and framebuffer effects. Every pixel write is integer
 //! arithmetic; the frame is opaque.
 
 use crate::display::Command;
@@ -9,7 +9,7 @@ use crate::{font, Align, Kind, LaidOut, Rect, Rgba};
 /// Fixed-point unit: 1024 == fully opaque.
 const UNIT: i64 = 1024;
 
-// R4 primitives use theme-independent, deterministic ink colours. They are
+// Data primitives use theme-independent, deterministic ink colours. They are
 // only ever drawn for the eight new kinds, so they cannot affect v0.1 goldens.
 const INK: Rgba = Rgba::rgb(0x1b, 0x1f, 0x27);
 const LINE: Rgba = Rgba::rgb(0x90, 0x98, 0xa8);
@@ -21,7 +21,7 @@ pub struct Canvas {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
-    /// Optional clip rectangle (R2 `Scroll` viewport).
+    /// Optional clip rectangle (`Scroll` viewport).
     pub clip: Option<Rect>,
     capture: bool,
     commands: Vec<Command>,
@@ -44,7 +44,7 @@ impl Canvas {
         }
     }
 
-    /// Capture the exact high-level draw commands for the R6 display list.
+    /// Capture the exact high-level draw commands for the display list.
     pub fn capturing(width: u32, height: u32, bg: Rgba) -> Canvas {
         let mut canvas = Canvas::new(width, height, bg);
         canvas.capture = true;
@@ -380,7 +380,7 @@ fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
 }
 
 /// Draw one laid-out node. Box first, glyphs on top; children are drawn later
-/// because `layout()` emits pre-order. R8 local effects use a frame snapshot
+/// because `layout()` emits pre-order. Local effects use a frame snapshot
 /// taken before this node; whole-frame blur passes run after all nodes.
 pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
     let prev_clip = canvas.clip;
@@ -1008,7 +1008,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
             let ty = body.y + ((body.h - font::GLYPH_H * scale) / 2).max(0);
             draw_glyphs(canvas, text, tx, ty, scale, on);
         }
-        (Some(Control::R10 { code, values }), _) => {
+        (Some(Control::Extended { code, values }), _) => {
             crate::primitives::draw(canvas, *code, values, n.rect, accent, alpha);
         }
         // Hand-built LaidOut nodes may carry no control; still draw the kind.

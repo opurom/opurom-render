@@ -1,4 +1,4 @@
-//! R3 data-only accessibility tree: pre-order JSON with integer bounds.
+//! Data-only accessibility tree: pre-order JSON with integer bounds.
 //!
 //! This is a deterministic description of the rendered layout, not an OS
 //! screen-reader integration. Hidden `when` nodes are included with
@@ -31,12 +31,12 @@ fn default_role(n: &Node) -> Role {
         Kind::Image => Role::Image,
         Kind::Switch | Kind::Checkbox => Role::Checkbox,
         Kind::Slider => Role::Slider,
-        // R4 primitives: explicit, honest defaults from the R3 role set.
+        // Data primitives: explicit defaults from the standard role set.
         Kind::Chart | Kind::Map => Role::Image,
         Kind::RichText | Kind::Tooltip => Role::Text,
         Kind::Player => Role::Button,
         Kind::Table | Kind::Calendar | Kind::Menu => Role::None,
-        // R10 extended primitives: each spec documents its default role.
+        // Extended primitives: each spec documents its default role.
         Kind::Extended(code) => crate::primitives::role_of(code),
         _ => Role::None,
     }

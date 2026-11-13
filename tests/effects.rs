@@ -1,5 +1,5 @@
-//! R8 software effects: prop schema, determinism, distinct pixels, clamping,
-//! R9 effect-command export and V0.1 golden regressions.
+//! Software effects: prop schema, determinism, distinct pixels, clamping,
+//! effect-command export and V0.1 golden regressions.
 
 use opurom_render::{
     digest_hex, layout, parse_ir, Renderer, Rgba, StateValue, StateView, VisualEffectKind,
@@ -63,7 +63,7 @@ fn ir_of(effects: Option<&str>) -> String {
 }
 
 fn render_pixels(ir_text: &str, count: i64, width: u32, height: u32) -> Vec<u8> {
-    let ir = parse_ir(ir_text).expect("R8 fixture IR must parse");
+    let ir = parse_ir(ir_text).expect("effect fixture IR must parse");
     let mut state = StateView::from_ir(&ir);
     state.set("n", StateValue::Int(count));
     Renderer::new(width, height).pixels(&ir, &state)
@@ -405,6 +405,6 @@ fn cli_commands_accepts_visual_effects() {
     let json = fs::read_to_string(&commands).unwrap();
     assert!(
         json.contains("\"kind\":\"effect_blur\",\"radius\":3"),
-        "R9 blur command missing: {json}"
+        "blur command missing: {json}"
     );
 }

@@ -1,4 +1,4 @@
-//! R10 extended primitive tests: 68 additional DISTINCT drawn widget kinds.
+//! Extended primitive tests: 68 additional DISTINCT drawn widget kinds.
 //!
 //! Every kind is checked against the documented fallback, against the other
 //! new kinds, and across repeated runs; a single test enumerates all new kinds
@@ -11,7 +11,7 @@ use opurom_render::{digest_hex, parse_ir, svg, Kind, Renderer, Role, StateView};
 use std::collections::HashSet;
 use std::{fs, path::PathBuf, process::Command};
 
-/// The 32 R1-R9 primitives, unchanged by R10.
+/// The 32 pre-existing primitives, unchanged by the extended library.
 const EXISTING: &[&str] = &[
     "Column",
     "Row",
@@ -172,7 +172,7 @@ fn r10_new_kinds_differ_from_all_existing_kinds() {
     for spec in SPECS.iter() {
         assert!(
             !existing.contains(&digest_of_kind(spec.name)),
-            "{} collided with an R1-R9 primitive",
+            "{} collided with an existing primitive",
             spec.name
         );
     }
@@ -231,7 +231,7 @@ fn r10_control_carries_code_and_series() {
     let laid = layout(&ir, &StateView::from_ir(&ir), 200, 140);
     assert_eq!(
         laid[0].control,
-        Some(Control::R10 {
+        Some(Control::Extended {
             code: 7,
             values: vec![3, 8, 5]
         })

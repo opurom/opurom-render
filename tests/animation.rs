@@ -1,4 +1,4 @@
-//! R5 renderer tests: deterministic page transitions, gesture progress,
+//! Animation renderer tests: deterministic page transitions, gesture progress,
 //! fixed-seed particles, caller-supplied quality tiers and golden regressions.
 
 use opurom_render::{

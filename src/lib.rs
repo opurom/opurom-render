@@ -5,20 +5,23 @@
 //! integer-only arithmetic, sorted state map, no wall-clock time, no unseeded
 //! randomness, no host queries (`theme.mode == "system"` resolves to light).
 //!
-//! R2 adds theme tokens, canonical style effects, conditional `when` visibility,
-//! sixteen new node kinds and a fixed-timestep animation clock. R3 adds optional
-//! accessibility props and a data-only accessibility tree. R4 adds eight more
-//! distinct primitives and a deterministic SVG 1.1 vector backend (a second
-//! software backend, not a GPU backend). R5 adds deterministic page transitions,
-//! gesture progress, fixed-seed particles and caller-supplied quality tiers.
-//! R6 adds an exact display-list snapshot of the software raster stage. R8
-//! adds five optional deterministic framebuffer effects. All of them are
-//! opt-in: a v0.1 IR renders byte-identically to round 1, and effect-free
-//! `--commands` output stays byte-identical to R6. R9 adds optional effect
-//! commands that reproduce those effects on the Metal compute backend. R10 adds
-//! 68 more distinct drawn primitives for a 100-primitive library, each with a
-//! deterministic integer-only drawing, a documented prop schema and an a11y
-//! default role; none of them change an R1-R9 frame.
+//! The interactive UI layer adds theme tokens, canonical style effects, conditional
+//! `when` visibility, sixteen new node kinds and a fixed-timestep animation clock.
+//! The component catalog adds optional accessibility props and a data-only
+//! accessibility tree. The async language layer adds eight more distinct
+//! primitives and a deterministic SVG 1.1 vector backend (a second software
+//! backend, not a GPU backend). The GPU and transport layer adds deterministic page
+//! transitions, gesture progress, fixed-seed particles and caller-supplied quality
+//! tiers. The platform delivery layer adds an exact display-list snapshot of the
+//! software raster stage. The visual fidelity layer adds five optional
+//! deterministic framebuffer effects. All of them are opt-in: a v0.1 IR renders
+//! byte-identically to the core release, and effect-free `--commands` output stays
+//! byte-identical to the effect-free command stream. The production layer adds
+//! optional effect commands that reproduce those effects on the Metal compute
+//! backend. The component library hardening adds 68 more distinct drawn primitives
+//! for a 100-primitive library, each with a deterministic integer-only drawing, a
+//! documented prop schema and an a11y default role; none of them change an earlier
+//! frame.
 
 pub mod a11y;
 pub mod anim;
@@ -201,7 +204,7 @@ impl Renderer {
     }
 
     /// Record the exact raster commands, including CPU-decomposed glyph blocks,
-    /// plus R9 effect commands in the order the software framebuffer applies
+    /// plus effect commands in the order the software framebuffer applies
     /// them. The software frame and the incremental renderer state are unchanged.
     pub fn display_list_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> DisplayList {
         let pal = Palette::from_theme(&ir.theme);

@@ -1,4 +1,4 @@
-//! R6 display-list serialization, clipping, draw order and CLI regression tests.
+//! Display-list serialization, clipping, draw order and CLI regression tests.
 
 use opurom_render::{
     parse_ir, raster::Canvas, Command as RasterCommand, DisplayList, Ir, Rect, Renderer, Rgba,

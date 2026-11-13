@@ -5,7 +5,7 @@
 //! when the caller ticks it, so two identical tick sequences always produce
 //! identical frame digests.
 //!
-//! R5 transitions compose two existing RGBA frames: `from` is the outgoing
+//! Transitions compose two existing RGBA frames: `from` is the outgoing
 //! page, `to` is the incoming page. Slide translates both pages by an integer
 //! number of columns, fade blends channels in fixed point, and scale draws a
 //! nearest-neighbour copy of the incoming page over the outgoing page.
@@ -123,7 +123,7 @@ impl Default for Animator {
     }
 }
 
-/// Duration of an R5 page transition.
+/// Duration of a page transition.
 pub const TRANSITION_MS: i64 = 320;
 /// Integer coordinate space used by particles before mapping to a frame.
 pub const PARTICLE_FIELD: i64 = 1024;

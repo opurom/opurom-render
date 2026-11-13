@@ -1,4 +1,4 @@
-//! R4 renderer tests: the deterministic SVG 1.1 vector backend and the eight
+//! SVG renderer tests: the deterministic SVG 1.1 vector backend and the eight
 //! new distinct primitives (distinct pixels, deterministic, prop schemas,
 //! a11y roles, 32 primitives, and unchanged v0.1 golden digests).
 

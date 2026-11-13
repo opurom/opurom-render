@@ -1,5 +1,5 @@
-//! R2 renderer tests: theme tokens, canonical effects, conditional `when`
-//! visibility, the sixteen new node kinds and deterministic animation.
+//! Interactive UI renderer tests: theme tokens, canonical effects, conditional
+//! `when` visibility, the sixteen new node kinds and deterministic animation.
 
 use opurom_render::{
     digest_hex, layout, layout_at, parse_ir, Animator, Control, Direction, Ir, Kind, LaidOut,
@@ -500,7 +500,7 @@ fn animation_without_a_change_yields_zero_dirty_rects() {
     assert!(again.dirty.is_empty());
 }
 
-// ------------------------------------------------------------- R2 event shapes
+// ------------------------------------------------------------- event shapes
 
 #[test]
 fn multi_action_and_value_from_events_parse() {

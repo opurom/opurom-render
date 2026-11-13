@@ -2,9 +2,9 @@
 
 Independent Rust crate: IR v0.1 → adaptive layout → deterministic RGBA8 software
 raster → incremental dirty rects, plus a deterministic SVG 1.1 **vector software
-backend**, deterministic R5 animation primitives, an exact R6 display-list
-export and five R8 deterministic framebuffer effects, plus R9 optional effect
-commands that reproduce them on the cross-repo Metal compute backend. This folder is its own
+backend**, deterministic animation primitives, an exact display-list export and
+five deterministic framebuffer effects, plus optional effect commands that
+reproduce them on the cross-repo Metal compute backend. This folder is its own
 git repository; it has no source dependency on
 any other OPUROM layer, only on the frozen IR/ABI contracts
 (`IR_SCHEMA.md`, `ADAPTER_CONTRACT.md`) and local `FrameView` shape
@@ -38,9 +38,9 @@ cargo build --offline
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --svg out.svg
 # writes a deterministic SVG 1.1 snapshot (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 320 240 out.ppm --commands commands.json
-# writes the exact R6 display list (stdout unchanged)
+# writes the exact display list (stdout unchanged)
 ./target/debug/opurom-render tests/fixtures/r9_effect.opuir.json 96 64 fx.ppm --commands fx.commands.json
-# writes the R6 display list plus R9 effect commands (stdout unchanged)
+# writes the display list plus effect commands (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --transition slide --tick 16
 # deterministic transition digest (stdout still exactly digest=... and dirty=...)
 ```
@@ -49,7 +49,7 @@ Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value .
 `--state` repeats; values are parsed against the declared state type. `--tick`
 sets the animation clock position in milliseconds, accepts `0..=4000`, and
 rejects non-numeric or out-of-range values with a readable diagnostic; the
-default is the settled end state, so a v0.1 IR renders exactly as in round 1.
+default is the settled end state, so a v0.1 IR renders exactly as the core release.
 `--transition` is opt-in: the CLI uses the frame at tick 0 as the outgoing page
 and the settled frame as the incoming page, then uses `--tick` as the elapsed
 time of the 320 ms transition. Unknown transition kinds are rejected with exit
@@ -68,13 +68,13 @@ vertical gradients with integer bounds/colours in draw order, plus the viewport
 and opaque background. Bitmap glyph runs are decomposed on the CPU into solid
 rect commands; there is no GPU glyph atlas or GPU text shaping. CPU-only page
 transitions cannot be represented as this display list, so `--commands` and
-`--transition` together fail with a readable diagnostic. R9 adds optional
-effect commands for IR carrying R8 visual effects: `effect_backdrop` and
+`--transition` together fail with a readable diagnostic. The display list adds
+optional effect commands for IR carrying visual effects: `effect_backdrop` and
 `effect_mask` snapshot the frame and the node silhouette, `effect_shadow`,
 `effect_glow`, `effect_glass` and `effect_liquid` carry the clamped integer
 parameters (radius, dx/dy, fixed-point alpha, colour, bounds, shape radius),
 and `effect_blur` is a whole-frame pass appended after all nodes. Effect-free
-IR emits none of them, so the frozen R6 command fixture stays byte-identical.
+IR emits none of them, so the frozen effect-free command fixture stays byte-identical.
 The flag adds no stdout lines and does not change the PPM or golden digests.
 
 ## Architecture
@@ -86,9 +86,9 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
                                                │
                       layout(Ir, StateView, viewport) ──▶ Vec<LaidOut>  (pre-order)
                                                │
-                               ├──▶ raster::Canvas (rounded fills/borders + 5x7 glyphs + local R8 effects) ──▶ final R8 frame blurs ──▶ Vec<u8> RGBA8
+                               ├──▶ raster::Canvas (rounded fills/borders + 5x7 glyphs + local effects) ──▶ final frame blurs ──▶ Vec<u8> RGBA8
                                │                       │
-                               │                       ├──▶ Vec<Command> ──▶ DisplayList JSON (R6)
+                               │                       ├──▶ Vec<Command> ──▶ DisplayList JSON
                                 │                       │
                                 │       Renderer::render diff vs previous buffer ──▶ Frame { dirty }
                                │                       │
@@ -98,7 +98,7 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
 ```
 
 - `src/ir.rs` — strictly validates `ir == "0.1"`, state decls/types/inits, pre-order
-  node ids, the 100 node kinds (32 R1-R9 + 68 R10), known props, event actions
+  node ids, the 100 node kinds (32 core kinds + 68 extended kinds), known props, event actions
   (targets/types) and the
   theme. Unknown props are ignored. Errors are `IrError(String)` values.
 - `src/layout.rs` — pure integer layout. Breakpoints on **logical px**: compact
@@ -111,42 +111,42 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   a–z, 0–9, punctuation). Unsupported codepoints consume a blank advance.
 - `src/raster.rs` — filled rounded rectangles (integer quarter-circle test), 1 px
   borders, gradients, shadows, glass fills, scaled glyph blocks, opaque RGBA with
-  integer alpha blending, the eight R4 primitive drawings and exact R6 command
+  integer alpha blending, the eight data primitive drawings and exact command
   recording.
-- `src/effects.rs` — R8 integer RGBA framebuffer effects: separable box blur,
+- `src/effects.rs` — integer RGBA framebuffer effects: separable box blur,
   silhouette shadow/glow, frosted backdrop glass and a specular liquid gradient.
-- `src/display.rs` — fixed-shape deterministic R6 display-list JSON with integer
+- `src/display.rs` — fixed-shape deterministic display-list JSON with integer
   bounds/colours, draw order, viewport and opaque background.
-- `src/anim.rs` — the fixed-timestep animation clock, spring/ease curves, R5
-  page transitions, gesture progress, fixed-seed particles and quality tiers.
+- `src/anim.rs` — the fixed-timestep animation clock, spring/ease curves, page
+  transitions, gesture progress, fixed-seed particles and quality tiers.
 - `src/lib.rs` — `Rgba`, `StateView`, `Renderer`, `Frame`, `FrameView`, inline FNV-1a
   digest, and row/column dirty-rect diffing.
-- `src/a11y.rs` — R3 pre-order accessibility tree, its deterministic JSON serializer,
+- `src/a11y.rs` — pre-order accessibility tree, its deterministic JSON serializer,
   and the shared `role_of` helper used by the SVG `data-role` backend.
-- `src/svg.rs` — R4 deterministic SVG 1.1 vector snapshot of the same layout.
+- `src/svg.rs` — deterministic SVG 1.1 vector snapshot of the same layout.
 - `src/main.rs` — the CLI described above.
 
-## R2 features (IR_R2_ADDENDUM)
+## Interactive UI features (IR_ADDITIONS)
 
-All R2 fields are **additive and opt-in**. A v0.1 IR file renders byte-identically
-to round 1 — the three golden digests below are unchanged.
+All interactive UI fields are **additive and opt-in**. A v0.1 IR file renders
+byte-identically to the core release — the three golden digests below are unchanged.
 
 | Area | What the renderer does |
 | --- | --- |
 | Theme tokens | `theme.tokens.surface` / `.onSurface` / `.font` override the `mode` defaults; every token falls back independently. The `font` token is recorded but never selects a host font: text always uses the built-in bitmap font. |
 | Style effects | `gradient` (two-stop vertical linear gradient, integer lerp), `glass` (surface blended with the accent), `shadow` (0..8, offset darkening), `opacity` (0..1, exact fixed point 0..1024), `border` (1 px colour), `radius` (rounded corners), `margin`. Effects apply to every kind that owns a box (Container, Card, Button, …). |
 | Conditional visibility | The optional node field `when: "<boolState>"` hides the node **and its subtree** from layout and from the raster while the state is false. A `when` on a non-bool or undeclared state is a parse error. |
-| Node kinds | All 24 R2 kinds render: the eight v0.1 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
+| Node kinds | All 24 interactive UI kinds render: the eight v0.1 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
 | Animation | `animate: spring\|ease\|none` on a node drives an entry animation (box grows from its centre while fading in). The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
 
 Unknown props are ignored and never fatal; an unknown kind degrades instead of
 rejecting the file. Multi-action events (`{"actions": [...]}`) and
-`valueFrom` are accepted as well, so an R2 compiler output renders here.
+`valueFrom` are accepted as well, so a compiler output renders here.
 
-## R3 accessibility (R3_ADDENDUM §2)
+## Accessibility (COMPONENTS_AND_A11Y §2)
 
-All R3 keys are **additive and opt-in**; a v0.1 IR without them renders
-byte-identically to round 1 (the three golden digests below are unchanged).
+All accessibility keys are **additive and opt-in**; a v0.1 IR without them renders
+byte-identically to the core release (the three golden digests below are unchanged).
 
 | Key | Type | Effect |
 | --- | --- | --- |
@@ -180,7 +180,7 @@ screen-reader integration, NO ARIA/AT-SPI bridge, NO focus order or hit
 testing, NO real font shaping, NO DPI scaling (`fontScale` scales logical
 pixels of the built-in bitmap font) and NO GPU backend.
 
-## R4 SVG 1.1 vector backend (R4_ADDENDUM §4)
+## SVG 1.1 vector backend (TOOLCHAIN_AND_PACKAGES §4)
 
 `opurom-render <ir> <w> <h> <out.ppm> --svg <out.svg>` (or the `svg`/`svg_at`
 library functions) writes a **byte-deterministic SVG 1.1 snapshot of the same
@@ -206,23 +206,21 @@ across runs (integer formatting over a deterministic pre-order layout; no time,
 randomness, host queries or external crate). Verified by tests for
 determinism, gradient defs, text, `data-role`, and hidden nodes.
 
-**Honest scope:** the SVG path is a **second software backend**, NOT a
-Metal/Vulkan/ANGLE GPU backend and not a hardware presenter. It does **no real
-font shaping** — `<text>` uses a generic `monospace` face and the built-in
-5x7 font's metrics, so glyph widths/positions are an approximation, not a
-pixel-exact match to the raster — and it does **no image decoding** (box colours
-come from the layout palette; `Image` stays a deterministic placeholder). It is
-a vector *snapshot* of the layout, not a replacement for the RGBA conformance
+The SVG path is a **second software backend**. `<text>` uses a generic `monospace`
+face and the built-in 5x7 font's metrics, so glyph widths/positions are an
+approximation of the raster rather than a pixel-exact match. Box colours come
+from the layout palette; `Image` stays a deterministic placeholder. It is a
+vector *snapshot* of the layout, not a replacement for the RGBA conformance
 oracle.
 
-## R4 eight new distinct primitives (R4_ADDENDUM §4)
+## Eight new distinct primitives (TOOLCHAIN_AND_PACKAGES §4)
 
-R4 adds eight **distinct, drawn** primitives (not aliases and not the
-Container/Text fallback), bringing the total to **32 known node kinds**. Each
-has a documented prop schema, a distinct deterministic raster, an a11y default
-role, and a test asserting its pixels differ from the fallback and are
-deterministic. All are leaves; all new props are optional and opt-in, so a
-v0.1 IR renders byte-identically to round 1.
+Eight **distinct, drawn** primitives (not aliases and not the Container/Text
+fallback) bring the total to **32 known node kinds**. Each has a documented prop
+schema, a distinct deterministic raster, an a11y default role, and a test
+asserting its pixels differ from the fallback and are deterministic. All are
+leaves; all new props are optional and opt-in, so a v0.1 IR renders
+byte-identically to the core release.
 
 | Kind | Prop schema (all optional) | Deterministic drawing | Default a11y role |
 | --- | --- | --- | --- |
@@ -236,17 +234,17 @@ v0.1 IR renders byte-identically to round 1.
 | `Tooltip` | `value` or `label` (text) | rounded dark bubble + downward tail triangle + centered text | `text` |
 
 New typed props: `values` (`Vec<i64>`), `rows` (`Option<i64>`); `columns` and
-`labels` are reused from R2. Unknown props remain ignored; an unknown kind still
-degrades to the documented fallback. The 108-name component catalog gains eight
+`labels` are reused from the interactive UI layer. Unknown props remain ignored;
+an unknown kind still degrades to the documented fallback. The 108-name component catalog gains eight
 names mapping onto these primitives (that catalog lives in the compiler repo,
 outside this crate).
 
-## R5 deterministic animation (R5_ADDENDUM section 3)
+## Deterministic animation (GPU_WINDOW_TRANSPORT section 3)
 
-All R5 animation is additive and opt-in. The fixed-point unit is `ONE = 1024`;
+All animation is additive and opt-in. The fixed-point unit is `ONE = 1024`;
 there are no floats, no `rand` crate, no wall clock and no unseeded randomness.
 The caller supplies every tick, gesture delta, particle seed and frame budget.
-V0.1 IR output without these APIs is byte-identical to round 1.
+V0.1 IR output without these APIs is byte-identical to the core release.
 
 - **Page transitions:** `Transition { kind, progress }` owns `slide`, `fade`
   or `scale`. `tick(dt_ms)` advances progress linearly by
@@ -287,18 +285,16 @@ budget is supplied by the caller** (for example `opurom profile`) and is never
 read from a clock inside the renderer. `opurom profile` remains the measured
 source; this crate makes no measurement and no fps claim.
 
-**Honest scope:** transitions and particles are CPU RGBA software compositing,
-not a GPU compositor; gesture deltas are integers, not real touch hardware;
-quality tiers are a deterministic policy, not runtime device profiling. The
-renderer does not sample `Instant`, system time or GPU counters. No frame-rate
-or fps claim is made. `--a11y` and `--svg` snapshots are unchanged by
-`--transition`.
+Transitions and particles are CPU RGBA software compositing and gesture deltas
+are integers; quality tiers are a deterministic policy, not runtime device
+profiling. The renderer does not sample `Instant`, system time or GPU counters.
+`--a11y` and `--svg` snapshots are unchanged by `--transition`.
 
 ## Determinism guarantee
 
 Same IR + same viewport + same state + same animation tick ⇒ byte-identical RGBA
-pixels on every host (and, for `--svg`, byte-identical SVG). R5 APIs add their
-own explicit inputs: transition ticks, gesture deltas, particle seeds/step
+pixels on every host (and, for `--svg`, byte-identical SVG). The animation APIs
+add their own explicit inputs: transition ticks, gesture deltas, particle seeds/step
 sequences and caller-supplied budgets. Mechanisms: all layout, raster and
 animation arithmetic is integer (`i64`/`i128`, no float ordering, no `f32`
 rounding); state lives in a `BTreeMap`; events are visited in sorted key
@@ -309,7 +305,7 @@ placeholder colour); the animation clock only moves when the caller ticks it,
 so two identical tick sequences produce identical digest sequences. The SVG
 backend applies the same rules to its element/attribute ordering.
 
-Golden digests (unchanged by R2, R3, R4 and R5):
+Golden digests (unchanged by every additive layer):
 
 | Fixture | Viewport | Digest |
 | --- | --- | --- |
@@ -321,9 +317,9 @@ Golden digests (unchanged by R2, R3, R4 and R5):
 layout of `ADAPTER_CONTRACT.md`. It is a local struct: adapters do not gain a
 compile-time dependency on this crate, and this crate does not import theirs.
 
-## R6 GPU display-list proof
+## GPU display-list proof
 
-The R6 GPU backend lives in the independent `opurom-gpu` repository. This crate
+The GPU backend lives in the independent `opurom-gpu` repository. This crate
 exports the exact raster command stream with `--commands`; `opurom-gpu raster
 <commands.json> <out.ppm>` uploads that stream to a real Metal compute kernel,
 dispatches one thread per viewport pixel, reads back RGBA8 and writes the same
@@ -333,18 +329,16 @@ frame is also covered because CPU-decomposed glyph blocks are recorded as solid
 rect commands. This is a real cross-repo GPU/software pixel proof, not a
 self-comparison.
 
-Honest scope: layout, glyph decomposition and page transitions remain CPU-side;
-the GPU kernel executes generic solid/rounded/gradient rectangles only. There is
-no GPU glyph atlas, full-scene GPU text, GPU presentation to a window,
-Vulkan/ANGLE/D3D backend, device matrix or fps claim. `Frame::view()` and dirty
+Layout, glyph decomposition and page transitions remain CPU-side; the GPU kernel
+executes generic solid/rounded/gradient rectangles. `Frame::view()` and dirty
 rects are unchanged; `--transition` composes whole CPU frames and cannot be
-exported as this display list. R9 adds optional effect commands on top of this
-stream; effect-free `--commands` output stays byte-identical to R6.
+exported as this display list. Optional effect commands sit on top of this
+stream; effect-free `--commands` output stays byte-identical.
 
-## R8 deterministic software visual effects
+## Deterministic software visual effects
 
-All R8 effects are **opt-in** through a node's `props.effects` array. Effects
-absent leave the three V0.1 golden digests and the R6 display list unchanged.
+All effects are **opt-in** through a node's `props.effects` array. Effects absent
+leave the three V0.1 golden digests and the display list unchanged.
 Example:
 
 ```json
@@ -380,18 +374,15 @@ threads or external crate is used. Alpha compositing is integer half-up:
 | `blur` | Separable horizontal then vertical integer box blur over the complete RGBA8 frame. Window ends are clamped to the frame, so edge windows have fewer samples and out-of-bounds samples are omitted, not repeated. For each channel, `(sum + count / 2) / count` is the exact half-up rounding rule (ties round up); alpha stays 255. |
 | `shadow` | A radius-softened binary silhouette of the node is offset by `dx`/`dy` and alpha-composited behind the node with a dark colour. |
 | `glow` | The same silhouette is box-blurred; coverage outside the node scales an alpha-composited halo in the node's ink colour. |
-| `glass` | The backdrop snapshot taken before the node is box-blurred and alpha-composited with a translucent tint inside the node's rounded bounds. This replaces the node's opaque fill; child nodes still draw afterwards. The old R2 `glass: true` prop remains a colour blend, not a blur. |
+| `glass` | The backdrop snapshot taken before the node is box-blurred and alpha-composited with a translucent tint inside the node's rounded bounds. This replaces the node's opaque fill; child nodes still draw afterwards. The older `glass: true` prop remains a colour blend, not a blur. |
 | `liquid` | A diagonal triangular specular band, `band = 1024 - abs(3 * t - 1024)` with `t = diagonal * 1024 / (width + height - 2)`, scales a fixed-point white/highlight alpha over the node bounds. |
 
-**Honest scope:** the CPU RGBA implementation is a framebuffer effect path, not
-a compositor layer tree. `liquid` is a stylized specular gradient, not real lens
-refraction or physically based transmission; `glass` uses a framebuffer
-snapshot, not real depth-aware refraction. There is no real-time 120fps claim
-and no measured frame rate. Effects are not represented in the R4 SVG snapshot
-or the R3 a11y tree. R9 adds a Metal compute path for the five effects (see
-below); presentation, GPU text and real lens optics remain out of scope.
+The CPU RGBA implementation is a framebuffer effect path. `liquid` is a stylized
+specular gradient and `glass` uses a framebuffer snapshot. Effects are not
+represented in the SVG snapshot or the a11y tree. A Metal compute path for the
+five effects exists in the GPU repository (see below).
 
-## R9 GPU effect kernels (cross-repo proof)
+## GPU effect kernels (cross-repo proof)
 
 `--commands` now accepts effect IR. The command stream gains seven fixed-shape
 effect commands with integer parameters only: `effect_backdrop` (snapshot the
@@ -417,17 +408,16 @@ cmp cpu.ppm gpu.ppm                # exit 0, byte-identical
 
 Measured result: `cmp` exits 0, both PPMs are 18445 bytes, and the FNV-1a 64
 digest of the PPM bytes is `b493cd0714a4fb64` (all five effect kinds active).
-`tests/r9.rs` also proves the same equality at `64 48`. This is a real
+`tests/gpu_effects.rs` also proves the same equality at `64 48`. This is a real
 comparison against the independent software renderer, not a self-comparison.
 
-**Honest scope:** compute kernels only. There is no GPU presentation to a
-window, no GPU text (glyphs remain CPU-decomposed rects), no Vulkan/ANGLE/D3D
-backend and no fps claim. The CPU renderer remains the reference oracle.
+The GPU path is compute-kernel only: glyphs remain CPU-decomposed rects. The CPU
+renderer remains the reference oracle.
 
-## R10 68 additional distinct primitives (R10_ADDENDUM section 1)
+## 68 additional distinct primitives (COMPONENT_LIBRARY_HARDENING section 1)
 
-R10 extends the library from 116 named components / 32 primitives to **216 named
-components mapped onto 100 DISTINCT primitive kinds**: the 32 R1-R9 kinds plus 68
+The library extends from 116 named components / 32 primitives to **216 named
+components mapped onto 100 DISTINCT primitive kinds**: the 32 core kinds plus 68
 new ones. Each new kind is a real, deterministic software drawing in
 [`src/primitives.rs`](src/primitives.rs) (with its generated
 [`src/primitives/specs.rs`](src/primitives/specs.rs) table), **not** an alias,
@@ -445,10 +435,10 @@ the kind code, so every kind's frame is pairwise-distinct by construction.
 
 Parsed as `Kind::Extended(code)`, each new kind keeps the normal rounded box and
 border, is a leaf, carries its documented prop schema in `primitives::SPECS`, and
-has an explicit default a11y role (one of the R3 seven). The SVG 1.1 backend
-emits the box and the correct `data-role`, and the a11y tree reports the role and
-bounds. `tests/r10.rs` proves all 68 differ from the fallback, from every R1-R9
-kind and from each other, are deterministic across repeated renders and across
+has an explicit default a11y role (one of the seven standard roles). The SVG 1.1
+backend emits the box and the correct `data-role`, and the a11y tree reports the
+role and bounds. `tests/primitives.rs` proves all 68 differ from the fallback,
+from every core kind and from each other, are deterministic across repeated renders and across
 separate CLI processes, and that the three V0.1 golden digests are unchanged.
 
 | Family | Kinds |
@@ -536,18 +526,16 @@ Full per-kind documentation (prop schema, motif, a11y role):
 Common prop schema keys (all optional): `value` (int magnitude, positional),
 `values` (int series, JSON array or comma-separated string), `segments`,
 `columns`, `rows`, `min`, `max`, `size`, `width`, `height`, `labels`, `src`,
-`type`, `color`, plus the R2/R3 generic and accessibility props. `src` is a
-placeholder only: no image is decoded.
+`type`, `color`, plus the generic and accessibility props. `src` is a placeholder
+only: no image is decoded.
 
-**Honest scope:** exactly one deterministic software drawing per kind. There is
-no real font shaping (the built-in 5x7 bitmap font is unchanged), no image
-decoding, no platform-native widget, no OS accessibility bridge, no GPU
-presentation and no frame-rate / 120fps claim. The SVG and a11y backends report
-the box and role for a new kind; they do not vectorise its motif geometry.
+Each kind has exactly one deterministic software drawing. The SVG and a11y
+backends report the box and role for a new kind; they do not vectorise its motif
+geometry.
 
-## Honest status (round 10)
+## Verified status
 
-Verified now, by tests in this crate: IR parsing/validation, adaptive breakpoints +
+Verified by tests in this crate: IR parsing/validation, adaptive breakpoints +
 Row collapse + fluid sizing, all 100 node kinds, theme tokens with per-token
 fallback, the six canonical style effects, conditional `when` visibility with
 bounded dirty rects, light/dark theme + accent, built-in 5x7 font, deterministic
@@ -556,44 +544,28 @@ tests, interpolation from `StateView`, `FrameView` shape, the PPM CLI, integer
 `fontScale`, high-contrast rendering, the `theme.tokens.contrast` token, a
 deterministic pre-order accessibility tree with roles, labels, bounds and hidden
 flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
-`data-role`, hidden markers), eight R4 and 68 R10 distinct deterministic
-primitives, R5 slide/fade/scale frame composition with monotonic ticks and
-settling, gesture digest sequences, fixed-seed particles, quality budget tiers,
-CLI transition validation, exact R6 display-list serialization/clipping/draw order, the five
-R8 software effects with determinism, pairwise distinct pixels, clamping,
-overflow, R9 effect-command export for all five kinds with integer parameters,
-draw order, bounds, R6 fixture invariance, and unchanged V0.1 golden digests.
+`data-role`, hidden markers), eight data primitives and 68 extended primitives as
+distinct deterministic drawings, slide/fade/scale frame composition with monotonic
+ticks and settling, gesture digest sequences, fixed-seed particles, quality budget
+tiers, CLI transition validation, exact display-list serialization/clipping/draw
+order, the five software effects with determinism, pairwise distinct pixels,
+clamping, overflow, effect-command export for all five kinds with integer
+parameters, draw order, bounds, effect-free fixture invariance, and unchanged
+V0.1 golden digests.
 `cargo test --offline` (123 tests) is green with fixed golden digests and zero
 warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
-Not implemented / not measured — later rounds: a Metal/Vulkan/ANGLE GPU raster
-or hardware-accelerated presentation inside this crate (the R6 Metal compute
-path is cross-repo and headless); any fps claim, including a real-time 120fps
-claim (there is no device matrix and the software raster has not been profiled);
-real gesture hardware or an OS gesture recognizer; runtime device profiling in
-the renderer (`opurom profile` remains the measured source); real image
-decoding; real font shaping (text is a 5x7 bitmap font by design, so no Unicode
-shaping, no hinting and no subpixel positioning; the SVG `<text>` is a generic
-monospace approximation); OS screen-reader integration (the R3 tree is data
-only: no ARIA/AT-SPI bridge, no focus order, no hit testing and no live
-announcements); DPI scaling (`fontScale` scales logical pixels, not physical
-DPI); native widget embedding; hardware presentation, GPU text, Vulkan/ANGLE/D3D
-backends and real lens refraction (R11+). The R9 GPU effect path is a headless
-cross-repo compute backend, not a presenter inside this crate. The R2 `glass: true` prop remains a colour blend; the
-R8 `effects` glass path is a real CPU framebuffer blur, not refraction. Bitmap
-glyphs are blocky by design. PPM drops alpha because all palette colours are
-opaque. The SVG backend and R5 animation compositor are software backends, NOT
-Metal/Vulkan/ANGLE GPU backends.
 
-## Gaps / known limits
+
+## Implementation shortcuts
 
 - `shortcut: 5x7 ASCII-only bitmap font, upgrade to a shaped font atlas when a GPU glyph path exists`.
 - `shortcut: Image renders a deterministic colour placeholder, upgrade when resource loading exists`.
 - `shortcut: dirty rects are capped at 64 (fallback: one full-frame rect), refine with a tile quadtree when a real presenter exists`.
 - `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient when the IR supports it`.
-- `shortcut: R2 glass is a colour blend; R8 glass blurs a framebuffer snapshot, upgrade to compositor layers and real refraction in R11+`.
+- `shortcut: the legacy `glass: true` prop is a colour blend; the `effects` glass path blurs a framebuffer snapshot, upgrade to compositor layers and real refraction`.
 - `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
-- `shortcut: R5 transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.
+- `shortcut: transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.
 - `shortcut: gesture input is integer L1 deltas, upgrade when real hardware gesture events exist`.
 - `shortcut: particles are fixed-seed 2x2 overlays, upgrade when a GPU particle path exists`.
 - `shortcut: quality is a caller-supplied budget policy, upgrade when profile feedback is wired into the host`.

@@ -3,9 +3,10 @@
 //! JSON is parsed into `serde_json::Value` and then checked field by field, so a
 //! malformed document always produces a readable `IrError` instead of a panic.
 //!
-//! R2/R3 are additive: `theme.tokens`, the optional node field `when`, the
-//! canonical style props, sixteen new node kinds and the accessibility props
-//! are accepted. R8 adds an optional `effects` array of typed software effects.
+//! The interactive UI and component catalog layers are additive: `theme.tokens`,
+//! the optional node field `when`, the canonical style props, sixteen new node
+//! kinds and the accessibility props are accepted. The visual fidelity layer
+//! adds an optional `effects` array of typed software effects.
 //! Unknown props are ignored and an unknown kind falls back to Container/Text,
 //! so a file from a newer compiler still renders instead of failing.
 
@@ -41,7 +42,7 @@ pub struct Ir {
 }
 
 impl Ir {
-    /// True when any node, visible or hidden, carries an R8 effect prop.
+    /// True when any node, visible or hidden, carries an effect prop.
     pub fn has_visual_effects(&self) -> bool {
         self.tree.has_visual_effects()
     }
@@ -108,7 +109,8 @@ pub struct StateDecl {
     pub init: StateValue,
 }
 
-/// The 32 IR node kinds (v0.1 eight + R2 sixteen + R4 eight), plus R10's 68
+/// The 32 IR node kinds (v0.1 eight + interactive UI sixteen + data eight),
+/// plus 68
 /// extended primitive kinds carried as `Extended(code)` where `code` indexes
 /// `crate::primitives::SPECS`. `Other` is a kind this renderer does not know:
 /// it is rendered with the documented fallback (Container with children, else
@@ -139,7 +141,7 @@ pub enum Kind {
     Scroll,
     Avatar,
     Spinner,
-    // R4 distinct primitives (drawn, not delegated to the fallback).
+    // Data primitives (drawn, not delegated to the fallback).
     Table,
     Chart,
     Calendar,
@@ -148,7 +150,7 @@ pub enum Kind {
     Map,
     Menu,
     Tooltip,
-    // R10 distinct primitives, resolved through `crate::primitives`.
+    // Extended primitives, resolved through `crate::primitives`.
     Extended(u16),
     Other,
 }
@@ -193,7 +195,7 @@ impl Kind {
         }
     }
 
-    /// Unknown kinds never fail the parse: they degrade to `Other`. An R10
+    /// Unknown kinds never fail the parse: they degrade to `Other`. An
     /// extended primitive resolves to `Extended(code)` first.
     pub fn parse(s: &str) -> Kind {
         match s {
@@ -268,7 +270,7 @@ impl Kind {
     }
 }
 
-/// R3 accessible role of a node. `None` is also an explicit `role: "none"`.
+/// Accessible role of a node. `None` is also an explicit `role: "none"`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
     Button,
@@ -326,9 +328,9 @@ pub struct Props {
     pub radius: Option<i64>,
     pub color: Option<Rgba>,
     pub value: Option<String>,
-    /// Integer form of `value` (R2 `Progress` percentage).
+    /// Integer form of `value` (`Progress` percentage).
     pub value_num: Option<i64>,
-    /// Fractional form of `value` as fixed point (R2 `Progress` fraction).
+    /// Fractional form of `value` as fixed point (`Progress` fraction).
     pub value_frac: Option<i64>,
     pub label: Option<String>,
     pub title: Option<String>,
@@ -337,7 +339,7 @@ pub struct Props {
     pub bind: Option<String>,
     pub src: Option<String>,
     pub size: Option<i64>,
-    // R2 canonical effects.
+    // Canonical style effects.
     pub shadow: Option<i64>,
     pub gradient: Option<(Rgba, Rgba)>,
     pub glass: bool,
@@ -345,22 +347,22 @@ pub struct Props {
     pub opacity: Option<i64>,
     pub border: Option<Rgba>,
     pub animate: Curve,
-    // R2 kind props.
+    // Kind props.
     pub columns: Option<i64>,
     pub labels: Vec<String>,
     pub min: Option<i64>,
     pub max: Option<i64>,
-    // R3 accessibility props.
+    // Accessibility props.
     /// Fixed-point font multiplier: 1024 == 1.0.
     pub font_scale: Option<i64>,
     pub high_contrast: bool,
     pub role: Option<Role>,
-    // R4 primitive data props.
+    // Primitive data props.
     /// Integer series for `Chart` bar heights (also usable by other primitives).
     pub values: Vec<i64>,
     /// Row count for `Table` / `Calendar` grids.
     pub rows: Option<i64>,
-    // R8 optional software visual effects.
+    // Optional software visual effects.
     pub effects: Vec<VisualEffect>,
 }
 
@@ -376,14 +378,14 @@ pub struct Action {
     pub op: Op,
     pub target: String,
     pub value: Option<StateValue>,
-    /// R2: read the value from another state at execution time.
+    /// Read the value from another state at execution time.
     pub value_from: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     pub name: String,
-    /// R2: handlers may hold several actions; v0.1 handlers hold exactly one.
+    /// Handlers may hold several actions; v0.1 handlers hold exactly one.
     pub actions: Vec<Action>,
 }
 
@@ -400,7 +402,7 @@ pub struct Node {
     pub props: Props,
     pub children: Vec<Node>,
     pub events: Vec<Event>,
-    /// R2: the node is visible only while this bool state is true.
+    /// The node is visible only while this bool state is true.
     pub when: Option<String>,
 }
 
@@ -417,7 +419,7 @@ pub enum ThemeMode {
     System,
 }
 
-/// R2 theme tokens; missing tokens fall back to `mode`/`accent`/`radius`.
+/// Theme tokens; missing tokens fall back to `mode`/`accent`/`radius`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Contrast {
     Normal,
@@ -871,7 +873,7 @@ fn effect_integer(
     }
 }
 
-/// Validate the optional R8 `effects` array. Unknown effect fields are ignored
+/// Validate the optional `effects` array. Unknown effect fields are ignored
 /// like other IR props; numeric fields are clamped here so raster arithmetic
 /// never sees an unbounded value.
 fn effects_prop(o: &Map<String, Value>, what: &str) -> Result<Vec<VisualEffect>, IrError> {
@@ -1098,7 +1100,7 @@ fn events(o: &Map<String, Value>, decls: &[StateDecl]) -> Result<Vec<Event>, IrE
     for name in keys {
         let what = format!("events.{name}");
         let raw = object(&o[name], &what)?;
-        // R2: one action object, or {"actions": [...]}.
+        // One action object, or {"actions": [...]}.
         let actions = match raw.get("actions") {
             Some(list) => {
                 let items = list
@@ -1228,7 +1230,7 @@ fn theme(v: &Value) -> Result<Theme, IrError> {
     })
 }
 
-/// `highContrast` on a node applies to its whole subtree (R3 additive prop).
+/// `highContrast` on a node applies to its whole subtree (additive prop).
 fn inherit_high_contrast(n: &mut Node, parent: bool) {
     let high = parent || n.props.high_contrast;
     n.props.high_contrast = high;

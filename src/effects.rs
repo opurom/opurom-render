@@ -1,8 +1,8 @@
-//! R9 visual effects: deterministic RGBA8 integer compositing and the command
+//! Visual effects: deterministic RGBA8 integer compositing and the command
 //! stream that reproduces it on the independent Metal compute backend.
 //!
 //! The software framebuffer uses integer arithmetic only. Effect-free IR emits
-//! no effect commands, so the R6 command stream stays byte-identical.
+//! no effect commands, so the effect-free command stream stays byte-identical.
 
 use crate::display::Command;
 use crate::raster::Canvas;
@@ -165,7 +165,7 @@ pub(crate) fn apply_frame_blurs(canvas: &mut Canvas, laid: &[LaidOut]) {
     }
 }
 
-/// Geometry and colours the R9 effect commands need for one node.
+/// Geometry and colours the effect commands need for one node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EffectFrame {
     pub has_local: bool,

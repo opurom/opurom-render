@@ -1,5 +1,5 @@
-//! R9 effect-command export: all five effect types, integer parameters, draw
-//! order, bounds, R6 invariance and the committed proof fixture.
+//! GPU effect-command export: all five effect types, integer parameters, draw
+//! order, bounds, effect-free invariance and the committed proof fixture.
 
 use opurom_render::{digest_hex, parse_ir, DisplayList, Renderer, Rgba, StateView};
 use serde_json::Value;

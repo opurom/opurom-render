@@ -1,4 +1,4 @@
-//! R3 renderer tests: font scaling, high contrast, theme contrast tokens and
+//! Accessibility renderer tests: font scaling, high contrast, theme contrast tokens and
 //! the data-only accessibility tree (pre-order roles, labels, bounds, hidden).
 
 use opurom_render::{
@@ -169,7 +169,7 @@ fn non_bool_high_contrast_and_unknown_role_are_rejected() {
 
 #[test]
 fn unknown_node_fields_are_ignored() {
-    // The R3 catalog adds an optional `component` field next to `kind`.
+    // The component catalog adds an optional `component` field next to `kind`.
     let with_component = SCALE_IR.replace(
         "\"kind\": \"Column\"",
         "\"kind\": \"Column\", \"component\": \"FancyCard\"",
