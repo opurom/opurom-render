@@ -401,15 +401,16 @@ blurs, with real buffer readback. For the committed effect fixture
 
 ```sh
 ./target/debug/opurom-render tests/fixtures/r9_effect.opuir.json 96 64 cpu.ppm \
-  --commands fx.commands.json     # digest=eb9ce1cec41bac13, dirty=1
+  --commands fx.commands.json     # digest=4c263a3810af4ef4, dirty=1
 ../opurom-gpu/target/debug/opurom-gpu raster fx.commands.json gpu.ppm
 cmp cpu.ppm gpu.ppm                # exit 0, byte-identical
 ```
 
 Measured result: `cmp` exits 0, both PPMs are 18445 bytes, and the FNV-1a 64
-digest of the PPM bytes is `b493cd0714a4fb64` (all five effect kinds active).
-`tests/gpu_effects.rs` also proves the same equality at `64 48`. This is a real
-comparison against the independent software renderer, not a self-comparison.
+digest of the PPM bytes is `1f9b7069c621028f` (all five effect kinds active).
+`tests/gpu_effects.rs` also proves the same equality at `64 48` (9229 bytes, PPM
+digest `7538c5a3976d1133`). This is a real comparison against the independent
+software renderer, not a self-comparison.
 
 The GPU path is compute-kernel only: glyphs remain CPU-decomposed rects. The CPU
 renderer remains the reference oracle.
