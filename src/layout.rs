@@ -285,12 +285,14 @@ fn text_width(text: &str, scale: i64) -> i64 {
     (text.chars().count() as i64).saturating_mul(font::advance(scale))
 }
 
-/// A node is visible unless its `when` bool state is false.
+/// A node is visible only while every condition it declares holds.
 pub fn visible(n: &Node, state: &StateView) -> bool {
-    match &n.when {
-        None => true,
-        Some(name) => state.get(name).and_then(|v| v.as_bool()).unwrap_or(false),
-    }
+    let holds = |name: &str, expected: bool| {
+        state.get(name).and_then(|v| v.as_bool()).unwrap_or(false) == expected
+    };
+    // `unless` selects the opposite branch of a bool state.
+    n.when.as_deref().map_or(true, |name| holds(name, true))
+        && n.unless.as_deref().map_or(true, |name| holds(name, false))
 }
 
 /// Fallback text for a kind this renderer does not know: label, value, title, name.

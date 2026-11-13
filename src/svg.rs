@@ -153,7 +153,7 @@ pub fn svg_at(ir: &Ir, state: &StateView, width: u32, height: u32, elapsed_ms: i
         }
     }
 
-    // Hidden `when` nodes: their drawing is omitted; a marker records them.
+    // Nodes absent from the layout get a marker so hidden regions stay inspectable.
     for n in all.iter().copied() {
         if !by_id.contains_key(&n.id) {
             let role = roles.get(&n.id).copied().unwrap_or(Role::None);
