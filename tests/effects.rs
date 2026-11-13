@@ -7,11 +7,11 @@ use opurom_render::{
 };
 use std::{fs, path::PathBuf, process::Command as ProcessCommand};
 
-const R6_COMMANDS: &[u8] = include_bytes!("fixtures/r6_counter_commands.json");
-const R6_COMMANDS_FNV: &str = "e596826c5ad1fccd";
+const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/r6_counter_commands.json");
+const BASE_COMMANDS_FNV: &str = "e596826c5ad1fccd";
 
 const IR_HEAD: &str = r##"{
-  "ir": "0.1", "app": "R8Effects",
+  "ir": "0.1", "app": "EffectsProof",
   "state": [ { "name": "n", "type": "int", "init": 3 } ],
   "tree": { "id": 0, "kind": "Column",
     "props": { "gap": 6, "padding": 6, "align": "center" },
@@ -287,7 +287,7 @@ fn extreme_effect_integers_clamp_without_overflow() {
 }
 
 const CLIP_HEAD: &str = r##"{
-  "ir": "0.1", "app": "R8Clip", "state": [],
+  "ir": "0.1", "app": "ClipProof", "state": [],
   "tree": { "id": 0, "kind": "Column", "props": { "gap": 0, "padding": 0 },
     "children": [
       { "id": 1, "kind": "Scroll", "props": { "width": 80, "height": 20 },
@@ -376,8 +376,8 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
         "digest=c87bf023a6c01f9d\ndirty=1\n"
     );
     let bytes = fs::read(&commands).unwrap();
-    assert_eq!(bytes.as_slice(), R6_COMMANDS);
-    assert_eq!(digest_hex(&bytes), R6_COMMANDS_FNV);
+    assert_eq!(bytes.as_slice(), BASE_COMMANDS);
+    assert_eq!(digest_hex(&bytes), BASE_COMMANDS_FNV);
 }
 
 #[test]

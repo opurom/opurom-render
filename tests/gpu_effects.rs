@@ -6,11 +6,11 @@ use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command};
 
 const FIXTURE_IR: &str = include_str!("fixtures/r9_effect.opuir.json");
-const R6_COMMANDS: &[u8] = include_bytes!("fixtures/r6_counter_commands.json");
+const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/r6_counter_commands.json");
 
 fn ir_with(effects: &str) -> String {
     format!(
-        r##"{{"ir":"0.1","app":"R9Commands","state":[],"tree":{{"id":0,"kind":"Column","props":{{"gap":6,"padding":6}},"children":[{{"id":1,"kind":"Container","props":{{"width":64,"height":32,"radius":6,"color":"#112233","effects":{effects}}},"children":[],"events":{{}}}}],"events":{{}}}},"theme":{{"mode":"dark","accent":"#4F46E5","radius":4}}}}"##
+        r##"{{"ir":"0.1","app":"CommandsProof","state":[],"tree":{{"id":0,"kind":"Column","props":{{"gap":6,"padding":6}},"children":[{{"id":1,"kind":"Container","props":{{"width":64,"height":32,"radius":6,"color":"#112233","effects":{effects}}},"children":[],"events":{{}}}}],"events":{{}}}},"theme":{{"mode":"dark","accent":"#4F46E5","radius":4}}}}"##
     )
 }
 
@@ -150,7 +150,7 @@ fn effect_free_stream_is_byte_identical_to_r6_and_unchanged_by_an_empty_array() 
             .to_json()
             .unwrap()
             .as_bytes(),
-        R6_COMMANDS
+        BASE_COMMANDS
     );
 }
 

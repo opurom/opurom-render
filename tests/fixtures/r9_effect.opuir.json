@@ -1,6 +1,6 @@
 {
   "ir": "0.1",
-  "app": "R9EffectProof",
+  "app": "EffectProof",
   "state": [],
   "tree": {
     "id": 0,
@@ -39,7 +39,7 @@
           {
             "id": 3,
             "kind": "Text",
-            "props": { "value": "R9", "size": 12, "color": "#FFFFFF" },
+            "props": { "value": "FX", "size": 12, "color": "#FFFFFF" },
             "children": [],
             "events": {}
           }

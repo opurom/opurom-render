@@ -326,7 +326,7 @@ fn quality_is_monotonic_as_the_budget_tightens() {
 }
 
 const CLI_IR: &str = r##"{
-  "ir": "0.1", "app": "R5Transition", "state": [],
+  "ir": "0.1", "app": "TransitionProof", "state": [],
   "tree": { "id": 0, "kind": "Column", "props": { "gap": 4 },
     "children": [
       { "id": 1, "kind": "Container", "props": { "width": 60, "height": 40, "animate": "ease" },
