@@ -174,6 +174,148 @@ fn cli_writes_byte_identical_svg_and_leaves_stdout_unchanged() {
     assert!(String::from_utf8_lossy(&missing.stderr).contains("--svg requires"));
 }
 
+// ------------------------------------------------------- particle fields
+
+const PARTICLE_IR: &str = r##"{"ir":"0.1","app":"Dots","state":[],"tree":{"id":0,"kind":"Column","props":{"padding":8,"gap":4},"children":[{"id":1,"kind":"Container","props":{"width":96,"height":64,"color":"#223344","radius":4{FIELD}},"children":[],"events":{}}],"events":{}},"theme":{"mode":"light","accent":"#097FEB","radius":4}}"##;
+
+fn particle_ir(field: &str) -> String {
+    PARTICLE_IR.replace("{FIELD}", field)
+}
+
+/// `(cx, cy, r, fill)` of every emitted dot, in document order.
+fn circles(doc: &str) -> Vec<(i64, i64, i64, String)> {
+    doc.lines()
+        .filter(|l| l.starts_with("  <circle "))
+        .map(|l| {
+            let num = |key: &str| -> i64 {
+                l.split(&format!("{key}=\""))
+                    .nth(1)
+                    .unwrap_or_else(|| panic!("circle is missing {key}"))
+                    .split('"')
+                    .next()
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            };
+            let fill = l
+                .split("fill=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap();
+            (num("cx"), num("cy"), num("r"), fill.to_string())
+        })
+        .collect()
+}
+
+#[test]
+fn svg_draws_one_circle_per_particle_dot_in_index_order() {
+    let ir = parse_ir(&particle_ir(",\"particles\":{\"count\":12,\"seed\":7}")).unwrap();
+    let state = StateView::from_ir(&ir);
+    let doc = svg(&ir, &state, 320, 240);
+    assert_eq!(
+        doc,
+        svg(&ir, &state, 320, 240),
+        "circles must be byte-stable"
+    );
+    assert_eq!(circles(&doc).len(), 12, "one circle per dot");
+
+    let laid = layout(&ir, &state, 320, 240);
+    let node = laid.iter().find(|n| n.id == 1).expect("container node");
+    let dots = circles(&doc);
+    for (cx, cy, r, fill) in &dots {
+        assert!(
+            *cx >= node.rect.x && *cx < node.rect.x + node.rect.w,
+            "dot centre {cx} outside the node rect"
+        );
+        assert!(
+            *cy >= node.rect.y && *cy < node.rect.y + node.rect.h,
+            "dot centre {cy} outside the node rect"
+        );
+        assert_eq!(*r, 2, "the default radius must reach the SVG");
+        assert_eq!(fill, "#097feb", "the accent is the default dot colour");
+    }
+    // The seed selects positions, so a different seed must move the dots.
+    let shifted = parse_ir(&particle_ir(",\"particles\":{\"count\":12,\"seed\":8}")).unwrap();
+    let other = circles(&svg(&shifted, &state, 320, 240));
+    assert_ne!(
+        dots.iter().map(|d| d.0).collect::<Vec<_>>(),
+        other.iter().map(|d| d.0).collect::<Vec<_>>()
+    );
+    assert!(
+        doc.contains("<rect data-id=\"1\""),
+        "the node box is still drawn"
+    );
+    assert!(
+        doc.contains("data-role=\"none\""),
+        "circles carry the node role"
+    );
+}
+
+fn faded_dots(doc: &str) -> usize {
+    doc.lines()
+        .filter(|l| l.starts_with("  <circle ") && l.contains(" opacity="))
+        .count()
+}
+
+#[test]
+fn svg_particle_fields_skip_no_ops_and_carry_alpha() {
+    for field in [
+        "",
+        ",\"particles\":{\"count\":0,\"seed\":7}",
+        ",\"particles\":{\"count\":9,\"seed\":7,\"alpha\":0}",
+    ] {
+        let ir = parse_ir(&particle_ir(field)).unwrap();
+        assert_eq!(
+            circles(&svg(&ir, &StateView::from_ir(&ir), 320, 240)).len(),
+            0,
+            "field {field} must draw no dots"
+        );
+    }
+
+    let opaque = parse_ir(&particle_ir(",\"particles\":{\"count\":3,\"seed\":1}")).unwrap();
+    let doc = svg(&opaque, &StateView::from_ir(&opaque), 320, 240);
+    assert_eq!(circles(&doc).len(), 3);
+    assert_eq!(
+        faded_dots(&doc),
+        0,
+        "a full alpha needs no opacity attribute"
+    );
+
+    let faded = parse_ir(&particle_ir(
+        ",\"particles\":{\"count\":3,\"seed\":1,\"radius\":5,\"alpha\":512,\"color\":\"#FF0044\"}",
+    ))
+    .unwrap();
+    let doc = svg(&faded, &StateView::from_ir(&faded), 320, 240);
+    let dots = circles(&doc);
+    assert_eq!(dots.len(), 3);
+    assert!(dots.iter().all(|d| d.2 == 5 && d.3 == "#ff0044"));
+    assert_eq!(faded_dots(&doc), 3, "half alpha per dot");
+}
+
+fn text_font_size(doc: &str) -> i64 {
+    doc.lines()
+        .find(|l| l.starts_with("  <text data-id=\"1\""))
+        .and_then(|l| l.split("font-size=\"").nth(1))
+        .and_then(|s| s.split('"').next())
+        .and_then(|s| s.parse().ok())
+        .expect("the text node must be drawn with a font-size")
+}
+
+#[test]
+fn svg_text_font_size_follows_theme_font_scale() {
+    let plain = parse_ir(&SVG_IR).unwrap();
+    let scaled = parse_ir(&SVG_IR.replace("\"radius\": 4 }", "\"radius\": 4, \"fontScale\": 2 }"))
+        .expect("theme fontScale must parse");
+    let size = text_font_size(&svg(&plain, &StateView::from_ir(&plain), 320, 240));
+    let grown = text_font_size(&svg(&scaled, &StateView::from_ir(&scaled), 320, 240));
+    assert!(
+        grown > size,
+        "font-size must grow with theme.fontScale: {size} -> {grown}"
+    );
+}
+
 // ------------------------------------------------ 8 new distinct primitives
 
 /// One self-contained primitive as the root, with a fixed box and a label so

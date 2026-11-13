@@ -340,6 +340,29 @@ fn cli_writes_byte_identical_a11y_json() {
     assert!(String::from_utf8_lossy(&missing.stderr).contains("--a11y requires"));
 }
 
+// ------------------------------------------------------- decorative particles
+
+const DOTS_IR: &str = r##"{"ir":"0.1","app":"Dots","state":[],"tree":{"id":0,"kind":"Column","props":{"padding":8,"gap":4},"children":[{"id":1,"kind":"Container","props":{"width":96,"height":64,"color":"#223344"{FIELD}},"children":[],"events":{}}],"events":{}},"theme":{"mode":"light","accent":"#097FEB","radius":4}}"##;
+
+#[test]
+fn particle_dots_never_add_accessibility_nodes() {
+    let build = |field: &str| ir_of(&DOTS_IR.replace("{FIELD}", field));
+    let dotted = build(",\"particles\":{\"count\":40,\"seed\":7}");
+    let plain = build("");
+    let with_field = a11y_json(&dotted, &StateView::from_ir(&dotted), 320, 240);
+    assert_eq!(
+        with_field,
+        a11y_json(&plain, &StateView::from_ir(&plain), 320, 240),
+        "decorative dots must leave the accessibility tree untouched"
+    );
+    let entries: Value = serde_json::from_str(&with_field).expect("a11y JSON must parse");
+    let nodes = entries.as_array().expect("a11y JSON is an array");
+    assert_eq!(nodes.len(), 2, "one entry per IR node, never one per dot");
+    assert_eq!(nodes[1]["id"], 1);
+    assert_eq!(nodes[1]["role"], "none");
+    assert_eq!(nodes[1]["bounds"], serde_json::json!([8, 8, 96, 64]));
+}
+
 // -------------------------------------------------------------- regressions
 
 #[test]

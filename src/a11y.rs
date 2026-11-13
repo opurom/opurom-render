@@ -4,6 +4,10 @@
 //! screen-reader integration. Hidden `when` nodes are included with
 //! `hidden: true`; their bounds come from a layout with every bool state
 //! forced true when that layout can place them, otherwise from zeros.
+//!
+//! Particle dots are decorative texture: a node's `particles` field never
+//! expands into per-dot entries, so the tree carries exactly one node per IR
+//! node and the host keeps its own role and label.
 
 use crate::ir::{Ir, Kind, Node, Role, StateValue, StateView, ValueType};
 use crate::layout::{
