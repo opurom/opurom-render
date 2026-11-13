@@ -36,6 +36,8 @@ fn default_role(n: &Node) -> Role {
         Kind::RichText | Kind::Tooltip => Role::Text,
         Kind::Player => Role::Button,
         Kind::Table | Kind::Calendar | Kind::Menu => Role::None,
+        // capability extended primitives: each framework contracts its default role.
+        Kind::Extended(code) => crate::primitives::role_of(code),
         _ => Role::None,
     }
 }

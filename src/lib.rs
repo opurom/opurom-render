@@ -15,7 +15,10 @@
 //! adds five optional deterministic framebuffer effects. All of them are
 //! opt-in: a 0.1.0 IR renders byte-identically to initial release, and effect-free
 //! `--commands` output stays byte-identical to capability. capability adds optional effect
-//! commands that reproduce those effects on the Metal compute backend.
+//! commands that reproduce those effects on the Metal compute backend. capability adds
+//! 68 more distinct drawn primitives for a 100-primitive library, each with a
+//! deterministic integer-only drawing, a documented prop schema and an a11y
+//! default role; none of them change an capability-capability frame.
 
 pub mod a11y;
 pub mod anim;
@@ -24,6 +27,7 @@ pub mod effects;
 pub mod font;
 pub mod ir;
 pub mod layout;
+pub mod primitives;
 pub mod raster;
 pub mod svg;
 
