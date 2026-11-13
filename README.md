@@ -19,7 +19,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 155 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 168 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -185,6 +185,8 @@ or a split-screen split does, and keeps the buffered frame. The next render
 diffs the shared region against it and reports the strip the new surface gained,
 so the dirty list names the regions that actually changed. An unchanged
 viewport still yields zero dirty rects, and the list stays bounded at 64 rects.
+Emitted rects are ordered by `(y, x)`, so identical state changes produce identical
+dirty lists.
 
 ## Accessibility (COMPONENTS_AND_A11Y §2)
 
