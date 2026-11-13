@@ -19,7 +19,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 168 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 175 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -138,13 +138,38 @@ byte-identically to the core release — the three golden digests below are unch
 | --- | --- |
 | Theme tokens | `theme.tokens.surface` / `.onSurface` / `.font` override the `mode` defaults; every token falls back independently. The `font` token is recorded but never selects a host font: text always uses the built-in bitmap font. |
 | Style effects | `gradient` (two-stop vertical linear gradient, integer lerp), `glass` (surface blended with the accent), `shadow` (0..8, offset darkening), `opacity` (0..1, exact fixed point 0..1024), `border` (1 px colour), `radius` (rounded corners), `margin`. Effects apply to every kind that owns a box (Container, Card, Button, …). |
-| Conditional visibility | The optional node field `when: "<boolState>"` hides the node **and its subtree** from layout and from the raster while the state is false. A `when` on a non-bool or undeclared state is a parse error. |
+| Conditional visibility | The optional node fields `when: "<boolState>"` and `unless: "<boolState>"` hide the node **and its subtree** from layout and from the raster while the state is false for `when` or true for `unless`. A field on a non-bool or undeclared state is a parse error. |
 | Node kinds | All 24 interactive UI kinds render: the eight v0.1 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
 | Animation | `animate: spring\|ease\|inertia\|none` on a node drives an entry animation (box grows from its centre while fading in; `inertia` flings it under a constant integer braking force). The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
 
 Unknown props are ignored and never fatal; an unknown kind degrades instead of
 rejecting the file. Multi-action events (`{"actions": [...]}`) and
 `valueFrom` are accepted as well, so a compiler output renders here.
+
+## Inverted conditional visibility (LANGUAGE_ADDITIONS section 2)
+
+The optional node field `"unless": "<boolState>"` keeps a node visible while that
+bool state is false and hides the node and its subtree while the state is true.
+It is the inverse of `when`, so one bool state selects between two sibling
+subtrees:
+
+```json
+"children": [
+  { "id": 1, "kind": "Text", "props": { "value": "light" }, "unless": "dark",
+    "children": [], "events": {} },
+  { "id": 2, "kind": "Text", "props": { "value": "dark" }, "when": "dark",
+    "children": [], "events": {} }
+]
+```
+
+Both fields may appear on one node, in which case the node is visible only while
+its `when` state is true and its `unless` state is false. Each field must name a
+declared bool state; an undeclared name, a non-bool state or a non-string value
+is a readable parse diagnostic with exit code 1. Hidden nodes are omitted from
+the layout, the raster, the display list and the SVG drawing; the SVG backend
+records a `data-hidden` marker and the accessibility tree reports `hidden: true`
+for the node and its descendants. The field is opt-in: an IR document without it
+renders byte-identically, and the three golden digests are unchanged.
 
 ## Five-tier adaptive layout and fluid grid (TRANSPORT_AND_LANGUAGE_ADDITIONS §3)
 
@@ -216,9 +241,9 @@ CLI:
 exactly `digest=...` and `dirty=...`. Each entry has the shape
 `{"id":0,"role":"none","label":"","bounds":[0,0,800,600],"hidden":false}`:
 integer bounds are the node's laid-out `[x,y,w,h]` in logical pixels. Hidden
-`when` nodes and their descendants appear with `hidden:true`; their bounds come
-from a second layout with every bool state forced true, or from zeros when that
-layout cannot place them. The JSON is byte-identical across identical runs.
+conditional nodes and their descendants appear with `hidden:true`; their bounds
+come from a second layout with every bool state forced true, or from zeros when
+that layout cannot place them. The JSON is byte-identical across identical runs.
 
 Status: this is a **data-only** accessibility tree. There is NO OS
 screen-reader integration, NO ARIA/AT-SPI bridge, NO focus order or hit
@@ -243,8 +268,8 @@ library functions) writes a **byte-deterministic SVG 1.1 snapshot of the same
   metrics** (`font-size = GLYPH_H * text_scale`), with XML escaping and
   `{name}` interpolation already applied by layout.
 - `data-id` and `data-role` on every element; the role is the shared a11y role
-  (`role_of`). Hidden `when` nodes are omitted from the drawing and recorded as
-  `<g ... data-hidden="true"/>` markers.
+  (`role_of`). Hidden conditional nodes are omitted from the drawing and
+  recorded as `<g ... data-hidden="true"/>` markers.
 
 Same IR + viewport + state + theme + animation tick ⇒ byte-identical SVG bytes
 across runs (integer formatting over a deterministic pre-order layout; no time,
@@ -604,11 +629,13 @@ Row collapse + fluid sizing, the five viewport tiers with their exact
 boundaries, the integer fluid grid arithmetic, resize diffing across a tier
 change, all 100 node kinds, theme tokens with per-token
 fallback, the six canonical style effects, conditional `when` visibility with
-bounded dirty rects, light/dark theme + accent, built-in 5x7 font, deterministic
-RGBA8 software raster, incremental dirty-rect diffing with coverage and bound
-tests, interpolation from `StateView`, `FrameView` shape, the PPM CLI, integer
-`fontScale`, high-contrast rendering, the `theme.tokens.contrast` token, a
-deterministic pre-order accessibility tree with roles, labels, bounds and hidden
+bounded dirty rects, inverted `unless` visibility in the layout, raster,
+accessibility tree, SVG snapshot and CLI, light/dark theme + accent, built-in
+5x7 font, deterministic RGBA8 software raster, incremental dirty-rect diffing
+with coverage and bound tests, interpolation from `StateView`, `FrameView`
+shape, the PPM CLI, integer `fontScale`, high-contrast rendering, the
+`theme.tokens.contrast` token, a deterministic pre-order accessibility tree with
+roles, labels, bounds and hidden
 flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
 `data-role`, hidden markers), eight data primitives and 68 extended primitives as
 distinct deterministic drawings, slide/fade/scale frame composition with monotonic
@@ -623,12 +650,12 @@ order, the five software effects with determinism, pairwise distinct pixels,
 clamping, overflow, effect-command export for all five kinds with integer
 parameters, draw order, bounds, effect-free fixture invariance, and unchanged
 golden digests.
-`cargo test --offline` (156 tests) is green with fixed golden digests and zero
+`cargo test --offline` (175 tests) is green with fixed golden digests and zero
 warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 
 
-## Future directions
+## Roadmap
 
 The renderer evolves through additive layers that keep the IR contract and the golden digests
 stable. Planned areas of work:

@@ -405,6 +405,8 @@ pub struct Node {
     pub events: Vec<Event>,
     /// The node is visible only while this bool state is true.
     pub when: Option<String>,
+    /// Inverted `when`, so one bool state can select between two sibling subtrees.
+    pub unless: Option<String>,
 }
 
 impl Node {
@@ -1134,6 +1136,32 @@ fn events(o: &Map<String, Value>, decls: &[StateDecl]) -> Result<Vec<Event>, IrE
     Ok(out)
 }
 
+/// Both conditional fields are validated here so layout can trust the state type.
+fn bool_condition(
+    o: &Map<String, Value>,
+    key: &str,
+    decls: &[StateDecl],
+) -> Result<Option<String>, IrError> {
+    let Some(v) = o.get(key) else {
+        return Ok(None);
+    };
+    let name = v
+        .as_str()
+        .ok_or_else(|| bad(format!("tree node.{key} must be a string")))?
+        .to_string();
+    let decl = decls.iter().find(|d| d.name == name).ok_or_else(|| {
+        bad(format!(
+            "tree node.{key} refers to undeclared state {name:?}"
+        ))
+    })?;
+    if decl.typ != ValueType::Bool {
+        return Err(bad(format!(
+            "tree node.{key} must reference a bool state, but {name:?} is not"
+        )));
+    }
+    Ok(Some(name))
+}
+
 fn node(v: &Value, next_id: &mut u32, decls: &[StateDecl]) -> Result<Node, IrError> {
     let o = object(v, "tree node")?;
     let id = integer(required(o, "id", "tree node")?, "tree node.id")?;
@@ -1163,26 +1191,8 @@ fn node(v: &Value, next_id: &mut u32, decls: &[StateDecl]) -> Result<Node, IrErr
         object(required(o, "events", "tree node")?, "events")?,
         decls,
     )?;
-    let when = match o.get("when") {
-        Some(v) => {
-            let name = v
-                .as_str()
-                .ok_or_else(|| bad("tree node.when must be a string"))?
-                .to_string();
-            let decl = decls.iter().find(|d| d.name == name).ok_or_else(|| {
-                bad(format!(
-                    "tree node.when refers to undeclared state {name:?}"
-                ))
-            })?;
-            if decl.typ != ValueType::Bool {
-                return Err(bad(format!(
-                    "tree node.when must reference a bool state, but {name:?} is not"
-                )));
-            }
-            Some(name)
-        }
-        None => None,
-    };
+    let when = bool_condition(o, "when", decls)?;
+    let unless = bool_condition(o, "unless", decls)?;
     Ok(Node {
         id,
         kind,
@@ -1190,6 +1200,7 @@ fn node(v: &Value, next_id: &mut u32, decls: &[StateDecl]) -> Result<Node, IrErr
         children,
         events: e,
         when,
+        unless,
     })
 }
 
