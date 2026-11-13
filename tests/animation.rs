@@ -1,5 +1,6 @@
 //! Animation renderer tests: deterministic page transitions, gesture progress,
-//! fixed-seed particles, caller-supplied quality tiers and golden regressions.
+//! fixed-seed particles with collision modes, caller-supplied quality tiers,
+//! the inertia curve through the CLI and golden regressions.
 
 use opurom_render::{
     choose_quality, digest_hex, parse_ir, Frame, GestureAnim, ParticleSystem, Quality, Renderer,
@@ -337,6 +338,16 @@ const CLI_IR: &str = r##"{
   "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
 }"##;
 
+const INERTIA_IR: &str = r##"{
+  "ir": "0.1", "app": "InertiaProof", "state": [],
+  "tree": { "id": 0, "kind": "Column", "props": { "gap": 4 },
+    "children": [
+      { "id": 1, "kind": "Container", "props": { "width": 60, "height": 40, "animate": "inertia" },
+        "children": [], "events": {} }
+    ], "events": {} },
+  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+}"##;
+
 fn cli_output(ir_path: &PathBuf, ppm: &PathBuf, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_opurom-render"))
         .arg(ir_path)
@@ -404,6 +415,31 @@ fn cli_transition_flags_are_deterministic_and_validated() {
     let missing_tick = cli_output(&ir_path, &ppm, &["--tick"]);
     assert_eq!(missing_tick.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&missing_tick.stderr).contains("--tick requires"));
+}
+
+#[test]
+fn cli_tick_drives_the_inertia_curve() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let ir_path = dir.join("inertia-proof.opuir.json");
+    fs::write(&ir_path, INERTIA_IR).unwrap();
+    let ppm = dir.join("inertia-proof.ppm");
+
+    let at_0 = cli_stdout(&ir_path, &ppm, &["--tick", "0"]);
+    let at_16 = cli_stdout(&ir_path, &ppm, &["--tick", "16"]);
+    assert_ne!(at_0, at_16, "the fling must move the entry box");
+    assert_eq!(
+        at_16,
+        cli_stdout(&ir_path, &ppm, &["--tick", "16"]),
+        "the inertia tick must be deterministic"
+    );
+    // The braking fling settles long before the end of the CLI tick range.
+    let settled = cli_stdout(&ir_path, &ppm, &[]);
+    assert_ne!(at_0, settled, "tick 0 must be unsettled");
+    assert_eq!(
+        cli_stdout(&ir_path, &ppm, &["--tick", "4000"]),
+        settled,
+        "a late tick must equal the settled frame"
+    );
 }
 
 #[test]

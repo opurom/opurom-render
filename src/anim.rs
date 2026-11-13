@@ -19,6 +19,7 @@ pub enum Curve {
     None,
     Spring,
     Ease,
+    Inertia,
 }
 
 impl Curve {
@@ -27,6 +28,7 @@ impl Curve {
             "none" => Curve::None,
             "spring" => Curve::Spring,
             "ease" => Curve::Ease,
+            "inertia" => Curve::Inertia,
             _ => return None,
         })
     }
@@ -36,6 +38,7 @@ impl Curve {
             Curve::None => "none",
             Curve::Spring => "spring",
             Curve::Ease => "ease",
+            Curve::Inertia => "inertia",
         }
     }
 }
@@ -51,12 +54,18 @@ pub const STEP_MS: i64 = 16;
 const K: i64 = 144;
 const C: i64 = 17;
 
+/// Inertia fling: start velocity and constant braking force per `STEP_MS`,
+/// both in fixed-point progress units.
+const FLING: i64 = 256;
+const BRAKE: i64 = 32;
+
 /// Curve progress at `elapsed_ms`, in `0..=ONE`.
 pub fn progress(curve: Curve, elapsed_ms: i64) -> i64 {
     match curve {
         Curve::None => ONE,
         Curve::Ease => ease(elapsed_ms),
         Curve::Spring => spring(elapsed_ms),
+        Curve::Inertia => inertia(elapsed_ms),
     }
 }
 
@@ -85,6 +94,24 @@ fn spring(elapsed_ms: i64) -> i64 {
         x = ONE;
     }
     x.clamp(0, ONE)
+}
+
+/// Fling under a constant integer braking force: every `STEP_MS` step travels
+/// `v` distance units and then drops `v` by `BRAKE`, so step `k` travels
+/// `FLING - k * BRAKE` and the velocity rests after `FLING / BRAKE` steps.
+/// The travelled distance clamps at `ONE`, which the fling reaches in a finite
+/// number of steps because the velocity is positive and strictly decreasing.
+fn inertia(elapsed_ms: i64) -> i64 {
+    let mut x: i64 = 0;
+    let mut v: i64 = FLING;
+    let mut steps = elapsed_ms.div_euclid(STEP_MS).max(0);
+    while steps > 0 && v > 0 && x < ONE {
+        x = x.saturating_add(v).min(ONE);
+        // v stays a positive multiple of BRAKE while it brakes, so it rests at 0.
+        v -= BRAKE;
+        steps -= 1;
+    }
+    x
 }
 
 /// Fixed-timestep driver. `tick(dt_ms)` is the only clock source.
@@ -311,7 +338,31 @@ pub struct Particle {
     pub life: i64,
 }
 
-/// Fixed-seed particles. `step()` is the only source of motion.
+/// How `step_mode` treats the field boundary and neighbouring particles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum StepMode {
+    /// Original behaviour: positions wrap around with `rem_euclid`.
+    #[default]
+    Wrap,
+    /// Reflect off the field boundary with restitution and resolve bounded
+    /// equal-mass elastic contacts between nearby particles.
+    Bounce,
+}
+
+/// Restitution of a wall bounce, fixed point: `e * ONE` with `e = 3/4`, so a
+/// reflected speed is `-(v * 768) / 1024`.
+const RESTITUTION: i64 = ONE * 3 / 4;
+/// Contact range: twice the maximum spawn speed (8), so a closing pair is
+/// always still in contact when it is checked and can never tunnel past the
+/// bounded neighbour window in one step.
+const TOUCH: i64 = 16;
+/// Neighbour window: particle `i` is paired only with the next `NEIGHBORS`
+/// particles in index order.
+// shortcut: index window instead of a spatial grid, upgrade to a spatial hash when a large field makes index order stop matching screen proximity
+const NEIGHBORS: usize = 8;
+
+/// Fixed-seed particles. `step()` and `step_mode()` are the only sources of
+/// motion.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParticleSystem {
     pub particles: Vec<Particle>,
@@ -331,11 +382,29 @@ impl ParticleSystem {
         ParticleSystem { particles, rng }
     }
 
+    /// Advance one step in the default `Wrap` mode.
     pub fn step(&mut self) {
+        self.step_mode(StepMode::Wrap);
+    }
+
+    /// Advance one fixed step in the given mode. `step()` is exactly
+    /// `step_mode(StepMode::Wrap)`; `Bounce` only adds boundary reflection and
+    /// bounded pair contacts on top of the same movement and respawning.
+    pub fn step_mode(&mut self, mode: StepMode) {
+        if mode == StepMode::Bounce {
+            resolve_contacts(&mut self.particles);
+        }
         let rng = &mut self.rng;
         for p in self.particles.iter_mut() {
-            p.x = (p.x + p.vx).rem_euclid(PARTICLE_FIELD);
-            p.y = (p.y + p.vy).rem_euclid(PARTICLE_FIELD);
+            if mode == StepMode::Bounce {
+                p.x += p.vx;
+                p.y += p.vy;
+                bounce_axis(&mut p.x, &mut p.vx);
+                bounce_axis(&mut p.y, &mut p.vy);
+            } else {
+                p.x = (p.x + p.vx).rem_euclid(PARTICLE_FIELD);
+                p.y = (p.y + p.vy).rem_euclid(PARTICLE_FIELD);
+            }
             p.life -= 1;
             if p.life <= 0 {
                 *p = spawn(rng);
@@ -398,6 +467,44 @@ fn spawn(rng: &mut u64) -> Particle {
     }
 }
 
+/// Mirror one axis past the wall it crossed and scale the reflected speed by
+/// the restitution coefficient.
+// shortcut: one reflection plus a clamp per step covers the spawn bound,
+// upgrade to a multi-wall fold if velocities past 8 units/step become legal
+fn bounce_axis(pos: &mut i64, vel: &mut i64) {
+    if *pos >= PARTICLE_FIELD {
+        *pos = 2 * (PARTICLE_FIELD - 1) - *pos;
+        *vel = -*vel * RESTITUTION / ONE;
+    } else if *pos < 0 {
+        *pos = -*pos;
+        *vel = -*vel * RESTITUTION / ONE;
+    }
+    *pos = (*pos).clamp(0, PARTICLE_FIELD - 1);
+}
+
+/// Equal-mass elastic response: when two particles are within `TOUCH` on both
+/// axes, each axis on which they are closing exchanges velocities — the 1D
+/// elastic collision at unit mass — so the pair separates with the same speed.
+/// The neighbour window bounds the pass at `NEIGHBORS` checks per particle.
+fn resolve_contacts(particles: &mut [Particle]) {
+    let n = particles.len();
+    for i in 0..n {
+        for j in (i + 1)..n.min(i + 1 + NEIGHBORS) {
+            let (a, b) = particles.split_at_mut(j);
+            let (p, q) = (&mut a[i], &mut b[0]);
+            if (q.x - p.x).abs() >= TOUCH || (q.y - p.y).abs() >= TOUCH {
+                continue;
+            }
+            if (q.x - p.x) * (q.vx - p.vx) <= 0 && q.vx != p.vx {
+                std::mem::swap(&mut p.vx, &mut q.vx);
+            }
+            if (q.y - p.y) * (q.vy - p.vy) <= 0 && q.vy != p.vy {
+                std::mem::swap(&mut p.vy, &mut q.vy);
+            }
+        }
+    }
+}
+
 /// Caller-applied quality policy for particles and expensive effects.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Quality {
@@ -434,7 +541,7 @@ mod tests {
 
     #[test]
     fn curves_are_monotonic_and_settle_at_one() {
-        for curve in [Curve::Spring, Curve::Ease] {
+        for curve in [Curve::Spring, Curve::Ease, Curve::Inertia] {
             let mut prev = 0i64;
             for t in (0..=4000).step_by(16) {
                 let p = progress(curve, t);
@@ -446,6 +553,7 @@ mod tests {
         assert_eq!(progress(Curve::None, 0), ONE);
         assert_eq!(progress(Curve::Ease, EASE_MS), ONE);
         assert_eq!(progress(Curve::Spring, 4000), ONE);
+        assert_eq!(progress(Curve::Inertia, 4000), ONE);
     }
 
     #[test]
@@ -461,5 +569,190 @@ mod tests {
         assert_eq!(a.tick(16), 32);
         a.reset();
         assert_eq!(a.elapsed_ms(), 0);
+    }
+
+    #[test]
+    fn inertia_settles_after_the_measured_braking_steps() {
+        assert_eq!(Curve::parse("inertia"), Some(Curve::Inertia));
+        assert_eq!(Curve::Inertia.name(), "inertia");
+        // Derived from the braking rule: step k travels FLING - k * BRAKE.
+        let mut travelled = 0i64;
+        let mut velocity = FLING;
+        let mut steps = 0i64;
+        while velocity > 0 && travelled < ONE {
+            travelled += velocity;
+            velocity -= BRAKE;
+            steps += 1;
+        }
+        assert!(
+            travelled >= ONE,
+            "the braking fling must reach ONE before resting"
+        );
+        // Counted the same way until the braking force floors the velocity.
+        let mut rest_steps = steps;
+        while velocity > 0 {
+            velocity -= BRAKE;
+            rest_steps += 1;
+        }
+        assert_eq!(
+            velocity, 0,
+            "the braking force must rest the velocity at zero"
+        );
+        let settle_ms = steps * STEP_MS;
+        // Measured on the real curve: still moving one step earlier, settled at
+        // settle_ms, and settled for every later tick up to the CLI range end.
+        assert!(progress(Curve::Inertia, settle_ms - STEP_MS) < ONE);
+        assert_eq!(progress(Curve::Inertia, settle_ms), ONE);
+        assert_eq!(progress(Curve::Inertia, rest_steps * STEP_MS), ONE);
+        assert_eq!(progress(Curve::Inertia, 4000), ONE);
+        println!(
+            "inertia settles after {steps} steps ({settle_ms} ms); velocity rests after {rest_steps} steps"
+        );
+    }
+
+    #[test]
+    fn wall_bounce_reflects_with_the_measured_restitution() {
+        let right_wall = Particle {
+            x: PARTICLE_FIELD - 4,
+            y: 400,
+            vx: 6,
+            vy: 0,
+            life: 40,
+        };
+        let mut right = ParticleSystem::new(1, 0);
+        right.particles.push(right_wall);
+        right.step_mode(StepMode::Bounce);
+        let p = right.particles[0];
+        let expected_right = -(right_wall.vx * RESTITUTION) / ONE;
+        assert_eq!(p.vx, expected_right, "restitution formula must hold");
+        assert!(p.vx < 0, "the right wall must reverse direction");
+        assert!((0..PARTICLE_FIELD).contains(&p.x));
+
+        let left_wall = Particle {
+            x: 3,
+            y: 400,
+            vx: -6,
+            vy: 0,
+            life: 40,
+        };
+        let mut left = ParticleSystem::new(2, 0);
+        left.particles.push(left_wall);
+        left.step_mode(StepMode::Bounce);
+        let q = left.particles[0];
+        let expected_left = -(left_wall.vx * RESTITUTION) / ONE;
+        assert_eq!(q.vx, expected_left, "restitution formula must hold");
+        assert!(q.vx > 0, "the left wall must reverse direction");
+        assert!((0..PARTICLE_FIELD).contains(&q.x));
+
+        println!(
+            "rebound: vx {} -> {} at x {}; vx {} -> {} at x {}",
+            right_wall.vx, p.vx, p.x, left_wall.vx, q.vx, q.x
+        );
+    }
+
+    #[test]
+    fn equal_mass_pair_exchanges_closing_velocities() {
+        let a0 = Particle {
+            x: 500,
+            y: 500,
+            vx: 6,
+            vy: 2,
+            life: 40,
+        };
+        let b0 = Particle {
+            x: 506,
+            y: 510,
+            vx: -6,
+            vy: -2,
+            life: 40,
+        };
+        let mut system = ParticleSystem::new(3, 0);
+        system.particles.push(a0);
+        system.particles.push(b0);
+        system.step_mode(StepMode::Bounce);
+        let (a1, b1) = (system.particles[0], system.particles[1]);
+        // Equal-mass elastic response: exact exchange of both closing axes.
+        assert_eq!((a1.vx, a1.vy), (b0.vx, b0.vy));
+        assert_eq!((b1.vx, b1.vy), (a0.vx, a0.vy));
+        // Momentum is preserved on each axis.
+        assert_eq!(a1.vx + b1.vx, a0.vx + b0.vx);
+        assert_eq!(a1.vy + b1.vy, a0.vy + b0.vy);
+        // The response separates the pair: both gaps grow.
+        assert!(b1.x - a1.x > b0.x - a0.x);
+        assert!((b1.y - a1.y).abs() > (b0.y - a0.y).abs());
+        assert!((0..PARTICLE_FIELD).contains(&a1.x));
+        assert!((0..PARTICLE_FIELD).contains(&b1.x));
+        assert!((0..PARTICLE_FIELD).contains(&a1.y));
+        assert!((0..PARTICLE_FIELD).contains(&b1.y));
+    }
+
+    #[test]
+    fn bounce_mode_is_byte_identical_for_equal_seeds_and_steps() {
+        let mut first = ParticleSystem::new(0x5eed_4242, 512);
+        let mut second = ParticleSystem::new(0x5eed_4242, 512);
+        for _ in 0..100 {
+            first.step_mode(StepMode::Bounce);
+            second.step_mode(StepMode::Bounce);
+        }
+        // Every field, including the generator state, must compare equal.
+        assert_eq!(first, second);
+        for p in &first.particles {
+            assert!((0..PARTICLE_FIELD).contains(&p.x));
+            assert!((0..PARTICLE_FIELD).contains(&p.y));
+            assert!(p.vx.abs() <= 8 && p.vy.abs() <= 8);
+            assert!((1..=PARTICLE_MAX_LIFE).contains(&p.life));
+        }
+        let (w, h) = (32u32, 24u32);
+        let mut frame_a = Frame {
+            width: w,
+            height: h,
+            pixels: vec![0u8; (w * h * 4) as usize],
+            dirty: Vec::new(),
+        };
+        let mut frame_b = frame_a.clone();
+        first.render_into(&mut frame_a).unwrap();
+        second.render_into(&mut frame_b).unwrap();
+        assert_eq!(frame_a.pixels, frame_b.pixels);
+        assert_eq!(
+            crate::digest_hex(&frame_a.pixels),
+            crate::digest_hex(&frame_b.pixels)
+        );
+    }
+
+    #[test]
+    fn wrap_stays_the_default_step_mode() {
+        let mut default = ParticleSystem::new(0x5eed_9876, 12);
+        let mut explicit = default.clone();
+        for _ in 0..200 {
+            default.step();
+            explicit.step_mode(StepMode::Wrap);
+        }
+        assert_eq!(default, explicit, "step() must be exactly Wrap mode");
+
+        // The default still wraps: a particle crossing the right edge reappears left.
+        let mut edge = ParticleSystem::new(4, 0);
+        edge.particles.push(Particle {
+            x: PARTICLE_FIELD - 1,
+            y: 10,
+            vx: 5,
+            vy: 0,
+            life: 40,
+        });
+        edge.step();
+        assert_eq!(edge.particles[0].x, 4);
+        assert_eq!(edge.particles[0].vx, 5, "wrap must not touch velocity");
+
+        // The same crossing in Bounce mode reflects instead of wrapping.
+        let mut bounced = ParticleSystem::new(4, 0);
+        bounced.particles.push(Particle {
+            x: PARTICLE_FIELD - 1,
+            y: 10,
+            vx: 5,
+            vy: 0,
+            life: 40,
+        });
+        bounced.step_mode(StepMode::Bounce);
+        assert!(bounced.particles[0].x < PARTICLE_FIELD - 1);
+        assert!(bounced.particles[0].vx < 0);
     }
 }

@@ -20,7 +20,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 149 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 155 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -118,8 +118,9 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   silhouette shadow/glow, frosted backdrop glass and a specular liquid gradient.
 - `src/display.rs` — fixed-shape deterministic display-list JSON with integer
   bounds/colours, draw order, viewport and opaque background.
-- `src/anim.rs` — the fixed-timestep animation clock, spring/ease curves, page
-  transitions, gesture progress, fixed-seed particles and quality tiers.
+- `src/anim.rs` — the fixed-timestep animation clock, spring/ease/inertia curves, page
+  transitions, gesture progress, fixed-seed particles with wrap and bounce
+  collision modes, and quality tiers.
 - `src/lib.rs` — `Rgba`, `StateView`, `Renderer`, `Frame`, `FrameView`, inline FNV-1a
   digest, and row/column dirty-rect diffing.
 - `src/a11y.rs` — pre-order accessibility tree, its deterministic JSON serializer,
@@ -138,7 +139,7 @@ byte-identically to the core release — the three golden digests below are unch
 | Style effects | `gradient` (two-stop vertical linear gradient, integer lerp), `glass` (surface blended with the accent), `shadow` (0..8, offset darkening), `opacity` (0..1, exact fixed point 0..1024), `border` (1 px colour), `radius` (rounded corners), `margin`. Effects apply to every kind that owns a box (Container, Card, Button, …). |
 | Conditional visibility | The optional node field `when: "<boolState>"` hides the node **and its subtree** from layout and from the raster while the state is false. A `when` on a non-bool or undeclared state is a parse error. |
 | Node kinds | All 24 interactive UI kinds render: the eight v0.1 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
-| Animation | `animate: spring\|ease\|none` on a node drives an entry animation (box grows from its centre while fading in). The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
+| Animation | `animate: spring\|ease\|inertia\|none` on a node drives an entry animation (box grows from its centre while fading in; `inertia` flings it under a constant integer braking force). The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
 
 Unknown props are ignored and never fatal; an unknown kind degrades instead of
 rejecting the file. Multi-action events (`{"actions": [...]}`) and
@@ -306,9 +307,27 @@ V0.1 IR output without these APIs is byte-identical to the core release.
 - **Fixed-seed particles:** `ParticleSystem::new(seed, count)` fills integer
   positions, velocities and lifetimes from a seeded xorshift64* generator. The
   integer field is 1024 units, lifetime is `1..=64` `step()` calls, and motion,
-  wrapping and respawning are deterministic. `step()` is the only motion
-  source; `render_into(&mut Frame)` overlays 2x2 RGBA blocks on an existing
+  wrapping and respawning are deterministic. `step()` (exactly
+  `step_mode(StepMode::Wrap)`) stays the default motion source;
+  `render_into(&mut Frame)` overlays 2x2 RGBA blocks on an existing
   frame. Identical seeds and step sequences give byte-identical frames.
+- **Inertia curve:** `animate: inertia` flings the entry box at start velocity
+  `FLING = 256` fixed-point units and brakes it by `BRAKE = 32` units every
+  `STEP_MS = 16` ms: step `k` travels `FLING - k * BRAKE` and the distance is
+  that arithmetic partial sum, clamped at 1024. The rule is pure integer
+  arithmetic, so a fling settles in a finite, measurable time — the tests
+  derive the counts from the formula and assert them against the real curve:
+  settle after exactly 6 steps (96 ms), velocity at rest after 8 steps.
+- **Bounce collision mode:** `step_mode(StepMode::Bounce)` is opt-in and keeps
+  the wrap behaviour of `step()` untouched. A particle crossing the 1024-unit
+  field boundary mirrors back with fixed-point restitution `e = 3/4`
+  (`v' = -v * 768 / 1024`: a measured wall hit returns speed 6 as -4), and
+  each particle checks its next 8 index neighbours within a 16-unit contact
+  range (twice the maximum spawn speed, so a closing pair cannot tunnel in one
+  step) for an equal-mass elastic response that exchanges the closing axis
+  velocities. One boundary pass plus the bounded neighbour window keeps a
+  large particle count at O(n), and identical seeds with identical step
+  sequences compare equal field for field.
 - **Automatic degradation:** `choose_quality(measured_frame_budget_ms,
   particle_count, effects_enabled) -> Quality` is a pure integer policy. The
   caller applies `Quality { particle_count, effects_enabled }` when
@@ -590,13 +609,18 @@ deterministic pre-order accessibility tree with roles, labels, bounds and hidden
 flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
 `data-role`, hidden markers), eight data primitives and 68 extended primitives as
 distinct deterministic drawings, slide/fade/scale frame composition with monotonic
-ticks and settling, gesture digest sequences, fixed-seed particles, quality budget
-tiers, CLI transition validation, exact display-list serialization/clipping/draw
+ticks and settling, gesture digest sequences, fixed-seed particles, the inertia
+curve's measured settle and rest step counts against the derived braking
+formula, wall-bounce rebounds against the derived restitution formula,
+equal-mass elastic velocity exchange with momentum conservation, byte-identical
+bounce-mode state and frames for identical seeds and step counts, wrap mode
+preserved as the default, quality budget tiers, CLI transition validation, CLI
+`--tick` driving the inertia curve, exact display-list serialization/clipping/draw
 order, the five software effects with determinism, pairwise distinct pixels,
 clamping, overflow, effect-command export for all five kinds with integer
 parameters, draw order, bounds, effect-free fixture invariance, and unchanged
 V0.1 golden digests.
-`cargo test --offline` (149 tests) is green with fixed golden digests and zero
+`cargo test --offline` (155 tests) is green with fixed golden digests and zero
 warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 
@@ -612,6 +636,7 @@ warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 - `shortcut: transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.
 - `shortcut: gesture input is integer L1 deltas, upgrade when real hardware gesture events exist`.
 - `shortcut: particles are fixed-seed 2x2 overlays, upgrade when a GPU particle path exists`.
+- `shortcut: bounce contacts use a 16-unit range and an 8-particle index-neighbour window (enough to block tunneling at spawn speeds), upgrade to a spatial hash when a large field needs denser pair checks`.
 - `shortcut: quality is a caller-supplied budget policy, upgrade when profile feedback is wired into the host`.
 - `shortcut: the accessibility tree is layout-derived data, upgrade to a platform bridge when a native adapter exists`.
 - `shortcut: SVG <text> uses a generic monospace face and built-in metrics, upgrade to real shaping when a font atlas exists`.
