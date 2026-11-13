@@ -1338,13 +1338,12 @@ fn smooth_coverage(
 /// fall back to the 5x7 bitmap rasterised at the same scale so a mixed run
 /// still has no gaps.
 fn draw_glyphs_smooth(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: i64, color: Rgba) {
-    // One high-resolution glyph fills the same mono advance as the block font,
-    // so layout widths and SVG metrics stay identical; only its height grows to
-    // the taller cell. The extra height is centred on the block font's band.
+    // A high-resolution glyph is drawn into exactly the same mono advance and
+    // text band as the block font: the 12x14 source cell matches the 6:7
+    // advance/band aspect, so the mapping scales uniformly at every integer
+    // scale and layout widths and SVG metrics stay identical.
     let w_out = font::advance(scale);
-    let cell_h = font::SMOOTH_H * scale;
-    let black_h = font::GLYPH_H * scale;
-    let fallback_dy = (cell_h - black_h) / 2;
+    let band_h = font::GLYPH_H * scale;
     for (idx, ch) in text.chars().enumerate() {
         let gx = x0 + (idx as i64).saturating_mul(w_out);
         match font::smooth_glyph(ch) {
@@ -1352,9 +1351,9 @@ fn draw_glyphs_smooth(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: 
                 if rows.iter().all(|&r| r == 0) {
                     continue;
                 }
-                for py in 0..cell_h {
+                for py in 0..band_h {
                     for px in 0..w_out {
-                        let cov = smooth_coverage(&rows, w_out, cell_h, px, py);
+                        let cov = smooth_coverage(&rows, w_out, band_h, px, py);
                         let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
                         if a != 0 {
                             canvas.set(gx + px, y0 + py, Rgba { a, ..color });
@@ -1367,12 +1366,12 @@ fn draw_glyphs_smooth(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: 
                     if rows == [0; 7] {
                         continue;
                     }
-                    for py in 0..black_h {
+                    for py in 0..band_h {
                         for px in 0..font::GLYPH_W * scale {
                             let cov = glyph_coverage(&rows, scale, px, py);
                             let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
                             if a != 0 {
-                                canvas.set(gx + px, y0 + fallback_dy + py, Rgba { a, ..color });
+                                canvas.set(gx + px, y0 + py, Rgba { a, ..color });
                             }
                         }
                     }
@@ -1388,7 +1387,10 @@ mod tests {
 
     #[test]
     fn aa_glyph_softens_edges_without_moving_ink() {
-        let rows = font::glyph('A').unwrap();
+        // '#' is outside the high-resolution set, so scale 3 stays on the
+        // block-font raster and the block AA contract is verified there.
+        let ch = '#';
+        let rows = font::glyph(ch).unwrap();
         let scale = 3;
         assert_eq!(font::advance(scale), (font::GLYPH_W + 1) * scale);
         let covs: Vec<i64> = (0..font::GLYPH_H * scale)
@@ -1403,7 +1405,7 @@ mod tests {
 
         let bg = Rgba::rgb(255, 255, 255);
         let mut canvas = Canvas::new(40, 20, bg);
-        draw_glyphs(&mut canvas, "A A", 2, 2, scale, Rgba::rgb(0, 0, 0));
+        draw_glyphs(&mut canvas, "# #", 2, 2, scale, Rgba::rgb(0, 0, 0));
         let pixel = |x: i64, y: i64| -> [u8; 3] {
             let i = (y as usize * canvas.width as usize + x as usize) * 4;
             [canvas.pixels[i], canvas.pixels[i + 1], canvas.pixels[i + 2]]

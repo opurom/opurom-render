@@ -116,16 +116,16 @@ fn the_three_pinned_golden_frames_are_unchanged() {
     state.set("count", opurom_render::StateValue::Int(0));
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
-        "900abf4bd93d1e51"
+        "16b69e96b1534324"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
-        "c8403ba57da5ee61"
+        "aaf572509f15d60c"
     );
     state.set("count", opurom_render::StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
-        "48a56056bd32a07e"
+        "e5d71acb7602eab2"
     );
 }
 
