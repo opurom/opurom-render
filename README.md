@@ -108,7 +108,12 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   `width`/`height`. `gap`, `padding`, `margin`, `align`, `radius` and `color` are
   resolved here.
 - `src/font.rs` — built-in 5x7 bitmap font, printable ASCII `0x20..=0x7E` (A–Z,
-  a–z, 0–9, punctuation). Unsupported codepoints consume a blank advance.
+  a–z, 0–9, punctuation), plus a high-resolution vector glyph set covering the
+  same letters, digits and common punctuation. Unsupported codepoints consume a
+  blank advance. Below text scale 4 the block font is used unchanged; at scale 4
+  and above the vector set renders each glyph from an embedded 12x18 coverage
+  grid, bilinearly sampled in integer fixed point, so curves and descenders read
+  as a smooth UI face at large sizes while layout widths stay identical.
 - `src/raster.rs` — filled rounded rectangles (integer quarter-circle test), 1 px
   borders, gradients, shadows, glass fills, supersampled anti-aliased glyphs,
   opaque RGBA with integer alpha blending, the eight data primitive drawings and

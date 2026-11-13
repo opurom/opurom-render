@@ -1183,6 +1183,10 @@ const AA_GRID: i64 = 4;
 /// Fine units per output pixel: sample centres stay integral.
 const AA_FINE: i64 = AA_GRID * 2;
 
+/// Sub-samples per output pixel per axis for the high-resolution glyph set.
+/// A finer grid than the block font keeps curved edges smooth at large sizes.
+const SMOOTH_AA: i64 = 6;
+
 /// Coverage of one pixel of a scaled glyph in fixed point (0..=UNIT).
 ///
 /// The 5x7 pattern is bilinearly interpolated on an `AA_GRID x AA_GRID`
@@ -1223,6 +1227,10 @@ fn glyph_coverage(rows: &[u8; 7], scale: i64, px: i64, py: i64) -> i64 {
 /// Draw a text run with the built-in bitmap font, blending partial coverage
 /// over whatever is already on the canvas.
 fn draw_glyphs(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: i64, color: Rgba) {
+    if scale >= font::SMOOTH_MIN_SCALE {
+        draw_glyphs_smooth(canvas, text, x0, y0, scale, color);
+        return;
+    }
     for (idx, ch) in text.chars().enumerate() {
         let rows = match font::glyph(ch) {
             Some(r) => r,
@@ -1238,6 +1246,106 @@ fn draw_glyphs(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: i64, co
                 let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
                 if a != 0 {
                     canvas.set(gx + px, y0 + py, Rgba { a, ..color });
+                }
+            }
+        }
+    }
+}
+
+/// Fixed-point coverage of one pixel of a high-resolution glyph.
+///
+/// Each `SMOOTH_W x SMOOTH_H` source cell holds a 4-bit coverage value. The
+/// glyph is drawn into a `w_out x h_out` box (`w_out` is the shared mono
+/// advance, `h_out` the scaled cell height); pixel `(px, py)` is sampled by
+/// `SMOOTH_AA x SMOOTH_AA` sub-points that bilinearly read the source grid.
+/// The result blends smoothly with integer maths only and no external data.
+fn smooth_coverage(
+    rows: &[u64; font::SMOOTH_H as usize],
+    w_out: i64,
+    h_out: i64,
+    px: i64,
+    py: i64,
+) -> i64 {
+    let level = font::SMOOTH_LEVEL;
+    let cell = |c: i64, r: i64| -> i64 {
+        if (0..font::SMOOTH_W).contains(&c) && (0..font::SMOOTH_H).contains(&r) {
+            let shift = (font::SMOOTH_W - 1 - c) * 4;
+            ((rows[r as usize] >> shift) & 0xF) as i64
+        } else {
+            0
+        }
+    };
+    // Map the output box onto the source grid: source cell = coord * dims / out.
+    let src_w = font::SMOOTH_W;
+    let src_h = font::SMOOTH_H;
+    let in_w = (w_out * SMOOTH_AA).max(1);
+    let in_h = (h_out * SMOOTH_AA).max(1);
+    let mut sum = 0i64;
+    for sy in 0..SMOOTH_AA {
+        let sub_y = py * SMOOTH_AA + sy;
+        let cy = sub_y * src_h / in_h;
+        let fy = (sub_y * src_h * 16 / in_h) % 16;
+        let ny = cy + 1;
+        for sx in 0..SMOOTH_AA {
+            let sub_x = px * SMOOTH_AA + sx;
+            let cx = sub_x * src_w / in_w;
+            let fx = (sub_x * src_w * 16 / in_w) % 16;
+            let nx = cx + 1;
+            let v00 = cell(cx, cy);
+            let v10 = cell(nx, cy);
+            let v01 = cell(cx, ny);
+            let v11 = cell(nx, ny);
+            let top = v00 * (16 - fx) + v10 * fx;
+            let bot = v01 * (16 - fx) + v11 * fx;
+            let val = (top * (16 - fy) + bot * fy) / 256;
+            sum += val * UNIT / level;
+        }
+    }
+    (sum + SMOOTH_AA * SMOOTH_AA / 2) / (SMOOTH_AA * SMOOTH_AA)
+}
+
+/// Draw a run with the high-resolution glyph set. Characters outside the set
+/// fall back to the 5x7 bitmap rasterised at the same scale so a mixed run
+/// still has no gaps.
+fn draw_glyphs_smooth(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: i64, color: Rgba) {
+    // One high-resolution glyph fills the same mono advance as the block font,
+    // so layout widths and SVG metrics stay identical; only its height grows to
+    // the taller cell. The extra height is centred on the block font's band.
+    let w_out = font::advance(scale);
+    let cell_h = font::SMOOTH_H * scale;
+    let black_h = font::GLYPH_H * scale;
+    let fallback_dy = (cell_h - black_h) / 2;
+    for (idx, ch) in text.chars().enumerate() {
+        let gx = x0 + (idx as i64).saturating_mul(w_out);
+        match font::smooth_glyph(ch) {
+            Some(rows) => {
+                if rows.iter().all(|&r| r == 0) {
+                    continue;
+                }
+                for py in 0..cell_h {
+                    for px in 0..w_out {
+                        let cov = smooth_coverage(&rows, w_out, cell_h, px, py);
+                        let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+                        if a != 0 {
+                            canvas.set(gx + px, y0 + py, Rgba { a, ..color });
+                        }
+                    }
+                }
+            }
+            None => {
+                if let Some(rows) = font::glyph(ch) {
+                    if rows == [0; 7] {
+                        continue;
+                    }
+                    for py in 0..black_h {
+                        for px in 0..font::GLYPH_W * scale {
+                            let cov = glyph_coverage(&rows, scale, px, py);
+                            let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+                            if a != 0 {
+                                canvas.set(gx + px, y0 + fallback_dy + py, Rgba { a, ..color });
+                            }
+                        }
+                    }
                 }
             }
         }
