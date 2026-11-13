@@ -29,7 +29,7 @@ const SCALE_IR: &str = r##"{
       { "id": 2, "kind": "Container", "props": { "width": 80, "height": 40 },
         "children": [], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
 
 fn with_font_scale(value: &str) -> String {
@@ -211,7 +211,7 @@ const A11Y_IR: &str = r##"{
           { "id": 10, "kind": "Text", "props": { "value": "Hidden" }, "children": [], "events": {} }
         ], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
 
 #[test]
@@ -363,10 +363,10 @@ fn v0_1_golden_digests_are_unchanged_by_r3() {
         String::from_utf8_lossy(&output.stdout).to_string()
     };
     assert!(
-        run("320", "240", &dir.join("r3-golden-320.ppm"), &[]).contains("digest=2fc4eac75fd50f89")
+        run("320", "240", &dir.join("r3-golden-320.ppm"), &[]).contains("digest=900abf4bd93d1e51")
     );
     assert!(
-        run("800", "600", &dir.join("r3-golden-800.ppm"), &[]).contains("digest=88127ca1577cdb61")
+        run("800", "600", &dir.join("r3-golden-800.ppm"), &[]).contains("digest=c8403ba57da5ee61")
     );
     assert!(run(
         "800",
@@ -374,5 +374,5 @@ fn v0_1_golden_digests_are_unchanged_by_r3() {
         &dir.join("r3-golden-7.ppm"),
         &["--state", "count=7"]
     )
-    .contains("digest=40891c1fbb81399e"));
+    .contains("digest=48a56056bd32a07e"));
 }

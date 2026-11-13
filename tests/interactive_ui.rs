@@ -24,7 +24,7 @@ fn effect_ir(props: &str) -> String {
   "tree": {{ "id": 0, "kind": "Container",
     "props": {{ "width": 120, "height": 80, {props} }},
     "children": [], "events": {{}} }},
-  "theme": {{ "mode": "light", "accent": "#4F46E5", "radius": 8 }}
+  "theme": {{ "mode": "light", "accent": "#097FEB", "radius": 8 }}
 }}"##
     )
 }
@@ -45,7 +45,7 @@ fn theme_tokens_override_mode_defaults_and_fall_back_per_token() {
   "state": [],
   "tree": { "id": 0, "kind": "Container", "props": { "width": 40, "height": 20 },
     "children": [], "events": {} },
-  "theme": { "mode": "dark", "accent": "#4F46E5", "radius": 4,
+  "theme": { "mode": "dark", "accent": "#097FEB", "radius": 4,
     "tokens": { "surface": "#010203", "onSurface": "#0A0B0C", "font": "Inter" } }
 }"##,
     );
@@ -64,7 +64,7 @@ fn theme_tokens_override_mode_defaults_and_fall_back_per_token() {
   "state": [],
   "tree": { "id": 0, "kind": "Container", "props": { "width": 40, "height": 20 },
     "children": [], "events": {} },
-  "theme": { "mode": "dark", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "dark", "accent": "#097FEB", "radius": 4 }
 }"##,
     );
     let plain_state = StateView::from_ir(&plain);
@@ -79,7 +79,7 @@ fn theme_tokens_change_pixels_deterministically() {
   "ir": "0.1", "app": "T", "state": [],
   "tree": { "id": 0, "kind": "Container", "props": { "width": 60, "height": 40 },
     "children": [], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 8 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 8 }
 }"##,
     );
     let tokened = digest_of(
@@ -87,7 +87,7 @@ fn theme_tokens_change_pixels_deterministically() {
   "ir": "0.1", "app": "T", "state": [],
   "tree": { "id": 0, "kind": "Container", "props": { "width": 60, "height": 40 },
     "children": [], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 8,
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 8,
     "tokens": { "surface": "#123456", "onSurface": "#FFFFFF" } }
 }"##,
     );
@@ -100,7 +100,7 @@ fn theme_tokens_change_pixels_deterministically() {
   "ir": "0.1", "app": "T", "state": [],
   "tree": { "id": 0, "kind": "Container", "props": { "width": 60, "height": 40 },
     "children": [], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 8,
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 8,
     "tokens": { "surface": "#123456", "onSurface": "#FFFFFF" } }
 }"##
         )
@@ -179,7 +179,7 @@ fn margin_pushes_a_child_inside_its_parent() {
       { "id": 1, "kind": "Container", "props": { "width": 20, "height": 20, "margin": 5 },
         "children": [], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 0 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 0 }
 }"##,
     );
     let state = StateView::from_ir(&ir);
@@ -202,7 +202,7 @@ const WHEN_IR: &str = r##"{
           { "id": 3, "kind": "Text", "props": { "value": "hidden" }, "children": [], "events": {} }
         ], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
 
 #[test]
@@ -308,7 +308,7 @@ const KINDS_IR: &str = r##"{
       { "id": 24, "kind": "Avatar", "props": { "label": "AB" }, "children": [], "events": {} },
       { "id": 25, "kind": "Spinner", "props": {}, "children": [], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 6 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 6 }
 }"##;
 
 #[test]
@@ -387,7 +387,7 @@ fn unknown_kind_falls_back_to_container_or_text() {
         "children": [ { "id": 3, "kind": "Text", "props": { "value": "x" }, "children": [], "events": {} } ],
         "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##,
     );
     let state = StateView::from_ir(&ir);
@@ -411,7 +411,7 @@ const ANIM_IR: &str = r##"{
       { "id": 2, "kind": "Container", "props": { "width": 60, "height": 40, "animate": "ease" },
         "children": [], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
 
 #[test]
@@ -465,7 +465,7 @@ fn animate_none_keeps_the_box_stable() {
     "children": [
       { "id": 1, "kind": "Container", "props": { "width": 60, "height": 40 }, "children": [], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##,
     );
     let state = StateView::from_ir(&ir);
@@ -513,7 +513,7 @@ fn multi_action_and_value_from_events_parse() {
       { "op": "add", "target": "a", "value": 1 },
       { "op": "set", "target": "b", "valueFrom": "a" }
     ] } } },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##,
     );
     let tap = &ir.tree.events[0];
@@ -530,7 +530,7 @@ fn add_value_from_parses_and_reads_state_at_event_time() {
   "state": [ { "name": "a", "type": "int", "init": 1 }, { "name": "b", "type": "int", "init": 4 } ],
   "tree": { "id": 0, "kind": "Button", "props": { "label": "go" }, "children": [],
     "events": { "tap": { "op": "add", "target": "a", "valueFrom": "b" } } },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##,
     );
     let action = ir.tree.events[0].action();
@@ -565,7 +565,7 @@ fn add_without_value_or_value_from_is_rejected() {
   "state": [ { "name": "a", "type": "int", "init": 1 }, { "name": "b", "type": "int", "init": 2 } ],
   "tree": { "id": 0, "kind": "Button", "props": { "label": "go" }, "children": [],
     "events": { "tap": { "op": "add", "target": "a" } } },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
     let err = parse_ir(missing).expect_err("an add with no value must be rejected");
     assert!(err.to_string().contains("add needs"));
@@ -585,7 +585,7 @@ fn value_from_type_mismatch_is_rejected() {
   "state": [ { "name": "a", "type": "int", "init": 1 }, { "name": "s", "type": "string", "init": "x" } ],
   "tree": { "id": 0, "kind": "Button", "props": { "label": "go" }, "children": [],
     "events": { "tap": { "op": "set", "target": "a", "valueFrom": "s" } } },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
     let err = parse_ir(bad).expect_err("a type mismatch must be rejected");
     assert!(err.to_string().contains("valueFrom type does not match"));
@@ -664,12 +664,12 @@ fn v0_1_golden_digest_is_unchanged_by_r2_features() {
     let mut renderer = Renderer::new(800, 600);
     assert_eq!(
         digest_hex(&renderer.render(&ir, &state).pixels),
-        "88127ca1577cdb61"
+        "c8403ba57da5ee61"
     );
     let mut renderer = Renderer::new(320, 240);
     assert_eq!(
         digest_hex(&renderer.render(&ir, &state).pixels),
-        "2fc4eac75fd50f89"
+        "900abf4bd93d1e51"
     );
 }
 

@@ -56,7 +56,7 @@ fn prim_ir(kind: &str, extra: &str) -> String {
         props.push_str(extra);
     }
     format!(
-        "{{\"ir\":\"0.1\",\"app\":\"P\",\"state\":[],\"tree\":{{\"id\":0,\"kind\":\"{}\",\"props\":{{{}}},\"children\":[],\"events\":{{}}}},\"theme\":{{\"mode\":\"light\",\"accent\":\"#4F46E5\",\"radius\":4}}}}",
+        "{{\"ir\":\"0.1\",\"app\":\"P\",\"state\":[],\"tree\":{{\"id\":0,\"kind\":\"{}\",\"props\":{{{}}},\"children\":[],\"events\":{{}}}},\"theme\":{{\"mode\":\"light\",\"accent\":\"#097FEB\",\"radius\":4}}}}",
         kind, props
     )
 }
@@ -306,10 +306,10 @@ fn r10_v0_1_golden_digests_are_unchanged() {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).to_string()
     };
-    assert!(run("320", "240", "r10-golden-320.ppm", &[]).contains("digest=2fc4eac75fd50f89"));
-    assert!(run("800", "600", "r10-golden-800.ppm", &[]).contains("digest=88127ca1577cdb61"));
+    assert!(run("320", "240", "r10-golden-320.ppm", &[]).contains("digest=900abf4bd93d1e51"));
+    assert!(run("800", "600", "r10-golden-800.ppm", &[]).contains("digest=c8403ba57da5ee61"));
     assert!(
         run("800", "600", "r10-golden-7.ppm", &["--state", "count=7"])
-            .contains("digest=40891c1fbb81399e")
+            .contains("digest=48a56056bd32a07e")
     );
 }

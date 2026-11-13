@@ -8,7 +8,7 @@ use opurom_render::{
 use std::{fs, path::PathBuf, process::Command as ProcessCommand};
 
 const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/r6_counter_commands.json");
-const BASE_COMMANDS_FNV: &str = "dc5ee1a05b1ee332";
+const BASE_COMMANDS_FNV: &str = "d264d20aa0e577c4";
 
 const IR_HEAD: &str = r##"{
   "ir": "0.1", "app": "EffectsProof",
@@ -29,7 +29,7 @@ const IR_TAIL: &str = r##" },
             "children": [], "events": {} }
         ], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "dark", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "dark", "accent": "#097FEB", "radius": 4 }
 }"##;
 
 const BLUR: &str = r#"[{"kind":"blur","radius":3}]"#;
@@ -301,7 +301,7 @@ const CLIP_TAIL: &str = r##" }, "children": [], "events": {} }
         "props": { "width": 80, "height": 20, "color": "#445566" },
         "children": [], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 0 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 0 }
 }"##;
 
 fn clip_ir(effects: Option<&str>) -> String {
@@ -342,17 +342,17 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
     let state = StateView::from_ir(&ir);
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
-        "2fc4eac75fd50f89"
+        "900abf4bd93d1e51"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
-        "88127ca1577cdb61"
+        "c8403ba57da5ee61"
     );
     let mut count_7 = state.clone();
     count_7.set("count", StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &count_7).pixels),
-        "40891c1fbb81399e"
+        "48a56056bd32a07e"
     );
     assert!(!ir.has_visual_effects());
 
@@ -373,7 +373,7 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "digest=2fc4eac75fd50f89\ndirty=1\n"
+        "digest=900abf4bd93d1e51\ndirty=1\n"
     );
     let bytes = fs::read(&commands).unwrap();
     assert_eq!(bytes.as_slice(), BASE_COMMANDS);

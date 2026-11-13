@@ -48,7 +48,7 @@ const COUNTER_IR: &str = r##"{
     ],
     "events": {}
   },
-  "theme": { "mode": "system", "accent": "#4F46E5", "radius": 12 }
+  "theme": { "mode": "system", "accent": "#097FEB", "radius": 12 }
 }"##;
 
 fn fixture() -> (Ir, StateView) {
@@ -78,7 +78,7 @@ const KIT_IR: &str = r##"{
         { "id": 8, "kind": "Spacer", "props": { "width": 5, "height": 5 }, "children": [], "events": {} }
       ], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 12 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 12 }
 }"##;
 
 #[test]
@@ -111,7 +111,7 @@ fn golden_digest_is_stable() {
     let view = frame.view();
     assert_eq!((view.width, view.height), (800, 600));
     assert_eq!(view.pixels, frame.pixels.as_slice());
-    assert_eq!(digest_hex(&frame.pixels), "88127ca1577cdb61");
+    assert_eq!(digest_hex(&frame.pixels), "c8403ba57da5ee61");
 }
 
 #[test]
@@ -230,7 +230,7 @@ fn theme_mode_and_accent_change_pixels() {
     let renderer = Renderer::new(320, 240);
     let base = renderer.pixels(&ir, &state);
     let dark = parse_ir(&COUNTER_IR.replace("\"mode\": \"system\"", "\"mode\": \"dark\"")).unwrap();
-    let accent = parse_ir(&COUNTER_IR.replace("#4F46E5", "#E5464F")).unwrap();
+    let accent = parse_ir(&COUNTER_IR.replace("#097FEB", "#E5464F")).unwrap();
     assert_ne!(base, renderer.pixels(&dark, &state));
     assert_ne!(base, renderer.pixels(&accent, &state));
     assert_eq!(base, renderer.pixels(&ir, &state));
@@ -248,7 +248,7 @@ fn malformed_ir_is_rejected_with_readable_diagnostics() {
             COUNTER_IR.replace("\"id\": 3", "\"id\": 9"),
             "pre-order",
         ),
-        (COUNTER_IR.replace("#4F46E5", "#GGGGGG"), "theme.accent"),
+        (COUNTER_IR.replace("#097FEB", "#GGGGGG"), "theme.accent"),
         (
             COUNTER_IR.replace("\"init\": 0", "\"init\": true"),
             "type does not match",

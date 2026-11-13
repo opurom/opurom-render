@@ -50,7 +50,7 @@ const COUNTER_IR: &str = r##"{
     ],
     "events": {}
   },
-  "theme": { "mode": "system", "accent": "#4F46E5", "radius": 12 }
+  "theme": { "mode": "system", "accent": "#097FEB", "radius": 12 }
 }"##;
 
 /// A grid with six cells and no explicit `columns`, so the fluid grid decides
@@ -73,7 +73,7 @@ const FLUID_GRID_IR: &str = r##"{
     ],
     "events": {}
   },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
 
 fn counter() -> (Ir, StateView) {
@@ -390,19 +390,19 @@ fn the_three_golden_digests_are_unchanged() {
     let mut small = Renderer::new(320, 240);
     assert_eq!(
         digest_hex(&small.render(&ir, &state).pixels),
-        "2fc4eac75fd50f89"
+        "900abf4bd93d1e51"
     );
     let mut large = Renderer::new(800, 600);
     assert_eq!(
         digest_hex(&large.render(&ir, &state).pixels),
-        "88127ca1577cdb61"
+        "c8403ba57da5ee61"
     );
     let (ir, mut state) = counter();
     state.set("count", StateValue::Int(7));
     let mut seven = Renderer::new(800, 600);
     assert_eq!(
         digest_hex(&seven.render(&ir, &state).pixels),
-        "40891c1fbb81399e"
+        "48a56056bd32a07e"
     );
 }
 

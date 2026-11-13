@@ -335,7 +335,7 @@ const CLI_IR: &str = r##"{
       { "id": 2, "kind": "Container", "props": { "width": 60, "height": 40, "animate": "spring" },
         "children": [], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
 
 const INERTIA_IR: &str = r##"{
@@ -345,7 +345,7 @@ const INERTIA_IR: &str = r##"{
       { "id": 1, "kind": "Container", "props": { "width": 60, "height": 40, "animate": "inertia" },
         "children": [], "events": {} }
     ], "events": {} },
-  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
 }"##;
 
 fn cli_output(ir_path: &PathBuf, ppm: &PathBuf, args: &[&str]) -> std::process::Output {
@@ -449,16 +449,16 @@ fn v0_1_golden_digests_are_unchanged_by_r5() {
     let state = StateView::from_ir(&ir);
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
-        "2fc4eac75fd50f89"
+        "900abf4bd93d1e51"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
-        "88127ca1577cdb61"
+        "c8403ba57da5ee61"
     );
     let mut count_7 = state.clone();
     count_7.set("count", StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &count_7).pixels),
-        "40891c1fbb81399e"
+        "48a56056bd32a07e"
     );
 }
