@@ -280,6 +280,23 @@ pub(crate) fn text_size(p: &Props, default_size: i64) -> i64 {
     }
 }
 
+/// Global `theme.fontScale` is the default for nodes without their own
+/// `fontScale` prop: clone the tree once and fill the effective value in, so
+/// text measurement, glyph sizing and the accessibility tree all agree.
+pub(crate) fn with_theme_font_scale(root: &Node, global: Option<i64>) -> Node {
+    fn fill(n: &mut Node, global: Option<i64>) {
+        if n.props.font_scale.is_none() {
+            n.props.font_scale = global;
+        }
+        for c in &mut n.children {
+            fill(c, global);
+        }
+    }
+    let mut n = root.clone();
+    fill(&mut n, global);
+    n
+}
+
 fn font_scale(p: &Props, default_size: i64) -> i64 {
     (text_size(p, default_size).saturating_add(3) / 7).clamp(1, 8)
 }
@@ -511,6 +528,7 @@ pub fn layout_at(
 ) -> Vec<LaidOut> {
     let bp = Breakpoint::from_width(width);
     let pal = Palette::from_theme(&ir.theme);
+    let tree = with_theme_font_scale(&ir.tree, ir.theme.font_scale);
     let mut out = Vec::new();
     let mut root = Rect {
         x: 0,
@@ -518,14 +536,14 @@ pub fn layout_at(
         w: width as i64,
         h: height as i64,
     };
-    if let Some(w) = ir.tree.props.width {
+    if let Some(w) = tree.props.width {
         root.w = root.w.min(w);
     }
-    if let Some(h) = ir.tree.props.height {
+    if let Some(h) = tree.props.height {
         root.h = root.h.min(h);
     }
     place(
-        &ir.tree,
+        &tree,
         root,
         bp,
         &pal,

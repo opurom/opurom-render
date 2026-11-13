@@ -6,7 +6,9 @@
 //! forced true when that layout can place them, otherwise from zeros.
 
 use crate::ir::{Ir, Kind, Node, Role, StateValue, StateView, ValueType};
-use crate::layout::{layout_at, node_text, text_size, visible, Rect, SETTLED_MS};
+use crate::layout::{
+    layout_at, node_text, text_size, visible, with_theme_font_scale, Rect, SETTLED_MS,
+};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -136,9 +138,10 @@ pub fn a11y_tree_at(
         }
     }
     let expanded_bounds = rect_map(ir, &expanded, width, height, elapsed_ms);
+    let tree = with_theme_font_scale(&ir.tree, ir.theme.font_scale);
     let mut out = Vec::new();
     walk(
-        &ir.tree,
+        &tree,
         state,
         &visible_bounds,
         &expanded_bounds,
