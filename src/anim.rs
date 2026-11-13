@@ -114,6 +114,54 @@ fn inertia(elapsed_ms: i64) -> i64 {
     x
 }
 
+/// Deterministic integer frame rate of the animation clock.
+///
+/// The animation objective names 60 and 120 fps. Each frame advances the
+/// fixed-timestep clock by the integer interval `1000 / hz` (truncated), so a
+/// tick sequence depends only on the frame count and never on a wall clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameRate {
+    Hz60,
+    Hz120,
+}
+
+impl FrameRate {
+    pub fn parse(s: &str) -> Option<FrameRate> {
+        Some(match s {
+            "60" => FrameRate::Hz60,
+            "120" => FrameRate::Hz120,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            FrameRate::Hz60 => "60",
+            FrameRate::Hz120 => "120",
+        }
+    }
+
+    /// Integer millisecond interval between two frames: `1000 / hz` truncated.
+    pub const fn frame_interval_ms(self) -> i64 {
+        match self {
+            FrameRate::Hz60 => 16,
+            FrameRate::Hz120 => 8,
+        }
+    }
+
+    /// The per-frame budget a caller hands to `choose_quality`. At 120 fps a
+    /// frame has half the time of a 60 fps frame, so the same caller-supplied
+    /// policy degrades automatically.
+    pub const fn budget_ms(self) -> i64 {
+        self.frame_interval_ms()
+    }
+
+    /// Millisecond clock position of the `frame`-th tick (0-based).
+    pub const fn frame_ms(self, frame: i64) -> i64 {
+        frame.saturating_mul(self.frame_interval_ms())
+    }
+}
+
 /// Fixed-timestep driver. `tick(dt_ms)` is the only clock source.
 pub struct Animator {
     elapsed_ms: i64,
@@ -128,6 +176,12 @@ impl Animator {
     pub fn tick(&mut self, dt_ms: i64) -> i64 {
         self.elapsed_ms = self.elapsed_ms.saturating_add(dt_ms.max(0));
         self.elapsed_ms
+    }
+
+    /// Advance the clock by one integer frame interval of `rate` and return the
+    /// new elapsed time. `tick_frame(rate)` is exactly `tick(rate.frame_interval_ms())`.
+    pub fn tick_frame(&mut self, rate: FrameRate) -> i64 {
+        self.tick(rate.frame_interval_ms())
     }
 
     pub fn elapsed_ms(&self) -> i64 {
@@ -754,5 +808,78 @@ mod tests {
         bounced.step_mode(StepMode::Bounce);
         assert!(bounced.particles[0].x < PARTICLE_FIELD - 1);
         assert!(bounced.particles[0].vx < 0);
+    }
+
+    #[test]
+    fn frame_rate_parses_names_and_intervals() {
+        assert_eq!(FrameRate::parse("60"), Some(FrameRate::Hz60));
+        assert_eq!(FrameRate::parse("120"), Some(FrameRate::Hz120));
+        assert_eq!(FrameRate::parse("30"), None);
+        assert_eq!(FrameRate::Hz60.name(), "60");
+        assert_eq!(FrameRate::Hz120.name(), "120");
+        // The intervals are the truncated integer `1000 / hz`, matching the
+        // fixed step the curves are already integrated with.
+        assert_eq!(FrameRate::Hz60.frame_interval_ms(), 16);
+        assert_eq!(FrameRate::Hz120.frame_interval_ms(), 8);
+        assert_eq!(FrameRate::Hz60.budget_ms(), 16);
+        assert_eq!(FrameRate::Hz120.budget_ms(), 8);
+    }
+
+    #[test]
+    fn frame_ms_is_the_integer_multiple_of_the_interval() {
+        for rate in [FrameRate::Hz60, FrameRate::Hz120] {
+            for frame in 0..=500i64 {
+                assert_eq!(rate.frame_ms(frame), frame * rate.frame_interval_ms());
+            }
+            assert_eq!(rate.frame_ms(0), 0);
+            // A larger frame count never moves backwards.
+            assert!(rate.frame_ms(120) > rate.frame_ms(119));
+        }
+        // 120 fps reaches a given clock position in half the frames.
+        assert_eq!(FrameRate::Hz120.frame_ms(60), FrameRate::Hz60.frame_ms(30));
+    }
+
+    #[test]
+    fn frame_ticks_advance_the_clock_deterministically() {
+        let mut first = Animator::new();
+        let mut second = Animator::new();
+        for frame in 1..=64 {
+            assert_eq!(
+                first.tick_frame(FrameRate::Hz60),
+                FrameRate::Hz60.frame_ms(frame)
+            );
+            second.tick_frame(FrameRate::Hz60);
+        }
+        assert_eq!(
+            first.elapsed_ms(),
+            second.elapsed_ms(),
+            "the same frame count must tick identically"
+        );
+        assert_eq!(first.elapsed_ms(), 64 * 16);
+
+        // `tick_frame` is exactly `tick(interval_ms)`: two clocks advanced in
+        // lockstep stay at the same elapsed position.
+        let mut via_frame = Animator::new();
+        let mut via_tick = Animator::new();
+        for _ in 0..10 {
+            let frame_elapsed = via_frame.tick_frame(FrameRate::Hz120);
+            let tick_elapsed = via_tick.tick(FrameRate::Hz120.frame_interval_ms());
+            assert_eq!(frame_elapsed, tick_elapsed);
+        }
+    }
+
+    #[test]
+    fn frame_rate_budget_degrades_at_120fps() {
+        // A 60 fps frame keeps the full tier; a 120 fps frame has half the
+        // budget and the same caller-supplied policy degrades automatically.
+        let at_60 = choose_quality(FrameRate::Hz60.budget_ms(), 8, true);
+        let at_120 = choose_quality(FrameRate::Hz120.budget_ms(), 8, true);
+        assert_eq!(at_60.effects_enabled, true);
+        assert_eq!(at_120.effects_enabled, false);
+        assert!(at_120.particle_count < at_60.particle_count);
+        assert_eq!(at_60.particle_count, 8);
+        assert_eq!(at_120.particle_count, 6);
+        assert_eq!(at_60, choose_quality(16, 8, true));
+        assert_eq!(at_120, choose_quality(8, 8, true));
     }
 }

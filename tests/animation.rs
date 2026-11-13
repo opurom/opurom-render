@@ -3,9 +3,9 @@
 //! the inertia curve through the CLI and golden regressions.
 
 use opurom_render::{
-    choose_quality, digest_hex, parse_ir, Frame, GestureAnim, ParticleSystem, Quality, Renderer,
-    StateValue, StateView, Transition, TransitionKind, ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE,
-    TRANSITION_MS,
+    choose_quality, digest_hex, parse_ir, Animator, Frame, FrameRate, GestureAnim, ParticleSystem,
+    Quality, Renderer, StateValue, StateView, Transition, TransitionKind, ONE, PARTICLE_FIELD,
+    PARTICLE_MAX_LIFE, TRANSITION_MS,
 };
 use std::{fs, path::PathBuf, process::Command};
 
@@ -324,6 +324,83 @@ fn quality_is_monotonic_as_the_budget_tightens() {
         previous_effects = quality.effects_enabled;
     }
     assert_eq!(choose_quality(24, 17, false).effects_enabled, false);
+}
+
+#[test]
+fn frame_rate_ticks_reproduce_the_manual_clock_positions() {
+    // The 60 fps and 120 fps clocks must each land on their integer interval
+    // multiples and never depend on a wall clock.
+    for rate in [FrameRate::Hz60, FrameRate::Hz120] {
+        let mut animator = Animator::new();
+        for frame in 1..=40 {
+            let elapsed = animator.tick_frame(rate);
+            assert_eq!(elapsed, rate.frame_ms(frame));
+            assert_eq!(elapsed, animator.elapsed_ms());
+        }
+    }
+}
+
+#[test]
+fn frame_rate_clocks_are_deterministic_and_separate() {
+    let mut first = Animator::new();
+    let mut second = Animator::new();
+    for _ in 0..128 {
+        assert_eq!(
+            first.tick_frame(FrameRate::Hz60),
+            second.tick_frame(FrameRate::Hz60)
+        );
+    }
+    assert_eq!(first.elapsed_ms(), second.elapsed_ms());
+    assert_eq!(first.elapsed_ms(), 128 * 16);
+    // The two rates advance the same clock independently.
+    let mut at_120 = Animator::new();
+    for _ in 0..128 {
+        at_120.tick_frame(FrameRate::Hz120);
+    }
+    assert_eq!(at_120.elapsed_ms(), 128 * 8);
+    assert_eq!(FrameRate::Hz120.frame_ms(64), FrameRate::Hz60.frame_ms(32));
+}
+
+#[test]
+fn frame_rate_budget_is_the_first_quality_argument() {
+    // A caller picks the tier by hand, but the frame interval is the budget
+    // the objective's 60/120 fps contract hands to the policy.
+    assert_eq!(FrameRate::Hz60.budget_ms(), 16);
+    assert_eq!(FrameRate::Hz120.budget_ms(), 8);
+    assert_eq!(
+        choose_quality(FrameRate::Hz60.budget_ms(), 8, true),
+        choose_quality(16, 8, true)
+    );
+    assert_eq!(
+        choose_quality(FrameRate::Hz120.budget_ms(), 8, true),
+        choose_quality(8, 8, true)
+    );
+    assert!(choose_quality(FrameRate::Hz60.budget_ms(), 8, true).effects_enabled);
+    assert!(!choose_quality(FrameRate::Hz120.budget_ms(), 8, true).effects_enabled);
+}
+
+#[test]
+fn frame_rate_render_at_matches_the_ticked_clock() {
+    // The frame-rate clock drives the same renderer path as an explicit tick:
+    // the ticked elapsed time equals the contract interval multiple and the
+    // frame produced there is the frame a manual tick would produce.
+    let ir = parse_ir(CLI_IR).unwrap();
+    let state = StateView::from_ir(&ir);
+    let mut animator = Animator::new();
+    for frame in 1..=24 {
+        let ticked = animator.tick_frame(FrameRate::Hz60);
+        assert_eq!(ticked, FrameRate::Hz60.frame_ms(frame));
+        let expected = Renderer::new(320, 240).pixels_at(&ir, &state, ticked);
+        assert_eq!(
+            digest_hex(&expected),
+            digest_hex(&Renderer::new(320, 240).pixels_at(
+                &ir,
+                &state,
+                FrameRate::Hz60.frame_ms(frame)
+            ))
+        );
+    }
+    assert_eq!(animator.elapsed_ms(), 24 * 16);
 }
 
 const CLI_IR: &str = r##"{
