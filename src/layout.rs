@@ -180,6 +180,8 @@ pub struct LaidOut {
     pub border: Option<Rgba>,
     pub border_w: i64,
     pub text: Option<String>,
+    /// Built-in icon name for `Kind::Icon`, or `None` when it has none.
+    pub icon_name: Option<String>,
     pub text_color: Option<Rgba>,
     pub text_scale: i64,
     pub text_align: Align,
@@ -826,6 +828,14 @@ fn place(
         opacity: (n.props.opacity.unwrap_or(UNIT) * anim_p) / UNIT,
     };
 
+    // The icon glyph is drawn from the declared name; the fallback glyph is
+    // only a safety net for a name the language layer failed to reject.
+    let icon_name = if n.kind == Kind::Icon {
+        n.props.name.clone()
+    } else {
+        None
+    };
+
     out.push(LaidOut {
         id: n.id,
         kind: n.kind,
@@ -836,6 +846,7 @@ fn place(
         border,
         border_w,
         text,
+        icon_name,
         text_color,
         text_scale: scale,
         text_align,

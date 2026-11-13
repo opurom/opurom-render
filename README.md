@@ -148,6 +148,23 @@ line is clipped and a node too short for its wrapped lines clips the excess
 rather than overlapping the next node. Text that already fits keeps its
 historical single-line placement, so the pinned golden frames remain byte-identical.
 
+## Built-in icons
+
+`Kind::Icon` renders a glyph from a built-in set of 31 named icons (home,
+settings, star, search, plus, minus, check, close, arrow_back, arrow_forward,
+refresh, lock, user, bell, heart, info, warning, chevron_right, chevron_down,
+download, upload, play, pause, edit, delete, eye, calendar, location, folder,
+mail and chat). Each icon is an integer vector path authored in a 24x24 box as
+filled polygons, stroked polylines and circles, stored in Rust data with no
+external font or image files. The renderer scales the path to fit the node
+rectangle, centres it, and samples it with the same fixed-point coverage
+technique as the built-in text font, so the glyph stays crisp at any size and
+is deterministic. The glyph is painted in the node's text colour with the
+accent colour as the fallback and honours the node opacity. A name outside the
+set does not reach the renderer because the language layer rejects it, but the
+renderer still paints a neutral disc so the node never renders blank. The three
+pinned golden frames contain no icon nodes and are unaffected.
+
 ## Interactive UI features (IR_ADDITIONS)
 
 All interactive UI fields are **additive and opt-in**. A v0.1 IR file renders
