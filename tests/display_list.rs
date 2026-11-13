@@ -7,7 +7,7 @@ use opurom_render::{
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command as ProcessCommand};
 
-const RECT_GRADIENT_IR: &str = include_str!("fixtures/r6_rect_gradient.opuir.json");
+const RECT_GRADIENT_IR: &str = include_str!("fixtures/rect-gradient.opuir.json");
 
 fn fixture() -> (Ir, StateView) {
     let ir = parse_ir(RECT_GRADIENT_IR).unwrap();

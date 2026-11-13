@@ -7,7 +7,7 @@ use opurom_render::{
 };
 use std::{fs, path::PathBuf, process::Command as ProcessCommand};
 
-const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/r6_counter_commands.json");
+const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/counter-commands.json");
 const BASE_COMMANDS_FNV: &str = "d264d20aa0e577c4";
 
 const IR_HEAD: &str = r##"{

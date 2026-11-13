@@ -5,8 +5,8 @@ use opurom_render::{digest_hex, parse_ir, DisplayList, Renderer, Rgba, StateView
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command};
 
-const FIXTURE_IR: &str = include_str!("fixtures/r9_effect.opuir.json");
-const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/r6_counter_commands.json");
+const FIXTURE_IR: &str = include_str!("fixtures/effects.opuir.json");
+const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/counter-commands.json");
 
 fn ir_with(effects: &str) -> String {
     format!(

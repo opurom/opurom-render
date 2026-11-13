@@ -38,7 +38,7 @@ cargo build --offline
 # writes a deterministic SVG 1.1 snapshot (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 320 240 out.ppm --commands commands.json
 # writes the exact display list (stdout unchanged)
-./target/debug/opurom-render tests/fixtures/r9_effect.opuir.json 96 64 fx.ppm --commands fx.commands.json
+./target/debug/opurom-render tests/fixtures/effects.opuir.json 96 64 fx.ppm --commands fx.commands.json
 # writes the display list plus effect commands (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --transition slide --tick 16
 # deterministic transition digest (stdout still exactly digest=... and dirty=...)
@@ -451,17 +451,17 @@ frame before a node's draws), `effect_mask` (snapshot the rounded silhouette
 from the frame/backdrop diff), `effect_shadow`, `effect_glow`, `effect_glass`,
 `effect_liquid` (one per local effect in IR order), and `effect_blur` (whole-frame
 passes appended after all nodes, in pre-order layout order). Effect-free IR emits
-none of them: `tests/fixtures/r6_counter_commands.json` still matches
+none of them: `tests/fixtures/counter-commands.json` still matches
 byte-for-byte, and the three golden digests are unchanged.
 
 The independent `opurom-gpu` repository executes that stream in real MSL
 compute kernels: one thread per viewport pixel, multiple dispatched passes for
 frame snapshots, silhouette masks, local effects and separable whole-frame
 blurs, with real buffer readback. For the committed effect fixture
-`tests/fixtures/r9_effect.opuir.json` at `96 64`, the real cross-repo proof is:
+`tests/fixtures/effects.opuir.json` at `96 64`, the real cross-repo proof is:
 
 ```sh
-./target/debug/opurom-render tests/fixtures/r9_effect.opuir.json 96 64 cpu.ppm \
+./target/debug/opurom-render tests/fixtures/effects.opuir.json 96 64 cpu.ppm \
   --commands fx.commands.json     # digest=ab00722ca3ae679a, dirty=1
 ../opurom-gpu/target/debug/opurom-gpu raster fx.commands.json gpu.ppm
 cmp cpu.ppm gpu.ppm                # exit 0, byte-identical
