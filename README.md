@@ -19,7 +19,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs the Rust unit and integration suites. All pass,
+`cargo test --offline` runs the Rust unit and integration suites. All pass without
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
