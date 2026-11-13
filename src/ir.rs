@@ -370,6 +370,7 @@ pub struct Props {
 pub enum Op {
     Set,
     Add,
+    Sub,
     Toggle,
 }
 
@@ -1028,6 +1029,7 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
     let op = match string_field(a, "op", what)?.as_str() {
         "set" => Op::Set,
         "add" => Op::Add,
+        "sub" => Op::Sub,
         "toggle" => Op::Toggle,
         other => return Err(bad(format!("{what}.op has unknown value {other:?}"))),
     };
@@ -1053,8 +1055,11 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
                     "{what}.valueFrom type does not match {target:?}"
                 )));
             }
-            if op == Op::Add && decl.typ != ValueType::Int {
-                return Err(bad(format!("{what}: add needs an int target")));
+            if matches!(op, Op::Add | Op::Sub) && decl.typ != ValueType::Int {
+                return Err(bad(format!(
+                    "{what}: {} needs an int target",
+                    if op == Op::Sub { "sub" } else { "add" }
+                )));
             }
             Some(name)
         }
@@ -1065,7 +1070,8 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         None => None,
     };
     match op {
-        Op::Add => {
+        Op::Add | Op::Sub => {
+            let label = if op == Op::Sub { "sub" } else { "add" };
             let numeric = match &value {
                 Some(StateValue::Int(_)) => true,
                 Some(_) => false,
@@ -1073,7 +1079,7 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
             };
             if decl.typ != ValueType::Int || !numeric {
                 return Err(bad(format!(
-                    "{what}: add needs an int target and an int value or valueFrom"
+                    "{what}: {label} needs an int target and an int value or valueFrom"
                 )));
             }
         }

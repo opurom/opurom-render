@@ -13,7 +13,6 @@ compatibility.
 ## Verify
 
 ```sh
-export PATH="$HOME/.cargo/bin:$PATH"
 cd opurom-render
 cargo fmt --all
 cargo fmt --check
