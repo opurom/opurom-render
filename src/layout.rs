@@ -119,6 +119,11 @@ pub enum Control {
     Tooltip {
         text: String,
     },
+    // R10 extended primitive: its code and integer series drive the drawing.
+    R10 {
+        code: u16,
+        values: Vec<i64>,
+    },
 }
 
 /// One laid-out node; the raster draws these in pre-order with no further decisions.
@@ -385,6 +390,7 @@ fn natural_w(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
         Kind::Calendar => 140,
         Kind::RichText | Kind::Player => 160,
         Kind::Menu | Kind::Tooltip => 120,
+        Kind::Extended(_) => 160,
         Kind::Other => {
             if leaf_like(n) {
                 text_width(&node_text(n, state), scale)
@@ -422,6 +428,7 @@ fn natural_h(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
         Kind::Calendar => 120,
         Kind::RichText | Kind::Menu => 100,
         Kind::Player | Kind::Tooltip => 40,
+        Kind::Extended(_) => 100,
         Kind::Other => {
             if leaf_like(n) {
                 font::GLYPH_H.saturating_mul(scale)
@@ -587,6 +594,10 @@ fn control_of(n: &Node, state: &StateView) -> Option<Control> {
                     .unwrap_or(""),
             ),
         }),
+        Kind::Extended(code) => Some(Control::R10 {
+            code,
+            values: n.props.values.clone(),
+        }),
         _ => None,
     }
 }
@@ -670,7 +681,8 @@ fn place(
         | Kind::Player
         | Kind::Map
         | Kind::Menu
-        | Kind::Tooltip => (
+        | Kind::Tooltip
+        | Kind::Extended(_) => (
             Some(n.props.color.unwrap_or(pal.surface)),
             Some(n.props.border.unwrap_or(pal.border)),
             1,

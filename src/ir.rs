@@ -108,9 +108,11 @@ pub struct StateDecl {
     pub init: StateValue,
 }
 
-/// The 32 IR node kinds (v0.1 eight + R2 sixteen + R4 eight). `Other` is a kind
-/// this renderer does not know: it is rendered with the documented fallback
-/// (Container with children, else Text).
+/// The 32 IR node kinds (v0.1 eight + R2 sixteen + R4 eight), plus R10's 68
+/// extended primitive kinds carried as `Extended(code)` where `code` indexes
+/// `crate::primitives::SPECS`. `Other` is a kind this renderer does not know:
+/// it is rendered with the documented fallback (Container with children, else
+/// Text).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Column,
@@ -146,6 +148,8 @@ pub enum Kind {
     Map,
     Menu,
     Tooltip,
+    // R10 distinct primitives, resolved through `crate::primitives`.
+    Extended(u16),
     Other,
 }
 
@@ -184,11 +188,13 @@ impl Kind {
             Kind::Map => "Map",
             Kind::Menu => "Menu",
             Kind::Tooltip => "Tooltip",
+            Kind::Extended(code) => crate::primitives::name_of(code),
             Kind::Other => "Other",
         }
     }
 
-    /// Unknown kinds never fail the parse: they degrade to `Other`.
+    /// Unknown kinds never fail the parse: they degrade to `Other`. An R10
+    /// extended primitive resolves to `Extended(code)` first.
     pub fn parse(s: &str) -> Kind {
         match s {
             "Column" => Kind::Column,
@@ -223,7 +229,10 @@ impl Kind {
             "Map" => Kind::Map,
             "Menu" => Kind::Menu,
             "Tooltip" => Kind::Tooltip,
-            _ => Kind::Other,
+            _ => match crate::primitives::parse(s) {
+                Some(code) => Kind::Extended(code),
+                None => Kind::Other,
+            },
         }
     }
 
@@ -254,6 +263,7 @@ impl Kind {
                 | Kind::Map
                 | Kind::Menu
                 | Kind::Tooltip
+                | Kind::Extended(_)
         )
     }
 }

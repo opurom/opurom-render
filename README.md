@@ -20,7 +20,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 111 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 123 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -98,7 +98,8 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
 ```
 
 - `src/ir.rs` — strictly validates `ir == "0.1"`, state decls/types/inits, pre-order
-  node ids, the 32 node kinds, known props, event actions (targets/types) and the
+  node ids, the 100 node kinds (32 R1-R9 + 68 R10), known props, event actions
+  (targets/types) and the
   theme. Unknown props are ignored. Errors are `IrError(String)` values.
 - `src/layout.rs` — pure integer layout. Breakpoints on **logical px**: compact
   `<600`, medium `<900`, expanded `>=900`. `Row` collapses to a vertical stack in
@@ -423,10 +424,131 @@ comparison against the independent software renderer, not a self-comparison.
 window, no GPU text (glyphs remain CPU-decomposed rects), no Vulkan/ANGLE/D3D
 backend and no fps claim. The CPU renderer remains the reference oracle.
 
-## Honest status (round 9)
+## R10 68 additional distinct primitives (R10_ADDENDUM section 1)
+
+R10 extends the library from 116 named components / 32 primitives to **216 named
+components mapped onto 100 DISTINCT primitive kinds**: the 32 R1-R9 kinds plus 68
+new ones. Each new kind is a real, deterministic software drawing in
+[`src/primitives.rs`](src/primitives.rs) (with its generated
+[`src/primitives/specs.rs`](src/primitives/specs.rs) table), **not** an alias,
+**not** the Container/Text fallback and **not** a parameter-only variation of an
+existing kind. There are no new crates: every pixel is written with integer
+`i64`/`i128` arithmetic, no wall clock, no `rand`, no floats and no host queries.
+
+The implementation is a small shared raster engine, not 68 copies of one
+function: 25 distinct geometric motifs (bars, polyline, area, pie, donut,
+scatter, stacked segments, rings, spokes, grid, heatmap, steps, triangle wave,
+ruler, crosshair, chevrons, gauge, treemap blocks, corner brackets, spectrum,
+ladder, dot matrix, checkerboard, pyramid) are parameterised by a per-kind code
+and by the optional `values` integer series. A seven-cell identity band encodes
+the kind code, so every kind's frame is pairwise-distinct by construction.
+
+Parsed as `Kind::Extended(code)`, each new kind keeps the normal rounded box and
+border, is a leaf, carries its documented prop schema in `primitives::SPECS`, and
+has an explicit default a11y role (one of the R3 seven). The SVG 1.1 backend
+emits the box and the correct `data-role`, and the a11y tree reports the role and
+bounds. `tests/r10.rs` proves all 68 differ from the fallback, from every R1-R9
+kind and from each other, are deterministic across repeated renders and across
+separate CLI processes, and that the three V0.1 golden digests are unchanged.
+
+| Family | Kinds |
+| --- | --- |
+| data / charts | Gauge, Sparkline, AreaChart, PieChart, DonutChart, ScatterPlot, StackedBar, Histogram, Heatmap, Treemap, Waterfall, BulletChart, FunnelChart, Waveform, Equalizer, Candlestick, BubbleChart, PolarChart |
+| navigation | Breadcrumbs, Pagination, Stepper, Sidebar, TabStrip, NavRail, AnchorBar, ProgressSteps, MenuBar, TocTree |
+| form / input | Rating, Dial, Knob, ColorWell, DateField, TimeField, SelectBox, ComboBox, SearchBar, PinInput, SegmentedInput, UploadZone |
+| media | WaveformPlayer, Spectrogram, Filmstrip, ThumbnailGrid, QrGlyph, BarcodeGlyph, ColorPalette, ZoomLens |
+| feedback / indicators | LevelMeter, SignalBars, BatteryMeter, Thermometer, Speedometer, Compass, ProgressRing, ActivityRing, KpiTile, StatCard |
+| layout / decoration | CornerFrame, CrosshairMark, LadderDivider, ChevronDivider, GridOverlay, CheckerBackdrop, DotPattern, RingBadge, StairDivider, BracketPanel |
+
+Full per-kind documentation (prop schema, motif, a11y role):
+
+| # | Kind | Family | Geometric motif | Documented prop schema | Default a11y role |
+| --- | --- | --- | --- | --- | --- |
+| 0 | `Gauge` | data | Gauge | Gauge accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `slider` |
+| 1 | `Sparkline` | data | LineChart | Sparkline accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 2 | `AreaChart` | data | AreaChart | AreaChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 3 | `PieChart` | data | Pie | PieChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 4 | `DonutChart` | data | Donut | DonutChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 5 | `ScatterPlot` | data | Scatter | ScatterPlot accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 6 | `StackedBar` | data | Stacked | StackedBar accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 7 | `Histogram` | data | Bars | Histogram accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 8 | `Heatmap` | data | GridCells | Heatmap accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 9 | `Treemap` | data | Blocks | Treemap accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 10 | `Waterfall` | data | Steps | Waterfall accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 11 | `BulletChart` | data | Ruler | BulletChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 12 | `FunnelChart` | data | Chevrons | FunnelChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 13 | `Waveform` | data | Wave | Waveform accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 14 | `Equalizer` | data | Spectrum | Equalizer accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 15 | `Candlestick` | data | Ladder | Candlestick accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 16 | `BubbleChart` | data | Rings | BubbleChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 17 | `PolarChart` | data | Spokes | PolarChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB | `image` |
+| 18 | `Breadcrumbs` | navigation | Chevrons | Breadcrumbs accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `button` |
+| 19 | `Pagination` | navigation | DotMatrix | Pagination accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `button` |
+| 20 | `Stepper` | navigation | Steps | Stepper accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `button` |
+| 21 | `Sidebar` | navigation | Brackets | Sidebar accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `none` |
+| 22 | `TabStrip` | navigation | HBars | TabStrip accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `button` |
+| 23 | `NavRail` | navigation | Ladder | NavRail accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `button` |
+| 24 | `AnchorBar` | navigation | Ruler | AnchorBar accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `button` |
+| 25 | `ProgressSteps` | navigation | Chevrons | ProgressSteps accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `none` |
+| 26 | `MenuBar` | navigation | HBars | MenuBar accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `button` |
+| 27 | `TocTree` | navigation | Blocks | TocTree accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB | `none` |
+| 28 | `Rating` | form | DotMatrix | Rating accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `slider` |
+| 29 | `Dial` | form | Gauge | Dial accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `slider` |
+| 30 | `Knob` | form | Donut | Knob accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `slider` |
+| 31 | `ColorWell` | form | Checker | ColorWell accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `button` |
+| 32 | `DateField` | form | GridCells | DateField accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `text` |
+| 33 | `TimeField` | form | Rings | TimeField accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `text` |
+| 34 | `SelectBox` | form | Brackets | SelectBox accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `button` |
+| 35 | `ComboBox` | form | Chevrons | ComboBox accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `button` |
+| 36 | `SearchBar` | form | Crosshair | SearchBar accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `text` |
+| 37 | `PinInput` | form | Checker | PinInput accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `text` |
+| 38 | `SegmentedInput` | form | Stacked | SegmentedInput accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `checkbox` |
+| 39 | `UploadZone` | form | Brackets | UploadZone accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB | `button` |
+| 40 | `WaveformPlayer` | media | Wave | WaveformPlayer accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int | `button` |
+| 41 | `Spectrogram` | media | Heat | Spectrogram accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int | `image` |
+| 42 | `Filmstrip` | media | HBars | Filmstrip accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int | `image` |
+| 43 | `ThumbnailGrid` | media | GridCells | ThumbnailGrid accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int | `image` |
+| 44 | `QrGlyph` | media | DotMatrix | QrGlyph accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int | `image` |
+| 45 | `BarcodeGlyph` | media | Ladder | BarcodeGlyph accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int | `image` |
+| 46 | `ColorPalette` | media | Stacked | ColorPalette accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int | `image` |
+| 47 | `ZoomLens` | media | Rings | ZoomLens accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int | `image` |
+| 48 | `LevelMeter` | feedback | Spectrum | LevelMeter accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `slider` |
+| 49 | `SignalBars` | feedback | Bars | SignalBars accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `image` |
+| 50 | `BatteryMeter` | feedback | Stacked | BatteryMeter accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `image` |
+| 51 | `Thermometer` | feedback | Pyramid | Thermometer accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `slider` |
+| 52 | `Speedometer` | feedback | Gauge | Speedometer accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `slider` |
+| 53 | `Compass` | feedback | Spokes | Compass accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `image` |
+| 54 | `ProgressRing` | feedback | Donut | ProgressRing accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `image` |
+| 55 | `ActivityRing` | feedback | Rings | ActivityRing accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `image` |
+| 56 | `KpiTile` | feedback | Blocks | KpiTile accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `text` |
+| 57 | `StatCard` | feedback | Ruler | StatCard accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB | `text` |
+| 58 | `CornerFrame` | layout | Brackets | CornerFrame accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 59 | `CrosshairMark` | layout | Crosshair | CrosshairMark accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 60 | `LadderDivider` | layout | Ladder | LadderDivider accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 61 | `ChevronDivider` | layout | Chevrons | ChevronDivider accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 62 | `GridOverlay` | layout | GridCells | GridOverlay accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 63 | `CheckerBackdrop` | layout | Checker | CheckerBackdrop accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 64 | `DotPattern` | layout | Scatter | DotPattern accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 65 | `RingBadge` | layout | Rings | RingBadge accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 66 | `StairDivider` | layout | Steps | StairDivider accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+| 67 | `BracketPanel` | layout | Brackets | BracketPanel accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB | `none` |
+
+Common prop schema keys (all optional): `value` (int magnitude, positional),
+`values` (int series, JSON array or comma-separated string), `segments`,
+`columns`, `rows`, `min`, `max`, `size`, `width`, `height`, `labels`, `src`,
+`type`, `color`, plus the R2/R3 generic and accessibility props. `src` is a
+placeholder only: no image is decoded.
+
+**Honest scope:** exactly one deterministic software drawing per kind. There is
+no real font shaping (the built-in 5x7 bitmap font is unchanged), no image
+decoding, no platform-native widget, no OS accessibility bridge, no GPU
+presentation and no frame-rate / 120fps claim. The SVG and a11y backends report
+the box and role for a new kind; they do not vectorise its motif geometry.
+
+## Honest status (round 10)
 
 Verified now, by tests in this crate: IR parsing/validation, adaptive breakpoints +
-Row collapse + fluid sizing, all 32 node kinds, theme tokens with per-token
+Row collapse + fluid sizing, all 100 node kinds, theme tokens with per-token
 fallback, the six canonical style effects, conditional `when` visibility with
 bounded dirty rects, light/dark theme + accent, built-in 5x7 font, deterministic
 RGBA8 software raster, incremental dirty-rect diffing with coverage and bound
@@ -434,14 +556,14 @@ tests, interpolation from `StateView`, `FrameView` shape, the PPM CLI, integer
 `fontScale`, high-contrast rendering, the `theme.tokens.contrast` token, a
 deterministic pre-order accessibility tree with roles, labels, bounds and hidden
 flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
-`data-role`, hidden markers), eight distinct deterministic primitives, R5
-slide/fade/scale frame composition with monotonic ticks and settling, gesture
-digest sequences, fixed-seed particles, quality budget tiers, CLI transition
-validation, exact R6 display-list serialization/clipping/draw order, the five
+`data-role`, hidden markers), eight R4 and 68 R10 distinct deterministic
+primitives, R5 slide/fade/scale frame composition with monotonic ticks and
+settling, gesture digest sequences, fixed-seed particles, quality budget tiers,
+CLI transition validation, exact R6 display-list serialization/clipping/draw order, the five
 R8 software effects with determinism, pairwise distinct pixels, clamping,
 overflow, R9 effect-command export for all five kinds with integer parameters,
 draw order, bounds, R6 fixture invariance, and unchanged V0.1 golden digests.
-`cargo test --offline` (111 tests) is green with fixed golden digests and zero
+`cargo test --offline` (123 tests) is green with fixed golden digests and zero
 warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 Not implemented / not measured — later rounds: a Metal/Vulkan/ANGLE GPU raster
@@ -456,7 +578,7 @@ monospace approximation); OS screen-reader integration (the R3 tree is data
 only: no ARIA/AT-SPI bridge, no focus order, no hit testing and no live
 announcements); DPI scaling (`fontScale` scales logical pixels, not physical
 DPI); native widget embedding; hardware presentation, GPU text, Vulkan/ANGLE/D3D
-backends and real lens refraction (R10+). The R9 GPU effect path is a headless
+backends and real lens refraction (R11+). The R9 GPU effect path is a headless
 cross-repo compute backend, not a presenter inside this crate. The R2 `glass: true` prop remains a colour blend; the
 R8 `effects` glass path is a real CPU framebuffer blur, not refraction. Bitmap
 glyphs are blocky by design. PPM drops alpha because all palette colours are
@@ -469,7 +591,7 @@ Metal/Vulkan/ANGLE GPU backends.
 - `shortcut: Image renders a deterministic colour placeholder, upgrade when resource loading exists`.
 - `shortcut: dirty rects are capped at 64 (fallback: one full-frame rect), refine with a tile quadtree when a real presenter exists`.
 - `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient when the IR supports it`.
-- `shortcut: R2 glass is a colour blend; R8 glass blurs a framebuffer snapshot, upgrade to compositor layers and real refraction in R10+`.
+- `shortcut: R2 glass is a colour blend; R8 glass blurs a framebuffer snapshot, upgrade to compositor layers and real refraction in R11+`.
 - `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
 - `shortcut: R5 transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.
 - `shortcut: gesture input is integer L1 deltas, upgrade when real hardware gesture events exist`.

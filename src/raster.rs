@@ -1008,6 +1008,13 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
             let ty = body.y + ((body.h - font::GLYPH_H * scale) / 2).max(0);
             draw_glyphs(canvas, text, tx, ty, scale, on);
         }
+        (Some(Control::R10 { code, values }), _) => {
+            crate::primitives::draw(canvas, *code, values, n.rect, accent, alpha);
+        }
+        // Hand-built LaidOut nodes may carry no control; still draw the kind.
+        (_, Kind::Extended(code)) => {
+            crate::primitives::draw(canvas, code, &[], n.rect, accent, alpha);
+        }
         _ => {}
     }
 }
