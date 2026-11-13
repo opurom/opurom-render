@@ -48,7 +48,8 @@ pub use ir::{
     Role, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
 };
 pub use layout::{
-    layout, layout_at, Breakpoint, Control, Direction, Effects, LaidOut, Palette, Rect, SETTLED_MS,
+    fluid_grid, layout, layout_at, Breakpoint, Control, Direction, Effects, FluidGrid, LaidOut,
+    Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH, SETTLED_MS,
 };
 pub use svg::{svg, svg_at};
 
@@ -147,6 +148,8 @@ pub struct Renderer {
     width: u32,
     height: u32,
     prev: Option<Vec<u8>>,
+    /// Viewport size of the buffered frame, for the resize diff.
+    prev_size: Option<(u32, u32)>,
 }
 
 impl Renderer {
@@ -160,6 +163,7 @@ impl Renderer {
             width,
             height,
             prev: None,
+            prev_size: None,
         })
     }
 
@@ -170,6 +174,20 @@ impl Renderer {
 
     pub fn viewport(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Change the viewport size, as a window resize or a split-screen split does.
+    /// The buffered frame is kept, so the next render diffs against the old
+    /// surface instead of reporting the whole new one as changed.
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), IrError> {
+        if width == 0 || height == 0 || width as u64 * height as u64 > MAX_PIXELS {
+            return Err(IrError(format!(
+                "invalid viewport {width}x{height}: both dimensions must be non-zero and at most {MAX_PIXELS} pixels"
+            )));
+        }
+        self.width = width;
+        self.height = height;
+        Ok(())
     }
 
     pub fn compute_layout(&self, ir: &Ir, state: &StateView) -> Vec<LaidOut> {
@@ -243,9 +261,11 @@ impl Renderer {
     /// frame. The clock is the only time source; no wall clock is consulted.
     pub fn render_at(&mut self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Frame {
         let pixels = self.pixels_at(ir, state, elapsed_ms);
-        let dirty = match self.prev.as_deref() {
-            Some(prev) => diff_rects(prev, &pixels, self.width, self.height),
-            None => vec![DirtyRect {
+        let dirty = match (self.prev.as_deref(), self.prev_size) {
+            (Some(prev), Some((pw, ph))) => {
+                diff_resize_rects(prev, pw, ph, &pixels, self.width, self.height)
+            }
+            _ => vec![DirtyRect {
                 x: 0,
                 y: 0,
                 w: self.width,
@@ -253,6 +273,7 @@ impl Renderer {
             }],
         };
         self.prev = Some(pixels.clone());
+        self.prev_size = Some((self.width, self.height));
         Frame {
             width: self.width,
             height: self.height,
@@ -262,24 +283,85 @@ impl Renderer {
     }
 }
 
-/// Diff rows and columns, then coalesce into a bounded list of rects that
-/// covers every changed pixel. Fallback to one full-frame rect keeps the list
-/// bounded for pathological frames.
-fn diff_rects(prev: &[u8], next: &[u8], width: u32, height: u32) -> Vec<DirtyRect> {
-    let w = width as usize;
-    let h = height as usize;
+/// Diff a resized frame against the previous one.
+///
+/// The shared region (the smaller of both surfaces) is diffed pixel by pixel;
+/// the strip that only exists in the new surface is dirty by definition. The
+/// result is bounded and covers every changed pixel of the new surface.
+fn diff_resize_rects(
+    prev: &[u8],
+    prev_w: u32,
+    prev_h: u32,
+    next: &[u8],
+    next_w: u32,
+    next_h: u32,
+) -> Vec<DirtyRect> {
     let full = || {
         vec![DirtyRect {
             x: 0,
             y: 0,
-            w: width,
-            h: height,
+            w: next_w,
+            h: next_h,
         }]
     };
-    if prev.len() != next.len() || next.len() != w * h * 4 {
+    if prev.len() != prev_w as usize * prev_h as usize * 4
+        || next.len() != next_w as usize * next_h as usize * 4
+    {
         return full();
     }
+    let ow = prev_w.min(next_w) as usize;
+    let oh = prev_h.min(next_h) as usize;
 
+    // The strip that the new surface gained: new columns and new rows. The
+    // two strips are disjoint: the column strip stops at the old height.
+    let mut rects = Vec::new();
+    if next_w > prev_w {
+        rects.push(DirtyRect {
+            x: prev_w,
+            y: 0,
+            w: next_w - prev_w,
+            h: prev_h,
+        });
+    }
+    if next_h > prev_h {
+        rects.push(DirtyRect {
+            x: 0,
+            y: prev_h,
+            w: next_w,
+            h: next_h - prev_h,
+        });
+    }
+
+    // Diff the shared region only; the strips above are already covered.
+    let shared_rects = match diff_strided(prev, prev_w as usize, next, next_w as usize, ow, oh) {
+        Some(r) => r,
+        // Too many rects: one full-frame rect stays bounded.
+        None => return full(),
+    };
+    rects.extend(shared_rects);
+    if rects.len() > MAX_DIRTY {
+        return full();
+    }
+    rects
+}
+
+/// Diff two bands of the same height whose rows may have different strides.
+/// `cols` is the number of columns both bands share; the rects are returned in
+/// the coordinate system of the new band.
+///
+/// Rows and columns are coalesced into a list of rects that covers every
+/// changed pixel. `None` means the list grew past the bound and the caller
+/// must fall back to one full-frame rect.
+fn diff_strided(
+    prev: &[u8],
+    prev_stride: usize,
+    next: &[u8],
+    next_stride: usize,
+    cols: usize,
+    rows: usize,
+) -> Option<Vec<DirtyRect>> {
+    let w = cols;
+    let h = rows;
     let mut row_min = vec![u32::MAX; h];
     let mut row_max = vec![0u32; h];
     let mut row_any = vec![false; h];
@@ -288,10 +370,11 @@ fn diff_rects(prev: &[u8], next: &[u8], width: u32, height: u32) -> Vec<DirtyRec
     let mut col_any = vec![false; w];
 
     for y in 0..h {
-        let base = y * w * 4;
+        let base = y * next_stride * 4;
         for x in 0..w {
             let i = base + x * 4;
-            if next[i..i + 4] != prev[i..i + 4] {
+            let p = y * prev_stride * 4 + x * 4;
+            if next[i..i + 4] != prev[p..p + 4] {
                 let (xu, yu) = (x as u32, y as u32);
                 if !row_any[y] {
                     row_any[y] = true;
@@ -367,9 +450,9 @@ fn diff_rects(prev: &[u8], next: &[u8], width: u32, height: u32) -> Vec<DirtyRec
     }
 
     if rects.len() > MAX_DIRTY {
-        return full();
+        return None;
     }
-    rects
+    Some(rects)
 }
 
 #[cfg(test)]
@@ -404,8 +487,12 @@ mod tests {
                 b[i] = 200;
             }
         }
-        assert!(diff_rects(&a, &a, w, h).is_empty());
-        let rects = diff_rects(&a, &b, w, h);
+        assert!(
+            diff_strided(&a, w as usize, &a, w as usize, w as usize, h as usize)
+                .unwrap()
+                .is_empty()
+        );
+        let rects = diff_strided(&a, w as usize, &b, w as usize, w as usize, h as usize).unwrap();
         assert!(!rects.is_empty());
         assert!(rects.len() <= MAX_DIRTY);
         for y in 0..h {

@@ -20,7 +20,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 123 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 149 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -102,8 +102,9 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   (targets/types) and the
   theme. Unknown props are ignored. Errors are `IrError(String)` values.
 - `src/layout.rs` — pure integer layout. Breakpoints on **logical px**: compact
-  `<600`, medium `<900`, expanded `>=900`. `Row` collapses to a vertical stack in
-  compact. Children share the main axis in proportion to their natural size (fluid
+  `<600`, medium `<900`, expanded `<1200`, wide `<1600`, ultra `>=1600`. `Row`
+  collapses to a vertical stack in compact. Children share the main axis in
+  proportion to their natural size (fluid
   sizing, i128 division with a deterministic remainder), honouring explicit
   `width`/`height`. `gap`, `padding`, `margin`, `align`, `radius` and `color` are
   resolved here.
@@ -142,6 +143,46 @@ byte-identically to the core release — the three golden digests below are unch
 Unknown props are ignored and never fatal; an unknown kind degrades instead of
 rejecting the file. Multi-action events (`{"actions": [...]}`) and
 `valueFrom` are accepted as well, so a compiler output renders here.
+
+## Five-tier adaptive layout and fluid grid (TRANSPORT_AND_LANGUAGE_ADDITIONS §3)
+
+The viewport width selects one of five tiers, on logical pixels:
+
+| Tier | Width |
+| --- | --- |
+| Compact | `< 600` |
+| Medium | `< 900` |
+| Expanded | `< 1200` |
+| Wide | `< 1600` |
+| Ultra | `>= 1600` |
+
+`Breakpoint::from_width` is the single entry point. The compact and medium tiers
+keep their earlier behaviour exactly, so the three golden digests are unchanged.
+
+### Fluid grid
+
+`fluid_grid(width)` derives the column count, the gutter and the margin from a
+container width with integer arithmetic only — no float, no randomness, no wall
+clock, so the metrics are identical on every host:
+
+```
+columns = clamp(width / 120, 1, 12)
+margin  = clamp(width /  40, 8, 32)
+gutter  = clamp(width /  60, 8, 24)
+```
+
+A `Grid` node without an explicit `columns` prop uses the fluid grid from the
+expanded tier upwards; the compact and medium tiers keep the fixed two-column
+grid, and an explicit `columns` always wins at every tier. The remainder pixels
+of a row go to the leftmost columns, so the cells always fill the container.
+
+### Resize diffing
+
+`Renderer::resize(width, height)` changes the viewport the way a window resize
+or a split-screen split does, and keeps the buffered frame. The next render
+diffs the shared region against it and reports the strip the new surface gained,
+so the dirty list names the regions that actually changed. An unchanged
+viewport still yields zero dirty rects, and the list stays bounded at 64 rects.
 
 ## Accessibility (COMPONENTS_AND_A11Y §2)
 
@@ -537,7 +578,9 @@ geometry.
 ## Verified status
 
 Verified by tests in this crate: IR parsing/validation, adaptive breakpoints +
-Row collapse + fluid sizing, all 100 node kinds, theme tokens with per-token
+Row collapse + fluid sizing, the five viewport tiers with their exact
+boundaries, the integer fluid grid arithmetic, resize diffing across a tier
+change, all 100 node kinds, theme tokens with per-token
 fallback, the six canonical style effects, conditional `when` visibility with
 bounded dirty rects, light/dark theme + accent, built-in 5x7 font, deterministic
 RGBA8 software raster, incremental dirty-rect diffing with coverage and bound
@@ -553,7 +596,7 @@ order, the five software effects with determinism, pairwise distinct pixels,
 clamping, overflow, effect-command export for all five kinds with integer
 parameters, draw order, bounds, effect-free fixture invariance, and unchanged
 V0.1 golden digests.
-`cargo test --offline` (123 tests) is green with fixed golden digests and zero
+`cargo test --offline` (149 tests) is green with fixed golden digests and zero
 warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 
