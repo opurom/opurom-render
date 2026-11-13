@@ -247,6 +247,10 @@ conditional nodes and their descendants appear with `hidden:true`; their bounds
 come from a second layout with every bool state forced true, or from zeros when
 that layout cannot place them. The JSON is byte-identical across identical runs.
 
+Particle dots are decorative texture: a node's `particles` field never expands
+into entries of its own, so the array carries exactly one object per IR node and
+the host keeps its own role and label.
+
 Status: this is a **data-only** accessibility tree. There is NO OS
 screen-reader integration, NO ARIA/AT-SPI bridge, NO focus order or hit
 testing, NO real font shaping, NO DPI scaling (`fontScale` scales logical
@@ -272,6 +276,10 @@ library functions) writes a **byte-deterministic SVG 1.1 snapshot of the same
 - `data-id` and `data-role` on every element; the role is the shared a11y role
   (`role_of`). Hidden conditional nodes are omitted from the drawing and
   recorded as `<g ... data-hidden="true"/>` markers.
+- One `<circle>` per dot of a node's `particles` field, with the same integer
+  `dot_center`, the field's `radius`, `fill` (explicit colour or node accent)
+  and `opacity`, drawn after the node's box and text. `count = 0`, `alpha = 0`
+  and an empty box emit no circles.
 
 Same IR + viewport + state + theme + animation tick ⇒ byte-identical SVG bytes
 across runs (integer formatting over a deterministic pre-order layout; no time,
@@ -517,8 +525,11 @@ colour are readable parse errors. Nodes without the prop emit no particle
 command, and the three golden digests are unchanged. The display list gains one
 `{"kind":"particles","rect":[...],"clip":[...],"count":...,"seed":...,"radius":...,"color":[r,g,b,a]}`
 command per node with a visible field; the cross-repo GPU backend evaluates the
-same dot centres, circle test and blend order per pixel. The SVG snapshot and
-the accessibility tree draw the node box but not its particle field.
+same dot centres, circle test and blend order per pixel. The SVG snapshot draws
+one `<circle>` per dot at that same integer centre, carrying the field's radius,
+colour (accent fallback) and alpha, after the node's box and text; the
+accessibility tree treats the dots as decorative texture, so a field never adds
+a node and the host keeps its own role and label.
 
 ## GPU effect kernels (cross-repo proof)
 
@@ -687,7 +698,7 @@ shape, the PPM CLI, integer `fontScale`, high-contrast rendering, the
 `theme.tokens.contrast` token, a deterministic pre-order accessibility tree with
 roles, labels, bounds and hidden
 flags, a deterministic SVG 1.1 vector snapshot (rects, gradients, text,
-`data-role`, hidden markers), eight data primitives and 68 extended primitives as
+particle circles, `data-role`, hidden markers), eight data primitives and 68 extended primitives as
 distinct deterministic drawings, slide/fade/scale frame composition with monotonic
 ticks and settling, gesture digest sequences, fixed-seed particles, the inertia
 curve's measured settle and rest step counts against the derived braking

@@ -11,6 +11,7 @@
 use crate::a11y::role_of;
 use crate::ir::{Ir, Node, Role, StateView};
 use crate::layout::{layout_at, LaidOut, Palette, SETTLED_MS};
+use crate::particles::{alpha_byte, dot_center};
 use crate::{font, Align, Rgba};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -149,6 +150,31 @@ pub fn svg_at(ir: &Ir, state: &StateView, width: u32, height: u32, elapsed_ms: i
                     esc(text)
                 )
                 .unwrap();
+            }
+        }
+        if let Some(p) = n.particles {
+            // Same guards as the raster's fill: a no-op field draws nothing, and
+            // `dot_center` divides by `rect.w`, so a degenerate box must bail out.
+            if p.count > 0
+                && p.radius >= 0
+                && n.rect.w > 0
+                && n.rect.h > 0
+                && alpha_byte(p.alpha) > 0
+            {
+                let color = p.color.unwrap_or(n.accent);
+                for i in 0..p.count as u32 {
+                    let (cx, cy) = dot_center(n.rect, p.seed, i);
+                    write!(
+                        body,
+                        "  <circle data-id=\"{}\" data-role=\"{}\" cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\"",
+                        n.id, role_s, cx, cy, p.radius, hex(color)
+                    )
+                    .unwrap();
+                    if p.alpha < 1024 {
+                        write!(body, " opacity=\"{}\"", fixed3(p.alpha)).unwrap();
+                    }
+                    body.push_str("/>\n");
+                }
             }
         }
     }
