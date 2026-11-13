@@ -118,6 +118,7 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
+    /// Renderer diffs are bounded, covering and ordered by `(y, x)`.
     pub dirty: Vec<DirtyRect>,
 }
 
@@ -342,6 +343,9 @@ fn diff_resize_rects(
     if rects.len() > MAX_DIRTY {
         return full();
     }
+    // Strips are appended before the shared-region rects; emit one canonical
+    // order so identical state changes always produce the same rect list.
+    rects.sort_by_key(|r| (r.y, r.x, r.h, r.w));
     rects
 }
 
@@ -459,6 +463,47 @@ fn diff_strided(
 mod tests {
     use super::*;
 
+    fn blank(w: u32, h: u32) -> Vec<u8> {
+        vec![0u8; w as usize * h as usize * 4]
+    }
+
+    /// Paint one changed region into a strided RGBA buffer.
+    fn paint(buf: &mut [u8], stride: usize, r: (u32, u32, u32, u32)) {
+        let (x, y, w, h) = r;
+        for yy in y..y + h {
+            for xx in x..x + w {
+                buf[(yy as usize * stride + xx as usize) * 4] = 200;
+            }
+        }
+    }
+
+    fn covered(rects: &[DirtyRect], x: u32, y: u32) -> bool {
+        rects
+            .iter()
+            .any(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+    }
+
+    /// The emitted rects must cover the union of every input region.
+    fn assert_covers(rects: &[DirtyRect], inputs: &[(u32, u32, u32, u32)]) {
+        for &r in inputs {
+            let (x, y, w, h) = r;
+            for yy in y..y + h {
+                for xx in x..x + w {
+                    assert!(
+                        covered(rects, xx, yy),
+                        "({xx},{yy}) of {r:?} not covered by {rects:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    fn is_canonical(rects: &[DirtyRect]) -> bool {
+        rects
+            .windows(2)
+            .all(|p| (p[0].y, p[0].x, p[0].h, p[0].w) <= (p[1].y, p[1].x, p[1].h, p[1].w))
+    }
+
     #[test]
     fn fnv_vectors() {
         assert_eq!(digest(b""), 0xcbf2_9ce4_8422_2325);
@@ -505,6 +550,141 @@ mod tests {
                             .any(|r| { x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h }),
                         "changed pixel ({x},{y}) not covered by {rects:?}"
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn overlapping_adjacent_and_contained_rects_merge_deterministically() {
+        let (w, h) = (64u32, 32u32);
+        let a = blank(w, h);
+        let mut b = a.clone();
+        let inputs = [
+            (4, 4, 8, 6),  // base
+            (8, 6, 8, 6),  // overlaps the base
+            (12, 4, 4, 6), // touches the base on its right edge
+            (6, 5, 2, 2),  // contained in the base
+            (4, 10, 4, 2), // touches the base on its bottom edge
+            (20, 4, 3, 3), // a small gap away
+        ];
+        for &r in &inputs {
+            paint(&mut b, w as usize, r);
+        }
+        let rects = diff_strided(&a, w as usize, &b, w as usize, w as usize, h as usize).unwrap();
+        let again = diff_strided(&a, w as usize, &b, w as usize, w as usize, h as usize).unwrap();
+        assert_eq!(rects, again, "identical diffs must emit identical lists");
+        assert!(!rects.is_empty());
+        assert!(
+            rects.len() < inputs.len(),
+            "overlapping inputs must merge: {rects:?}"
+        );
+        assert!(rects.len() <= MAX_DIRTY);
+        assert_covers(&rects, &inputs);
+        assert!(is_canonical(&rects), "not ordered by (y, x): {rects:?}");
+    }
+
+    #[test]
+    fn many_small_rects_cover_their_union_within_the_cap() {
+        let (w, h) = (96u32, 96u32);
+        let a = blank(w, h);
+        let mut b = a.clone();
+        let mut inputs = Vec::new();
+        for i in 0..120u32 {
+            let r = (4 + (i % 12) * 8, 4 + (i / 12) * 8, 2, 2);
+            paint(&mut b, w as usize, r);
+            inputs.push(r);
+        }
+        let rects = diff_strided(&a, w as usize, &b, w as usize, w as usize, h as usize).unwrap();
+        assert!(rects.len() <= MAX_DIRTY, "{} rects", rects.len());
+        assert!(rects.len() < inputs.len(), "small rects must coalesce");
+        assert_covers(&rects, &inputs);
+        assert!(is_canonical(&rects), "not ordered by (y, x): {rects:?}");
+        for r in &rects {
+            assert!(r.w > 0 && r.h > 0 && r.x + r.w <= w && r.y + r.h <= h);
+        }
+    }
+
+    #[test]
+    fn too_many_small_rects_fall_back_to_one_full_frame_rect() {
+        let (w, h) = (100u32, 100u32);
+        let a = blank(w, h);
+        let mut b = a.clone();
+        let mut inputs = Vec::new();
+        for i in 0..9u32 {
+            for j in 0..9u32 {
+                let r = (1 + j * 11, 1 + i * 11, 1, 1);
+                paint(&mut b, w as usize, r);
+                inputs.push(r);
+            }
+        }
+        // 81 separated runs exceed the cap, so the shared diff gives up.
+        assert!(diff_strided(&a, w as usize, &b, w as usize, w as usize, h as usize).is_none());
+        let rects = diff_resize_rects(&a, w, h, &b, w, h);
+        assert_eq!(rects, vec![DirtyRect { x: 0, y: 0, w, h }]);
+        assert!(rects.len() <= MAX_DIRTY);
+        assert_covers(&rects, &inputs);
+    }
+
+    #[test]
+    fn resize_strips_and_shared_rects_together_respect_the_cap() {
+        let (pw, ph) = (100u32, 100u32);
+        let (nw, nh) = (120u32, 120u32);
+        let a = blank(pw, ph);
+        let mut b = blank(nw, nh);
+        for i in 0..8u32 {
+            for j in 0..8u32 {
+                paint(&mut b, nw as usize, (1 + j * 11, 1 + i * 11, 1, 1));
+            }
+        }
+        let shared = diff_strided(&a, pw as usize, &b, nw as usize, pw as usize, ph as usize)
+            .expect("64 shared rects still fit the cap");
+        assert_eq!(
+            shared.len(),
+            MAX_DIRTY,
+            "shared diff sits exactly at the cap"
+        );
+        // Two gained strips push the combined list past the cap.
+        let rects = diff_resize_rects(&a, pw, ph, &b, nw, nh);
+        assert_eq!(
+            rects,
+            vec![DirtyRect {
+                x: 0,
+                y: 0,
+                w: nw,
+                h: nh
+            }]
+        );
+        assert!(rects.len() <= MAX_DIRTY);
+    }
+
+    #[test]
+    fn emitted_rects_are_canonically_ordered_and_cover_a_resize() {
+        let (pw, ph) = (40u32, 30u32);
+        let (nw, nh) = (48u32, 36u32);
+        let a = blank(pw, ph);
+        let mut b = blank(nw, nh);
+        let inputs = [(2, 2, 3, 3), (5, 4, 3, 3), (20, 12, 4, 4), (2, 20, 6, 2)];
+        for &r in &inputs {
+            paint(&mut b, nw as usize, r);
+        }
+        let rects = diff_resize_rects(&a, pw, ph, &b, nw, nh);
+        assert!(rects.len() > 1, "a resize must report strips plus changes");
+        assert!(is_canonical(&rects), "not ordered by (y, x): {rects:?}");
+        assert!(rects.len() <= MAX_DIRTY);
+        assert_covers(&rects, &inputs);
+        // A changed pixel or a newly exposed pixel is dirty by definition.
+        for y in 0..nh {
+            for x in 0..nw {
+                let i = (y as usize * nw as usize + x as usize) * 4;
+                let dirty = if x < pw && y < ph {
+                    let o = (y as usize * pw as usize + x as usize) * 4;
+                    a[o..o + 4] != b[i..i + 4]
+                } else {
+                    true
+                };
+                if dirty {
+                    assert!(covered(&rects, x, y), "({x},{y}) not covered by {rects:?}");
                 }
             }
         }
