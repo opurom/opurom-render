@@ -128,3 +128,60 @@ fn the_three_pinned_golden_frames_are_unchanged() {
         "48a56056bd32a07e"
     );
 }
+
+/// A `Row` of `Icon` nodes: no Container wrapper and no explicit width/height,
+/// so each icon must lay out on its own intrinsic 16x16 size.
+fn icon_row_ir(names: &[&str]) -> String {
+    let kids = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            format!(
+                "{{ \"id\": {id}, \"kind\": \"Icon\", \"props\": {{\"name\": \"{name}\", \"color\": \"#101010\"}}, \"children\": [], \"events\": {{}} }}",
+                id = i + 1,
+                name = name,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r##"{{
+  "ir": "0.1", "app": "IconRow",
+  "state": [],
+  "tree": {{ "id": 0, "kind": "Row", "props": {{ "gap": 8, "align": "start" }},
+    "children": [ {kids} ], "events": {{}} }},
+  "theme": {{ "mode": "light", "accent": "#097FEB", "radius": 4 }}
+}}"##
+    )
+}
+
+#[test]
+fn a_row_of_unwrapped_icons_keeps_intrinsic_size_and_draws_glyphs() {
+    let w = 600u32;
+    let h = 100u32;
+    let ir =
+        parse_ir(&icon_row_ir(&["star", "heart", "plus", "minus"])).expect("parse icon row IR");
+    let state = StateView::from_ir(&ir);
+    let laid = layout(&ir, &state, w, h);
+    let icons: Vec<_> = laid
+        .iter()
+        .filter(|n| n.kind == opurom_render::Kind::Icon)
+        .collect();
+    assert_eq!(icons.len(), 4, "all icons must lay out inside the Row");
+    // No Container wrapper: each icon sits beside the next at intrinsic size.
+    let starts: Vec<i64> = icons.iter().map(|n| n.rect.x).collect();
+    assert_eq!(
+        starts,
+        vec![0, 24, 48, 72],
+        "icons sit side by side, not stretched"
+    );
+    for icon in &icons {
+        assert_eq!(icon.rect.w, 16, "icon must keep its intrinsic width");
+        assert_eq!(icon.rect.h, 16, "icon must keep its intrinsic height");
+    }
+    let pixels = Renderer::new(w, h).pixels(&ir, &state);
+    for icon in &icons {
+        let ink = exact_white_in_rect(&pixels, icon.rect, w as i64, h as i64);
+        assert!(ink > 0, "icon at x={} drew no glyph ink", icon.rect.x);
+    }
+}

@@ -959,7 +959,19 @@ fn place_children(
         } else {
             (c.props.width, c.props.height)
         };
-        let main = main_override.unwrap_or(sizes[i]).min(content_main).max(0);
+        let main = if main_override.is_none() && c.kind == Kind::Icon && count > 1 {
+            // A shared Icon keeps its intrinsic size instead of absorbing the
+            // fluid share, so a Row of icons paints 16x16 glyphs rather than
+            // stretched bars; a sole Icon still fills its fixed-size Container.
+            let natural = if vertical {
+                natural_h(c, bp, state)
+            } else {
+                natural_w(c, bp, state)
+            };
+            natural.min(content_main).max(0)
+        } else {
+            main_override.unwrap_or(sizes[i]).min(content_main).max(0)
+        };
         let cross = cross_override
             .unwrap_or_else(|| {
                 if c.kind == Kind::Divider {
