@@ -1239,6 +1239,28 @@ fn inherit_high_contrast(n: &mut Node, parent: bool) {
     }
 }
 
+/// Parse a JSON object of state overrides against one IR document.
+///
+/// Names must be declared in `ir.state` and values must match the declared
+/// type; undeclared names and type mismatches are errors, not silent drops.
+/// Omitted names keep the IR initial value.
+pub fn parse_state_json(ir: &Ir, text: &str) -> Result<StateView, IrError> {
+    let v: Value =
+        serde_json::from_str(text).map_err(|e| bad(format!("invalid state JSON: {e}")))?;
+    let o = object(&v, "state")?;
+    let mut view = StateView::from_ir(ir);
+    for (name, value) in o {
+        let decl = ir
+            .state
+            .iter()
+            .find(|d| &d.name == name)
+            .ok_or_else(|| bad(format!("state {name:?} is not declared in IR")))?;
+        let parsed = state_value(value, Some(decl.typ), &format!("state.{name}"))?;
+        view.set(name.clone(), parsed);
+    }
+    Ok(view)
+}
+
 /// Parse and fully validate one IR v0.1 document.
 pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
     let v: Value = serde_json::from_str(text).map_err(|e| bad(format!("invalid IR JSON: {e}")))?;
@@ -1268,6 +1290,18 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
 mod tests {
     use super::*;
 
+    const SAMPLE_IR: &str = r##"{
+        "ir": "0.1", "app": "Sample",
+        "state": [
+            {"name": "count", "type": "int", "init": 0},
+            {"name": "title", "type": "string", "init": "idle"},
+            {"name": "flag", "type": "bool", "init": false}
+        ],
+        "tree": {"id": 0, "kind": "Text", "props": {"value": "{count}"},
+                 "children": [], "events": {}},
+        "theme": {"mode": "light", "accent": "#4F46E5", "radius": 8}
+    }"##;
+
     #[test]
     fn interpolation_handles_escapes_and_unknown_names() {
         let mut s = StateView::default();
@@ -1275,6 +1309,33 @@ mod tests {
         s.set("name", StateValue::Str("world".into()));
         assert_eq!(s.interpolate("Count: {count} / {name}"), "Count: 7 / world");
         assert_eq!(s.interpolate("{{count}} {missing}"), "{count} {missing}");
+    }
+
+    #[test]
+    fn state_json_overrides_keep_undeclared_defaults() {
+        let ir = parse_ir(SAMPLE_IR).unwrap();
+        let view = parse_state_json(&ir, r#"{"count":7,"title":"done","flag":true}"#).unwrap();
+        assert_eq!(view.get("count"), Some(&StateValue::Int(7)));
+        assert_eq!(view.get("title"), Some(&StateValue::Str("done".into())));
+        assert_eq!(view.get("flag"), Some(&StateValue::Bool(true)));
+        let empty = parse_state_json(&ir, "{}").unwrap();
+        assert_eq!(empty, StateView::from_ir(&ir));
+    }
+
+    #[test]
+    fn state_json_rejects_malformed_and_mismatched_values() {
+        let ir = parse_ir(SAMPLE_IR).unwrap();
+        for bad_json in [
+            "",
+            "{",
+            "[]",
+            r#"{"missing":1}"#,
+            r#"{"count":"seven"}"#,
+            r#"{"flag":1}"#,
+            r#"{"count":1.5}"#,
+        ] {
+            assert!(parse_state_json(&ir, bad_json).is_err(), "{bad_json:?}");
+        }
     }
 
     #[test]

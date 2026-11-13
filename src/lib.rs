@@ -44,8 +44,8 @@ pub use effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
 pub use ir::{
-    parse_ir, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props, Role, StateDecl,
-    StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
+    parse_ir, parse_state_json, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props,
+    Role, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
 };
 pub use layout::{
     layout, layout_at, Breakpoint, Control, Direction, Effects, LaidOut, Palette, Rect, SETTLED_MS,
