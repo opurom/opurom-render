@@ -452,6 +452,9 @@ pub struct Theme {
     pub accent: Rgba,
     pub radius: i64,
     pub tokens: ThemeTokens,
+    /// Global text scale (fixed point, 1024 == 1.0); nodes without their own
+    /// `fontScale` prop inherit this value.
+    pub font_scale: Option<i64>,
 }
 
 /// Flat, ordered state map consumed by text interpolation and by the CLI.
@@ -1290,11 +1293,13 @@ fn theme(v: &Value) -> Result<Theme, IrError> {
         Some(t) => tokens(t)?,
         None => ThemeTokens::default(),
     };
+    let font_scale = font_scale_prop(o, "fontScale", "theme")?;
     Ok(Theme {
         mode,
         accent,
         radius,
         tokens: tk,
+        font_scale,
     })
 }
 
