@@ -2,7 +2,7 @@
 //! `when` visibility, the sixteen new node kinds and deterministic animation.
 
 use opurom_render::{
-    digest_hex, layout, layout_at, parse_ir, Animator, Control, Direction, Ir, Kind, LaidOut,
+    digest_hex, layout, layout_at, parse_ir, Animator, Control, Direction, Ir, Kind, LaidOut, Op,
     Renderer, Rgba, StateValue, StateView,
 };
 use std::process::Command;
@@ -523,6 +523,62 @@ fn multi_action_and_value_from_events_parse() {
 }
 
 #[test]
+fn add_value_from_parses_and_reads_state_at_event_time() {
+    let ir = ir_of(
+        r##"{
+  "ir": "0.1", "app": "E",
+  "state": [ { "name": "a", "type": "int", "init": 1 }, { "name": "b", "type": "int", "init": 4 } ],
+  "tree": { "id": 0, "kind": "Button", "props": { "label": "go" }, "children": [],
+    "events": { "tap": { "op": "add", "target": "a", "valueFrom": "b" } } },
+  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+}"##,
+    );
+    let action = ir.tree.events[0].action();
+    assert_eq!(action.op, Op::Add);
+    assert_eq!(action.target, "a");
+    assert_eq!(action.value, None);
+    assert_eq!(action.value_from.as_deref(), Some("b"));
+
+    // Hosts execute the parsed action against the current state view.
+    fn int(view: &StateView, name: &str) -> i64 {
+        match view.get(name) {
+            Some(StateValue::Int(n)) => *n,
+            other => panic!("expected int state {name}, got {other:?}"),
+        }
+    }
+    let apply = |state: &mut StateView| {
+        let sum = int(state, &action.target) + int(state, action.value_from.as_deref().unwrap());
+        state.set(action.target.clone(), StateValue::Int(sum));
+    };
+    let mut state = StateView::from_ir(&ir);
+    apply(&mut state);
+    assert_eq!(state.get("a"), Some(&StateValue::Int(5)));
+    state.set("b", StateValue::Int(9));
+    apply(&mut state);
+    assert_eq!(state.get("a"), Some(&StateValue::Int(14)));
+}
+
+#[test]
+fn add_without_value_or_value_from_is_rejected() {
+    let missing = r##"{
+  "ir": "0.1", "app": "E",
+  "state": [ { "name": "a", "type": "int", "init": 1 }, { "name": "b", "type": "int", "init": 2 } ],
+  "tree": { "id": 0, "kind": "Button", "props": { "label": "go" }, "children": [],
+    "events": { "tap": { "op": "add", "target": "a" } } },
+  "theme": { "mode": "light", "accent": "#4F46E5", "radius": 4 }
+}"##;
+    let err = parse_ir(missing).expect_err("an add with no value must be rejected");
+    assert!(err.to_string().contains("add needs"));
+
+    let non_int = missing.replace(
+        r#"{ "op": "add", "target": "a" }"#,
+        r#"{ "op": "add", "target": "a", "value": "x", "valueFrom": "b" }"#,
+    );
+    let err = parse_ir(&non_int).expect_err("a non-int add value must be rejected");
+    assert!(err.to_string().contains("add needs"));
+}
+
+#[test]
 fn value_from_type_mismatch_is_rejected() {
     let bad = r##"{
   "ir": "0.1", "app": "E",
@@ -608,12 +664,12 @@ fn v0_1_golden_digest_is_unchanged_by_r2_features() {
     let mut renderer = Renderer::new(800, 600);
     assert_eq!(
         digest_hex(&renderer.render(&ir, &state).pixels),
-        "8cc3021fa80749b5"
+        "88127ca1577cdb61"
     );
     let mut renderer = Renderer::new(320, 240);
     assert_eq!(
         digest_hex(&renderer.render(&ir, &state).pixels),
-        "c87bf023a6c01f9d"
+        "2fc4eac75fd50f89"
     );
 }
 

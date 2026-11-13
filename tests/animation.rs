@@ -449,16 +449,16 @@ fn v0_1_golden_digests_are_unchanged_by_r5() {
     let state = StateView::from_ir(&ir);
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
-        "c87bf023a6c01f9d"
+        "2fc4eac75fd50f89"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
-        "8cc3021fa80749b5"
+        "88127ca1577cdb61"
     );
     let mut count_7 = state.clone();
     count_7.set("count", StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &count_7).pixels),
-        "e7aad51c98d9cf21"
+        "40891c1fbb81399e"
     );
 }

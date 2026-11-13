@@ -306,10 +306,10 @@ fn r10_v0_1_golden_digests_are_unchanged() {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).to_string()
     };
-    assert!(run("320", "240", "r10-golden-320.ppm", &[]).contains("digest=c87bf023a6c01f9d"));
-    assert!(run("800", "600", "r10-golden-800.ppm", &[]).contains("digest=8cc3021fa80749b5"));
+    assert!(run("320", "240", "r10-golden-320.ppm", &[]).contains("digest=2fc4eac75fd50f89"));
+    assert!(run("800", "600", "r10-golden-800.ppm", &[]).contains("digest=88127ca1577cdb61"));
     assert!(
         run("800", "600", "r10-golden-7.ppm", &["--state", "count=7"])
-            .contains("digest=e7aad51c98d9cf21")
+            .contains("digest=40891c1fbb81399e")
     );
 }

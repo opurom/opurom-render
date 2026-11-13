@@ -29,12 +29,12 @@ CLI (integration surface for `opurom-cli` and the e2e suite):
 ```sh
 cargo build --offline
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm
-# digest=8cc3021fa80749b5
+# digest=88127ca1577cdb61
 # dirty=1
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --state count=7
-# digest=e7aad51c98d9cf21
+# digest=40891c1fbb81399e
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --a11y tree.json
-# digest=8cc3021fa80749b5, dirty=1 (stdout unchanged)
+# digest=88127ca1577cdb61, dirty=1 (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --svg out.svg
 # writes a deterministic SVG 1.1 snapshot (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 320 240 out.ppm --commands commands.json
@@ -111,9 +111,11 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
 - `src/font.rs` — built-in 5x7 bitmap font, printable ASCII `0x20..=0x7E` (A–Z,
   a–z, 0–9, punctuation). Unsupported codepoints consume a blank advance.
 - `src/raster.rs` — filled rounded rectangles (integer quarter-circle test), 1 px
-  borders, gradients, shadows, glass fills, scaled glyph blocks, opaque RGBA with
-  integer alpha blending, the eight data primitive drawings and exact command
-  recording.
+  borders, gradients, shadows, glass fills, supersampled anti-aliased glyphs,
+  opaque RGBA with integer alpha blending, the eight data primitive drawings and
+  exact command recording. Text coverage is 4x4 bilinear supersampling of the
+  5x7 pattern with a ~1 px feather; advance metrics, line wrapping and SVG
+  metrics are unchanged. The rasterizer operates on the built-in bitmap pattern with deterministic integer coverage.
 - `src/effects.rs` — integer RGBA framebuffer effects: separable box blur,
   silhouette shadow/glow, frosted backdrop glass and a specular liquid gradient.
 - `src/display.rs` — fixed-shape deterministic display-list JSON with integer
@@ -365,13 +367,13 @@ placeholder colour); the animation clock only moves when the caller ticks it,
 so two identical tick sequences produce identical digest sequences. The SVG
 backend applies the same rules to its element/attribute ordering.
 
-Golden digests (unchanged by every additive layer):
+Golden digests (current text rasterization; additive layers preserve these values):
 
 | Fixture | Viewport | Digest |
 | --- | --- | --- |
-| `counter.opuir.json` | 320x240 | `c87bf023a6c01f9d` |
-| `counter.opuir.json` | 800x600 | `8cc3021fa80749b5` |
-| `counter.opuir.json`, `--state count=7` | 800x600 | `e7aad51c98d9cf21` |
+| `counter.opuir.json` | 320x240 | `2fc4eac75fd50f89` |
+| `counter.opuir.json` | 800x600 | `88127ca1577cdb61` |
+| `counter.opuir.json`, `--state count=7` | 800x600 | `40891c1fbb81399e` |
 
 `FrameView<'a> { width: u32, height: u32, pixels: &'a [u8] }` has the exact field
 layout of `ADAPTER_CONTRACT.md`. It is a local struct: adapters do not gain a
@@ -398,7 +400,7 @@ stream; effect-free `--commands` output stays byte-identical.
 ## Deterministic software visual effects
 
 All effects are **opt-in** through a node's `props.effects` array. Effects absent
-leave the three V0.1 golden digests and the display list unchanged.
+leave the three golden digests and the display list unchanged.
 Example:
 
 ```json
@@ -451,7 +453,7 @@ from the frame/backdrop diff), `effect_shadow`, `effect_glow`, `effect_glass`,
 `effect_liquid` (one per local effect in IR order), and `effect_blur` (whole-frame
 passes appended after all nodes, in pre-order layout order). Effect-free IR emits
 none of them: `tests/fixtures/r6_counter_commands.json` still matches
-byte-for-byte, and the three V0.1 golden digests are unchanged.
+byte-for-byte, and the three golden digests are unchanged.
 
 The independent `opurom-gpu` repository executes that stream in real MSL
 compute kernels: one thread per viewport pixel, multiple dispatched passes for
@@ -461,15 +463,15 @@ blurs, with real buffer readback. For the committed effect fixture
 
 ```sh
 ./target/debug/opurom-render tests/fixtures/r9_effect.opuir.json 96 64 cpu.ppm \
-  --commands fx.commands.json     # digest=4c263a3810af4ef4, dirty=1
+  --commands fx.commands.json     # digest=ab00722ca3ae679a, dirty=1
 ../opurom-gpu/target/debug/opurom-gpu raster fx.commands.json gpu.ppm
 cmp cpu.ppm gpu.ppm                # exit 0, byte-identical
 ```
 
 Measured result: `cmp` exits 0, both PPMs are 18445 bytes, and the FNV-1a 64
-digest of the PPM bytes is `1f9b7069c621028f` (all five effect kinds active).
+digest of the PPM bytes is `292043461093fcd5` (all five effect kinds active).
 `tests/gpu_effects.rs` also proves the same equality at `64 48` (9229 bytes, PPM
-digest `7538c5a3976d1133`). This is a real comparison against the independent
+digest `51ba485cdab48339`). This is a real comparison against the independent
 software renderer, not a self-comparison.
 
 The GPU path is compute-kernel only: glyphs remain CPU-decomposed rects. The CPU
@@ -500,7 +502,7 @@ has an explicit default a11y role (one of the seven standard roles). The SVG 1.1
 backend emits the box and the correct `data-role`, and the a11y tree reports the
 role and bounds. `tests/primitives.rs` proves all 68 differ from the fallback,
 from every core kind and from each other, are deterministic across repeated renders and across
-separate CLI processes, and that the three V0.1 golden digests are unchanged.
+separate CLI processes, and that the three golden digests are unchanged.
 
 | Family | Kinds |
 | --- | --- |
@@ -619,27 +621,28 @@ preserved as the default, quality budget tiers, CLI transition validation, CLI
 order, the five software effects with determinism, pairwise distinct pixels,
 clamping, overflow, effect-command export for all five kinds with integer
 parameters, draw order, bounds, effect-free fixture invariance, and unchanged
-V0.1 golden digests.
-`cargo test --offline` (155 tests) is green with fixed golden digests and zero
+golden digests.
+`cargo test --offline` (156 tests) is green with fixed golden digests and zero
 warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 
 
-## Implementation shortcuts
+## Future directions
 
-- `shortcut: 5x7 ASCII-only bitmap font, upgrade to a shaped font atlas when a GPU glyph path exists`.
-- `shortcut: Image renders a deterministic colour placeholder, upgrade when resource loading exists`.
-- `shortcut: dirty rects are capped at 64 (fallback: one full-frame rect), refine with a tile quadtree when a real presenter exists`.
-- `shortcut: the gradient is vertical only (two stops), upgrade to an angle/multi-stop gradient when the IR supports it`.
-- `shortcut: the legacy `glass: true` prop is a colour blend; the `effects` glass path blurs a framebuffer snapshot, upgrade to compositor layers and real refraction`.
-- `shortcut: the entry animation grows and fades the box only, upgrade to per-property keyframes`.
-- `shortcut: transitions composite whole CPU frames with nearest-neighbour scale, upgrade to compositor layers with a real presenter`.
-- `shortcut: gesture input is integer L1 deltas, upgrade when real hardware gesture events exist`.
-- `shortcut: particles are fixed-seed 2x2 overlays, upgrade when a GPU particle path exists`.
-- `shortcut: bounce contacts use a 16-unit range and an 8-particle index-neighbour window (enough to block tunneling at spawn speeds), upgrade to a spatial hash when a large field needs denser pair checks`.
-- `shortcut: quality is a caller-supplied budget policy, upgrade when profile feedback is wired into the host`.
-- `shortcut: the accessibility tree is layout-derived data, upgrade to a platform bridge when a native adapter exists`.
-- `shortcut: SVG <text> uses a generic monospace face and built-in metrics, upgrade to real shaping when a font atlas exists`.
-- `shortcut: SVG has no external crate and no image/font decoding; it is a software vector snapshot, not a GPU backend`.
-- No cross-repo runtime link: the adapter crate's `FrameView` is matched by layout,
-  not shared by type. That is intentional per `ADAPTER_CONTRACT.md`.
+The renderer evolves through additive layers that keep the IR contract and the golden digests
+stable. Planned areas of work:
+
+- **Shaped text**: a font atlas with hinting, kerning and shaping, integrated with a GPU glyph
+  path.
+- **Image resources**: resource-backed image decoding in place of the deterministic colour
+  placeholder.
+- **Dirty-region refinement**: a tile quadtree for large framebuffers.
+- **Gradient and compositor layers**: angled multi-stop gradients, compositor-backed glass and
+  per-property keyframe animation.
+- **Transition presentation**: compositor layers with a real presenter.
+- **Hardware gesture events**: full gesture event streams in place of integer deltas.
+- **GPU particle and spatial paths**: GPU-accelerated particle fields and spatial-hash contact
+  queries.
+- **Quality feedback**: profile-driven quality budgets from the host.
+- **Platform accessibility bridge**: a native accessibility bridge over the layout-derived tree.
+- **SVG text shaping**: real shaping and font metrics in the SVG backend.

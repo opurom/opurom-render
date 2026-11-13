@@ -1077,29 +1077,110 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
     draw_glyphs(canvas, text, x0, y0, scale, color);
 }
 
-/// Draw a text run with the built-in bitmap font.
+/// Supersampling grid per output pixel for glyph coverage.
+const AA_GRID: i64 = 4;
+/// Fine units per output pixel: sample centres stay integral.
+const AA_FINE: i64 = AA_GRID * 2;
+
+/// Coverage of one pixel of a scaled glyph in fixed point (0..=UNIT).
+///
+/// The 5x7 pattern is bilinearly interpolated on an `AA_GRID x AA_GRID`
+/// supersampling grid, then sharpened to a ~1 px feather so only edge pixels
+/// soften; the glyph box and advance are untouched.
+fn glyph_coverage(rows: &[u8; 7], scale: i64, px: i64, py: i64) -> i64 {
+    let cell = scale * AA_FINE;
+    let lit = |c: i64, r: i64| -> i64 {
+        if (0..font::GLYPH_W).contains(&c) && (0..font::GLYPH_H).contains(&r) {
+            i64::from(rows[r as usize] & (1u8 << (4 - c as u32)) != 0)
+        } else {
+            0
+        }
+    };
+    let mut sum = 0i64;
+    for sy in 0..AA_GRID {
+        let y2 = py * AA_FINE + sy * 2 + 1;
+        let (cy, fy) = (y2 / cell, y2 % cell);
+        let dy = fy - cell / 2;
+        let ny = cy + if dy < 0 { -1 } else { 1 };
+        let wy = 128 * dy.abs() / scale;
+        for sx in 0..AA_GRID {
+            let x2 = px * AA_FINE + sx * 2 + 1;
+            let (cx, fx) = (x2 / cell, x2 % cell);
+            let dx = fx - cell / 2;
+            let nx = cx + if dx < 0 { -1 } else { 1 };
+            let wx = 128 * dx.abs() / scale;
+            let (ax, ay) = (UNIT - wx, UNIT - wy);
+            let g = (ay * (ax * lit(cx, cy) + wx * lit(nx, cy))
+                + wy * (ax * lit(cx, ny) + wx * lit(nx, ny)))
+                / UNIT;
+            sum += ((g - UNIT / 2) * scale + UNIT / 2).clamp(0, UNIT);
+        }
+    }
+    (sum + AA_GRID * AA_GRID / 2) / (AA_GRID * AA_GRID)
+}
+
+/// Draw a text run with the built-in bitmap font, blending partial coverage
+/// over whatever is already on the canvas.
 fn draw_glyphs(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: i64, color: Rgba) {
     for (idx, ch) in text.chars().enumerate() {
         let rows = match font::glyph(ch) {
             Some(r) => r,
             None => continue, // unsupported codepoint still consumes its advance
         };
+        if rows == [0; 7] {
+            continue;
+        }
         let gx = x0 + (idx as i64).saturating_mul(font::advance(scale));
-        for (ry, mask) in rows.iter().enumerate() {
-            for col in 0..5i64 {
-                if mask & (1u8 << ((4 - col) as u32)) != 0 {
-                    canvas.fill_rect(
-                        Rect {
-                            x: gx + col * scale,
-                            y: y0 + ry as i64 * scale,
-                            w: scale,
-                            h: scale,
-                        },
-                        color,
-                    );
+        for py in 0..font::GLYPH_H * scale {
+            for px in 0..font::GLYPH_W * scale {
+                let cov = glyph_coverage(&rows, scale, px, py);
+                let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+                if a != 0 {
+                    canvas.set(gx + px, y0 + py, Rgba { a, ..color });
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aa_glyph_softens_edges_without_moving_ink() {
+        let rows = font::glyph('A').unwrap();
+        let scale = 3;
+        assert_eq!(font::advance(scale), (font::GLYPH_W + 1) * scale);
+        let covs: Vec<i64> = (0..font::GLYPH_H * scale)
+            .flat_map(|y| {
+                (0..font::GLYPH_W * scale).map(move |x| glyph_coverage(&rows, scale, x, y))
+            })
+            .collect();
+        assert!(covs.iter().all(|&c| (0..=UNIT).contains(&c)));
+        assert!(covs.contains(&UNIT), "solid interior must stay opaque");
+        assert!(covs.iter().any(|&c| c > 0 && c < UNIT), "edges must soften");
+        assert_eq!(glyph_coverage(&font::glyph(' ').unwrap(), scale, 3, 0), 0);
+
+        let bg = Rgba::rgb(255, 255, 255);
+        let mut canvas = Canvas::new(40, 20, bg);
+        draw_glyphs(&mut canvas, "A A", 2, 2, scale, Rgba::rgb(0, 0, 0));
+        let pixel = |x: i64, y: i64| -> [u8; 3] {
+            let i = (y as usize * canvas.width as usize + x as usize) * 4;
+            [canvas.pixels[i], canvas.pixels[i + 1], canvas.pixels[i + 2]]
+        };
+        let (ex, ey) = (0..font::GLYPH_W * scale)
+            .flat_map(|x| (0..font::GLYPH_H * scale).map(move |y| (x, y)))
+            .find(|&(x, y)| {
+                let c = glyph_coverage(&rows, scale, x, y);
+                c > 0 && c < UNIT
+            })
+            .unwrap();
+        let soft = pixel(2 + ex, 2 + ey);
+        assert!(soft[0] > 0 && soft[0] < 255, "edge pixel {soft:?}");
+        // Nothing outside either 5x7 glyph box is touched.
+        assert_eq!(pixel(2 + font::GLYPH_W * scale, 2), [255, 255, 255]);
+        assert_eq!(pixel(1, 2), [255, 255, 255]);
     }
 }
 
