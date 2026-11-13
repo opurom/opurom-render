@@ -1126,7 +1126,56 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
             (x0, y0)
         }
     };
-    draw_glyphs(canvas, text, x0, y0, scale, color);
+    // Text that already fits keeps the historical single-line placement, so
+    // committed frames are byte for byte unchanged.
+    if tw <= n.rect.w {
+        draw_glyphs(canvas, text, x0, y0, scale, color);
+        return;
+    }
+    // Overflowing text is wrapped into lines that fit the node and then painted
+    // through the canvas clip, so no glyph pixel spills onto a neighbour or the
+    // next node; lines past the bottom edge are clipped the same way.
+    let adv = font::advance(scale).max(1);
+    let max_chars = ((n.rect.w - 2 * pad).max(adv) / adv) as usize;
+    let line_h = font::GLYPH_H * scale + 2;
+    let lines = wrap_text(text, max_chars);
+    let total_h = line_h.saturating_mul(lines.len() as i64);
+    let (x_base, y_base) = match n.text_origin {
+        Some((ox, oy)) => (ox, oy),
+        None => {
+            let y_base = n.rect.y + ((n.rect.h - total_h) / 2).max(pad);
+            (n.rect.x + pad, y_base)
+        }
+    };
+    let prev_clip = canvas.clip;
+    canvas.clip = Some(intersect(canvas.effective_clip(), n.rect));
+    for (i, line) in lines.iter().enumerate() {
+        let lw = (line.chars().count() as i64).saturating_mul(font::advance(scale));
+        let x = match n.text_origin {
+            Some((ox, _)) => ox,
+            None => match n.text_align {
+                Align::Start => x_base,
+                Align::Center => n.rect.x + ((n.rect.w - lw) / 2).max(pad),
+                Align::End => n.rect.x + (n.rect.w - lw - pad).max(pad),
+            },
+        };
+        draw_glyphs(canvas, line, x, y_base + (i as i64) * line_h, scale, color);
+    }
+    canvas.clip = prev_clip;
+}
+
+/// Overlap of two rectangles, empty when they do not meet.
+fn intersect(a: Rect, b: Rect) -> Rect {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = a.x.saturating_add(a.w).min(b.x.saturating_add(b.w));
+    let y1 = a.y.saturating_add(a.h).min(b.y.saturating_add(b.h));
+    Rect {
+        x: x0,
+        y: y0,
+        w: (x1 - x0).max(0),
+        h: (y1 - y0).max(0),
+    }
 }
 
 /// Supersampling grid per output pixel for glyph coverage.
@@ -1233,6 +1282,18 @@ mod tests {
         // Nothing outside either 5x7 glyph box is touched.
         assert_eq!(pixel(2 + font::GLYPH_W * scale, 2), [255, 255, 255]);
         assert_eq!(pixel(1, 2), [255, 255, 255]);
+    }
+
+    #[test]
+    fn wrap_text_breaks_at_spaces_and_hard_breaks_long_words() {
+        assert_eq!(wrap_text("", 4), Vec::<String>::new());
+        assert_eq!(wrap_text("Ok", 4), vec!["Ok"]);
+        assert_eq!(wrap_text("a b c", 3), vec!["a b", "c"]);
+        // A word wider than the line is hard-broken.
+        assert_eq!(wrap_text("abcdef", 3), vec!["abc", "def"]);
+        // No space fits: the earlier word moves to the next line.
+        assert_eq!(wrap_text("ab cd", 2), vec!["ab", "cd"]);
+        assert_eq!(wrap_text("a b c d", 1), vec!["a", "b", "c", "d"]);
     }
 }
 
