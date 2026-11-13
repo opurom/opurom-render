@@ -3,6 +3,7 @@
 //! arithmetic; the frame is opaque.
 
 use crate::display::Command;
+use crate::icons;
 use crate::layout::Control;
 use crate::{font, Align, Kind, LaidOut, Rect, Rgba};
 
@@ -439,7 +440,11 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
     draw_shadow(canvas, n);
     draw_box(canvas, n);
     draw_control(canvas, n);
-    draw_text(canvas, n);
+    if n.kind == Kind::Icon {
+        draw_icon(canvas, n);
+    } else {
+        draw_text(canvas, n);
+    }
     // The particle field is part of the node's ordinary drawing, so local
     // effects see it in their silhouette snapshot.
     if let Some(particles) = n.particles {
@@ -1099,6 +1104,31 @@ fn cos45(deg: i64) -> i64 {
         (-707, 707),
     ];
     TABLE[((deg / 45).rem_euclid(8)) as usize].1
+}
+
+/// Draw a built-in icon glyph, centred and scaled to fit the node rect. The
+/// glyph is a 24x24 integer vector path sampled to the same fixed-point
+/// coverage as the text font; unknown names fall back to a neutral disc.
+fn draw_icon(canvas: &mut Canvas, n: &LaidOut) {
+    let Some(name) = n.icon_name.as_deref() else {
+        return;
+    };
+    let box_size = n.rect.w.min(n.rect.h);
+    if box_size <= 0 {
+        return;
+    }
+    let color = with_alpha(n.text_color.unwrap_or(n.accent), n.effects.opacity);
+    let x0 = n.rect.x + (n.rect.w - box_size) / 2;
+    let y0 = n.rect.y + (n.rect.h - box_size) / 2;
+    for py in 0..box_size {
+        for px in 0..box_size {
+            let cov = icons::icon_coverage(name, box_size, px, py);
+            let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+            if a != 0 {
+                canvas.set(x0 + px, y0 + py, Rgba { a, ..color });
+            }
+        }
+    }
 }
 
 fn draw_text(canvas: &mut Canvas, n: &LaidOut) {

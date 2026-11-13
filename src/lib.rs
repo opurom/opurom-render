@@ -30,6 +30,7 @@ pub mod anim;
 pub mod display;
 pub mod effects;
 pub mod font;
+pub mod icons;
 pub mod ir;
 pub mod layout;
 pub mod particles;
@@ -46,6 +47,7 @@ pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
 pub use effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
+pub use icons::{icon_coverage, icon_shape, IconShape, Shape, ICON_NAMES};
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props,
     Role, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
