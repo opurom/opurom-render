@@ -14,6 +14,7 @@ use crate::anim::Curve;
 use crate::effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
+use crate::particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 use crate::Rgba;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -364,6 +365,8 @@ pub struct Props {
     pub rows: Option<i64>,
     // Optional software visual effects.
     pub effects: Vec<VisualEffect>,
+    // Optional deterministic particle field.
+    pub particles: Option<Particles>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -912,6 +915,48 @@ fn effects_prop(o: &Map<String, Value>, what: &str) -> Result<Vec<VisualEffect>,
     Ok(out)
 }
 
+/// The optional `particles` prop. Every numeric field is a bounded integer
+/// rejected at parse time when out of range, so raster arithmetic never sees
+/// an unbounded value and malformed documents get a readable diagnostic.
+fn particles_prop(o: &Map<String, Value>, what: &str) -> Result<Option<Particles>, IrError> {
+    let Some(v) = o.get("particles") else {
+        return Ok(None);
+    };
+    let path = format!("{what}.particles");
+    let p = object(v, &path)?;
+    let count = match p.get("count") {
+        Some(v) => {
+            let n = integer(v, &format!("{path}.count"))?;
+            if !(0..=PARTICLE_MAX_COUNT).contains(&n) {
+                return Err(bad(format!(
+                    "{path}.count {n} must be 0..={PARTICLE_MAX_COUNT}"
+                )));
+            }
+            n
+        }
+        None => return Err(bad(format!("{path} is missing required field \"count\""))),
+    };
+    let field = |key: &str, lo: i64, hi: i64, default: i64| -> Result<i64, IrError> {
+        match p.get(key) {
+            Some(v) => {
+                let n = integer(v, &format!("{path}.{key}"))?;
+                if !(lo..=hi).contains(&n) {
+                    return Err(bad(format!("{path}.{key} {n} must be {lo}..={hi}")));
+                }
+                Ok(n)
+            }
+            None => Ok(default),
+        }
+    };
+    Ok(Some(Particles {
+        count,
+        seed: field("seed", 0, PARTICLE_MAX_SEED, 1)?,
+        radius: field("radius", 0, PARTICLE_MAX_RADIUS, 2)?,
+        alpha: field("alpha", 0, EFFECT_UNIT, EFFECT_UNIT)?,
+        color: color_prop(p, "color", &path)?,
+    }))
+}
+
 fn state_value(v: &Value, expected: Option<ValueType>, what: &str) -> Result<StateValue, IrError> {
     let value = if let Some(s) = v.as_str() {
         StateValue::Str(s.to_string())
@@ -1024,6 +1069,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         values: values_prop(o, "values", what)?,
         rows: opt_integer(o, "rows", what)?,
         effects: effects_prop(o, what)?,
+        particles: particles_prop(o, what)?,
     })
 }
 

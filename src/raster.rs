@@ -256,6 +256,52 @@ impl Canvas {
         }
     }
 
+    /// Scatter the node's particle field over `r` and record one `particles`
+    /// command. Dots are painted in index order and clipped to
+    /// `rect ∩ clip ∩ viewport`; the display-list command evaluates the same
+    /// centres, circle test and blend order per pixel, so the recorded stream
+    /// reproduces the framebuffer byte for byte.
+    pub fn fill_particles(&mut self, r: Rect, params: crate::particles::Particles, color: Rgba) {
+        if r.w <= 0 || r.h <= 0 || params.count <= 0 || params.radius < 0 {
+            return;
+        }
+        let color = Rgba {
+            a: crate::particles::alpha_byte(params.alpha),
+            ..color
+        };
+        if color.a == 0 {
+            return;
+        }
+        let rad = params.radius.min(crate::particles::PARTICLE_MAX_RADIUS);
+        let clip = self.effective_clip();
+        if self.capture && self.visible_rect(r, color) {
+            self.emit(Command::Particles {
+                rect: r,
+                clip,
+                count: params.count,
+                seed: params.seed,
+                radius: rad,
+                color,
+            });
+        }
+        let x0 = r.x.max(clip.x).max(0);
+        let y0 = r.y.max(clip.y).max(0);
+        let x1 = (r.x + r.w).min(clip.x + clip.w).min(self.width as i64);
+        let y1 = (r.y + r.h).min(clip.y + clip.h).min(self.height as i64);
+        for i in 0..params.count as u32 {
+            let (cx, cy) = crate::particles::dot_center(r, params.seed, i);
+            for y in (cy - rad).max(y0)..=(cy + rad).min(y1 - 1) {
+                for x in (cx - rad).max(x0)..=(cx + rad).min(x1 - 1) {
+                    let dx = x - cx;
+                    let dy = y - cy;
+                    if dx * dx + dy * dy <= rad * rad {
+                        self.set_quiet(x, y, color);
+                    }
+                }
+            }
+        }
+    }
+
     /// Filled circle (integer distance test).
     pub fn fill_circle(&mut self, r: Rect, c: Rgba) {
         if r.w <= 0 || r.h <= 0 {
@@ -394,6 +440,12 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
     draw_box(canvas, n);
     draw_control(canvas, n);
     draw_text(canvas, n);
+    // The particle field is part of the node's ordinary drawing, so local
+    // effects see it in their silhouette snapshot.
+    if let Some(particles) = n.particles {
+        let color = particles.color.unwrap_or(n.accent);
+        canvas.fill_particles(n.rect, particles, color);
+    }
     if let Some(backdrop) = backdrop {
         crate::effects::apply_node(canvas, n, &backdrop);
     }

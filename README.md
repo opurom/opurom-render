@@ -19,7 +19,7 @@ cargo fmt --check
 cargo test --offline
 ```
 
-`cargo test --offline` runs 175 tests (unit + integration). All pass, zero
+`cargo test --offline` runs 185 tests (unit + integration). All pass, zero
 warnings. Only `serde_json` is used; it is pinned to the locally cached
 `=1.0.154`, so the build needs no network.
 
@@ -62,8 +62,8 @@ one `Renderer` yields zero dirty rects. `--a11y <out.json>` writes a separate
 deterministic JSON accessibility tree (see below), and `--svg <out.svg>` a
 deterministic SVG 1.1 snapshot; neither adds stdout lines and neither is
 composited by `--transition`. `--commands <out.json>` records the exact raster
-display list as deterministic JSON: solid rects, rounded rects and two-stop
-vertical gradients with integer bounds/colours in draw order, plus the viewport
+display list as deterministic JSON: solid rects, rounded rects, two-stop
+vertical gradients and particle fields with integer bounds/colours in draw order, plus the viewport
 and opaque background. Bitmap glyph runs are decomposed on the CPU into solid
 rect commands; there is no GPU glyph atlas or GPU text shaping. CPU-only page
 transitions cannot be represented as this display list, so `--commands` and
@@ -117,6 +117,8 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   metrics are unchanged. The rasterizer operates on the built-in bitmap pattern with deterministic integer coverage.
 - `src/effects.rs` — integer RGBA framebuffer effects: separable box blur,
   silhouette shadow/glow, frosted backdrop glass and a specular liquid gradient.
+- `src/particles.rs` — the opt-in particle field: bounded integer parameters,
+  the seeded integer dot-centre hash and the fixed-point alpha reduction.
 - `src/display.rs` — fixed-shape deterministic display-list JSON with integer
   bounds/colours, draw order, viewport and opaque background.
 - `src/anim.rs` — the fixed-timestep animation clock, spring/ease/inertia curves, page
@@ -470,6 +472,54 @@ specular gradient and `glass` uses a framebuffer snapshot. Effects are not
 represented in the SVG snapshot or the a11y tree. A Metal compute path for the
 five effects exists in the GPU repository (see below).
 
+## Deterministic particle fields
+
+A node opts into a particle field with the `particles` prop:
+
+```json
+"props": {
+  "width": 96,
+  "height": 64,
+  "color": "#223344",
+  "particles": {"count": 40, "seed": 7, "radius": 2, "alpha": 1024, "color": "#FF0044"}
+}
+```
+
+| Field | Type / default | Meaning |
+| --- | --- | --- |
+| `count` | required integer `0..=512` | Number of dots. `0` paints nothing. |
+| `seed` | integer `0..=4294967295`, default `1` | Selects every dot position; different seeds produce different fields. |
+| `radius` | integer `0..=32`, default `2` | Dot radius in pixels; coverage is the integer circle test `dx*dx + dy*dy <= radius*radius`. |
+| `alpha` | fixed point `0..=1024`, default `1024` | Blend alpha, reduced to a byte as `alpha * 255 / 1024`; `0` paints nothing. |
+| `color` | optional `#RRGGBB` | Dot colour; defaults to the node accent. |
+
+Particles are a deterministic spatial primitive. There is no time input, no
+motion, no physics and no wall clock: dot `i` is placed at
+
+```text
+cx = rect.x + mix(seed ^ (i * A + B)) mod rect.w
+cy = rect.y + mix(seed ^ (i * A + C)) mod rect.h
+```
+
+where `A`, `B` and `C` are fixed 32-bit constants and `mix` is an integer
+xorshift/multiply avalanche over `u32` (`x ^= x >> 16`, `x *= 0x7feb352d`,
+`x ^= x >> 15`, `x *= 0x846ca68b`, `x ^= x >> 16`). Only the seed and the dot
+index select positions; the viewport, frame buffer and other commands cannot
+change them. Each dot is painted in index order with the same integer `/255`
+blend as a solid rect, clipped to the node rect, the effective clip and the
+viewport. The field is drawn after the node's box, control and text, and before
+any local framebuffer effects, so a local effect silhouette includes the dots.
+The node opacity entry animation scales the box fill and leaves the particle
+alpha at its prop value.
+
+Every out-of-range or non-integer field, a non-object prop and an invalid
+colour are readable parse errors. Nodes without the prop emit no particle
+command, and the three golden digests are unchanged. The display list gains one
+`{"kind":"particles","rect":[...],"clip":[...],"count":...,"seed":...,"radius":...,"color":[r,g,b,a]}`
+command per node with a visible field; the cross-repo GPU backend evaluates the
+same dot centres, circle test and blend order per pixel. The SVG snapshot and
+the accessibility tree draw the node box but not its particle field.
+
 ## GPU effect kernels (cross-repo proof)
 
 `--commands` now accepts effect IR. The command stream gains seven fixed-shape
@@ -649,8 +699,10 @@ preserved as the default, quality budget tiers, CLI transition validation, CLI
 order, the five software effects with determinism, pairwise distinct pixels,
 clamping, overflow, effect-command export for all five kinds with integer
 parameters, draw order, bounds, effect-free fixture invariance, and unchanged
-golden digests.
-`cargo test --offline` (175 tests) is green with fixed golden digests and zero
+golden digests; opt-in particle fields with byte-identical repeated renders,
+seed sensitivity, `count=0` and `alpha=0` no-ops, bounded parse diagnostics,
+rect clipping, effect-snapshot draw order and unchanged golden digests.
+`cargo test --offline` (185 tests) is green with fixed golden digests and zero
 warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 
@@ -669,8 +721,8 @@ stable. Planned areas of work:
   per-property keyframe animation.
 - **Transition presentation**: compositor layers with a real presenter.
 - **Hardware gesture events**: full gesture event streams in place of integer deltas.
-- **GPU particle and spatial paths**: GPU-accelerated particle fields and spatial-hash contact
-  queries.
+- **Spatial contact queries**: spatial-hash contact queries for the step-based
+  particle field.
 - **Quality feedback**: profile-driven quality budgets from the host.
 - **Platform accessibility bridge**: a native accessibility bridge over the layout-derived tree.
 - **SVG text shaping**: real shaping and font metrics in the SVG backend.
