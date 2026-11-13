@@ -87,7 +87,7 @@ pub fn glyph(ch: char) -> Option<[u8; 7]> {
         'd' => "00001000010111110001100011000101111",
         'e' => "00000000000111010001111111000001111",
         'f' => "00110010010100011110010000100001000",
-        'g' => "00000011111000110001011110000101110",
+        'g' => "00000011111000110001011110001011110",
         'h' => "10000100001111010001100011000110001",
         'i' => "00100000000110000100001000010001110",
         'j' => "00010000000011000010000101001001100",
@@ -143,5 +143,19 @@ mod tests {
     fn glyph_bits_are_stable() {
         assert_eq!(glyph('A').unwrap()[3], 0b11111);
         assert_eq!(glyph(' ').unwrap(), [0; 7]);
+    }
+
+    #[test]
+    fn descender_glyphs_are_distinct_from_digits() {
+        let g = glyph('g').unwrap();
+        let q = glyph('q').unwrap();
+        let nine = glyph('9').unwrap();
+        assert_ne!(g, nine, "g must not read as 9");
+        assert_ne!(q, nine, "q must not read as 9");
+        assert_ne!(g, q, "g and q need different descenders");
+        // g ends in a left hook, q in a straight stem, 9 in a right-leaning tail.
+        assert_ne!(g[5], q[5]);
+        assert_ne!(g[6], nine[6]);
+        assert_eq!(g[6], 0b11110);
     }
 }
