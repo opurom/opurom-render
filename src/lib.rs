@@ -14,7 +14,9 @@
 //! transitions, gesture progress, fixed-seed particles and caller-supplied quality
 //! tiers. The platform delivery layer adds an exact display-list snapshot of the
 //! software raster stage. The visual fidelity layer adds five optional
-//! deterministic framebuffer effects. All of them are opt-in: a v0.1 IR renders
+//! deterministic framebuffer effects plus an opt-in deterministic particle
+//! field: a fixed-count scatter of integer dots whose positions are a pure
+//! function of a bounded integer seed. All of them are opt-in: a v0.1 IR renders
 //! byte-identically to the core release, and effect-free `--commands` output stays
 //! byte-identical to the effect-free command stream. The production layer adds
 //! optional effect commands that reproduce those effects on the Metal compute
@@ -30,6 +32,7 @@ pub mod effects;
 pub mod font;
 pub mod ir;
 pub mod layout;
+pub mod particles;
 pub mod primitives;
 pub mod raster;
 pub mod svg;
@@ -51,6 +54,7 @@ pub use layout::{
     fluid_grid, layout, layout_at, Breakpoint, Control, Direction, Effects, FluidGrid, LaidOut,
     Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH, SETTLED_MS,
 };
+pub use particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 pub use svg::{svg, svg_at};
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).

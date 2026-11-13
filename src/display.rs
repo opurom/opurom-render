@@ -4,6 +4,7 @@
 //! it with a small standard-library parser and no extra dependency.
 
 use crate::ir::IrError;
+use crate::particles::{PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 use crate::{Rect, Rgba};
 use std::fmt::{self, Write as _};
 
@@ -34,6 +35,16 @@ pub enum Command {
         bottom: Rgba,
         /// Alpha already reduced from fixed point to the software raster's u8.
         alpha: u8,
+    },
+    /// Deterministic particle field: `count` integer dots scattered over the
+    /// rect by a seeded pure integer hash, painted in dot order.
+    Particles {
+        rect: Rect,
+        clip: Rect,
+        count: i64,
+        seed: i64,
+        radius: i64,
+        color: Rgba,
     },
     /// Snapshot the frame before a node's ordinary draw commands.
     EffectBackdrop,
@@ -229,6 +240,7 @@ impl DisplayList {
                 | Command::Gradient {
                     rect, clip, radius, ..
                 } => (*rect, *clip, *radius),
+                Command::Particles { rect, clip, .. } => (*rect, *clip, 0),
                 _ => {
                     validate_effect(command, index)?;
                     continue;
@@ -237,6 +249,24 @@ impl DisplayList {
             validate_rect(rect, &format!("commands[{index}].rect"), true)?;
             validate_rect(clip, &format!("commands[{index}].clip"), false)?;
             validate_coord(radius, &format!("commands[{index}].radius"))?;
+            if let Command::Particles {
+                count,
+                seed,
+                radius,
+                ..
+            } = command
+            {
+                let what = format!("commands[{index}]");
+                for (name, value, hi) in [
+                    ("count", *count, PARTICLE_MAX_COUNT),
+                    ("seed", *seed, PARTICLE_MAX_SEED),
+                    ("radius", *radius, PARTICLE_MAX_RADIUS),
+                ] {
+                    if !(0..=hi).contains(&value) {
+                        return Err(bad(format!("{what}.{name} {value} must be 0..={hi}")));
+                    }
+                }
+            }
         }
 
         let mut out = String::with_capacity(128 + self.commands.len() * 192);
@@ -304,6 +334,26 @@ impl DisplayList {
                         .map_err(|e| bad(format!("cannot format display list: {e}")))?;
                     write!(&mut out, ",\"alpha\":{alpha}}}")
                         .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                }
+                Command::Particles {
+                    rect,
+                    clip,
+                    count,
+                    seed,
+                    radius,
+                    color,
+                } => {
+                    out.push_str("{\"kind\":\"particles\",");
+                    write_rect(&mut out, "rect", *rect).map_err(fmt_err)?;
+                    out.push(',');
+                    write_rect(&mut out, "clip", *clip).map_err(fmt_err)?;
+                    write!(
+                        &mut out,
+                        ",\"count\":{count},\"seed\":{seed},\"radius\":{radius},"
+                    )
+                    .map_err(fmt_err)?;
+                    write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
+                    out.push('}');
                 }
                 Command::EffectBackdrop => out.push_str("{\"kind\":\"effect_backdrop\"}"),
                 Command::EffectBlur { radius } => {

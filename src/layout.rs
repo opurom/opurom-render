@@ -4,6 +4,7 @@
 use crate::anim::{self, Curve};
 use crate::effects::VisualEffect;
 use crate::ir::Contrast;
+use crate::particles::Particles;
 use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateView, Theme, ThemeMode};
 
 /// Elapsed time at which every animation curve has settled.
@@ -185,6 +186,8 @@ pub struct LaidOut {
     pub effects: Effects,
     /// Typed software effects, in IR array order.
     pub visual_effects: Vec<VisualEffect>,
+    /// Opt-in deterministic particle field for this node's rect.
+    pub particles: Option<Particles>,
     pub control: Option<Control>,
     /// Clip rectangle inherited from a `Scroll` viewport.
     pub clip: Option<Rect>,
@@ -820,6 +823,7 @@ fn place(
         text_align,
         effects,
         visual_effects: n.props.effects.clone(),
+        particles: n.props.particles,
         control: control_of(n, state),
         clip,
         text_origin: None,
