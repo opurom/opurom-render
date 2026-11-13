@@ -159,7 +159,10 @@ filled polygons, stroked polylines and circles, stored in Rust data with no
 external font or image files. The renderer scales the path to fit the node
 rectangle, centres it, and samples it with the same fixed-point coverage
 technique as the built-in text font, so the glyph stays crisp at any size and
-is deterministic. The glyph is painted in the node's text colour with the
+is deterministic. A shared icon keeps its intrinsic 16x16 size in a flex
+parent, so a Row of icons renders each glyph without a fixed-size Container
+wrapper; a sole icon inside a fixed-size container still fills and centres
+within it. The glyph is painted in the node's text colour with the
 accent colour as the fallback and honours the node opacity. A name outside the
 set does not reach the renderer because the language layer rejects it, but the
 renderer still paints a neutral disc so the node never renders blank. The three
