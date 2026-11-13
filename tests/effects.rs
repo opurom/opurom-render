@@ -8,7 +8,7 @@ use opurom_render::{
 use std::{fs, path::PathBuf, process::Command as ProcessCommand};
 
 const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/counter-commands.json");
-const BASE_COMMANDS_FNV: &str = "d264d20aa0e577c4";
+const BASE_COMMANDS_FNV: &str = "3c4ea154f59b1c04";
 
 const IR_HEAD: &str = r##"{
   "ir": "0.1", "app": "EffectsProof",
@@ -134,11 +134,11 @@ fn five_effects_are_pairwise_distinct_and_differ_from_fallback() {
 #[test]
 fn sample_effect_digests_are_pinned() {
     for ((name, effects), expected) in KINDS.iter().zip([
-        "4a4750a56fe4c5cc",
-        "862bbdff7c0857d1",
-        "4830d575e5575ed5",
-        "90c4093d6437c459",
-        "da16c756265a86f8",
+        "50aa3db9715c69d5",
+        "6c45857604a7cee1",
+        "2092b17f696ce721",
+        "622e98bf3bf9f76c",
+        "b8f9ba34a8c8dd60",
     ]) {
         assert_eq!(effect_digest(effects), expected, "{name} sample changed");
     }
@@ -342,17 +342,17 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
     let state = StateView::from_ir(&ir);
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
-        "900abf4bd93d1e51"
+        "16b69e96b1534324"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
-        "c8403ba57da5ee61"
+        "aaf572509f15d60c"
     );
     let mut count_7 = state.clone();
     count_7.set("count", StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &count_7).pixels),
-        "48a56056bd32a07e"
+        "e5d71acb7602eab2"
     );
     assert!(!ir.has_visual_effects());
 
@@ -373,7 +373,7 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "digest=900abf4bd93d1e51\ndirty=1\n"
+        "digest=16b69e96b1534324\ndirty=1\n"
     );
     let bytes = fs::read(&commands).unwrap();
     assert_eq!(bytes.as_slice(), BASE_COMMANDS);

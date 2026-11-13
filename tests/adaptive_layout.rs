@@ -390,19 +390,19 @@ fn the_three_golden_digests_are_unchanged() {
     let mut small = Renderer::new(320, 240);
     assert_eq!(
         digest_hex(&small.render(&ir, &state).pixels),
-        "900abf4bd93d1e51"
+        "16b69e96b1534324"
     );
     let mut large = Renderer::new(800, 600);
     assert_eq!(
         digest_hex(&large.render(&ir, &state).pixels),
-        "c8403ba57da5ee61"
+        "aaf572509f15d60c"
     );
     let (ir, mut state) = counter();
     state.set("count", StateValue::Int(7));
     let mut seven = Renderer::new(800, 600);
     assert_eq!(
         digest_hex(&seven.render(&ir, &state).pixels),
-        "48a56056bd32a07e"
+        "e5d71acb7602eab2"
     );
 }
 

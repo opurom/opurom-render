@@ -112,9 +112,10 @@ fn scale_four_glyph_is_smoothly_anti_aliased() {
 }
 
 #[test]
-fn small_scales_stay_on_the_block_font_path() {
-    // Below the smooth threshold the raster is the legacy block font, so a
-    // pinned golden frame and an explicit scale-2/3 label are unchanged.
+fn pinned_golden_frames_are_stable() {
+    // The three canonical counter frames are pinned to the current rendering;
+    // they render through the high-resolution glyph path at every scale the
+    // counter program uses.
     let spec = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../opurom-spec/counter.opuir.json"
@@ -125,24 +126,26 @@ fn small_scales_stay_on_the_block_font_path() {
     state.set("count", StateValue::Int(0));
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
-        "900abf4bd93d1e51"
+        "16b69e96b1534324"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
-        "c8403ba57da5ee61"
+        "aaf572509f15d60c"
     );
     state.set("count", StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
-        "48a56056bd32a07e"
+        "e5d71acb7602eab2"
     );
 }
 
 #[test]
 fn same_text_uses_block_font_below_threshold_and_vector_above() {
-    // The switch is a pure function of the integer text scale.
-    let small = parse_ir(&text_ir("Vector", 13)).unwrap(); // scale 2
-    let big = parse_ir(&text_ir("Vector", 32)).unwrap(); // scale 5
+    // The switch is a pure function of the integer text scale: size 10 lands
+    // on scale 1 (below the smooth threshold) and size 11 lands on scale 2
+    // (at the threshold, so it uses the high-resolution path).
+    let small = parse_ir(&text_ir("Vector", 10)).unwrap(); // scale 1
+    let big = parse_ir(&text_ir("Vector", 11)).unwrap(); // scale 2
     let small_state = StateView::from_ir(&small);
     let big_state = StateView::from_ir(&big);
     assert!(scale_of(&small, &small_state, 400, 80) < font::SMOOTH_MIN_SCALE);

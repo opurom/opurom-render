@@ -386,10 +386,10 @@ fn v0_1_golden_digests_are_unchanged_by_r3() {
         String::from_utf8_lossy(&output.stdout).to_string()
     };
     assert!(
-        run("320", "240", &dir.join("r3-golden-320.ppm"), &[]).contains("digest=900abf4bd93d1e51")
+        run("320", "240", &dir.join("r3-golden-320.ppm"), &[]).contains("digest=16b69e96b1534324")
     );
     assert!(
-        run("800", "600", &dir.join("r3-golden-800.ppm"), &[]).contains("digest=c8403ba57da5ee61")
+        run("800", "600", &dir.join("r3-golden-800.ppm"), &[]).contains("digest=aaf572509f15d60c")
     );
     assert!(run(
         "800",
@@ -397,5 +397,5 @@ fn v0_1_golden_digests_are_unchanged_by_r3() {
         &dir.join("r3-golden-7.ppm"),
         &["--state", "count=7"]
     )
-    .contains("digest=48a56056bd32a07e"));
+    .contains("digest=e5d71acb7602eab2"));
 }
