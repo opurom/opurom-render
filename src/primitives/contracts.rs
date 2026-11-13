@@ -1,4 +1,4 @@
-// capability generated table. Edit the generator, not this file.
+// Generated primitive table. Edit the generator, not this file.
 // One entry per additional primitive kind; order fixes the kind code.
 use super::{Motif, contract, COUNT};
 use crate::ir::Role;
