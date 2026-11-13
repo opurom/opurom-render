@@ -12,23 +12,64 @@ pub const SETTLED_MS: i64 = 4000;
 /// Fixed-point unit: 1024 == fully opaque, 0 == fully transparent.
 pub const UNIT: i64 = 1024;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Viewport width tiers, in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Breakpoint {
     Compact,
     Medium,
     Expanded,
+    Wide,
+    Ultra,
 }
 
 impl Breakpoint {
-    /// Logical-pixel breakpoints: compact <600, medium <900, expanded >=900.
+    /// Logical-pixel breakpoints: compact <600, medium <900, expanded <1200,
+    /// wide <1600, ultra >=1600.
     pub fn from_width(width: u32) -> Breakpoint {
         if width < 600 {
             Breakpoint::Compact
         } else if width < 900 {
             Breakpoint::Medium
-        } else {
+        } else if width < 1200 {
             Breakpoint::Expanded
+        } else if width < 1600 {
+            Breakpoint::Wide
+        } else {
+            Breakpoint::Ultra
         }
+    }
+}
+
+/// Narrowest column the fluid grid allows, in logical pixels.
+pub const MIN_COLUMN_WIDTH: i64 = 120;
+
+/// Largest column count the fluid grid produces.
+pub const MAX_GRID_COLUMNS: i64 = 12;
+
+/// Fluid grid metrics for one container width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FluidGrid {
+    /// Column count.
+    pub columns: i64,
+    /// Space between two columns, in logical pixels.
+    pub gutter: i64,
+    /// Space around the whole grid, in logical pixels.
+    pub margin: i64,
+}
+
+/// Integer-only fluid grid: columns, gutter and margin from a container width.
+///
+/// The formula is `columns = clamp(width / 120, 1, 12)`,
+/// `margin = clamp(width / 40, 8, 32)` and `gutter = clamp(width / 60, 8, 24)`.
+///
+/// Every term is an integer division of a non-negative width, so the metrics
+/// are identical on every host: no float, no rounding rule, no clock.
+pub fn fluid_grid(width: i64) -> FluidGrid {
+    let width = width.max(0);
+    FluidGrid {
+        columns: (width / MIN_COLUMN_WIDTH).clamp(1, MAX_GRID_COLUMNS),
+        margin: (width / 40).clamp(8, 32),
+        gutter: (width / 60).clamp(8, 24),
     }
 }
 
@@ -940,6 +981,10 @@ fn place_children(
 }
 
 /// Fluid grid: `columns` columns, row-major, each row as tall as its tallest cell.
+///
+/// An explicit `columns` prop keeps the fixed grid at every tier. Without it,
+/// the expanded tiers and above size themselves from the container width with
+/// the integer fluid grid: column count, gutter and margin.
 #[allow(clippy::too_many_arguments)]
 fn place_grid(
     n: &Node,
@@ -951,14 +996,28 @@ fn place_grid(
     clip: Option<Rect>,
     out: &mut Vec<LaidOut>,
 ) {
-    let cols = n.props.columns.unwrap_or(2).max(1);
-    let content = inset(rect, n.props.padding);
     let kids: Vec<&Node> = n.children.iter().filter(|c| visible(c, state)).collect();
     if kids.is_empty() {
         return;
     }
-    let col_w = content.w / cols;
-    let col_rem = content.w % cols;
+    let base = inset(rect, n.props.padding);
+    // The compact and medium tiers keep the fixed grid; the expanded tiers and
+    // above derive the column count, gutter and margin from the width.
+    let fluid = if bp >= Breakpoint::Expanded && n.props.columns.is_none() {
+        Some(fluid_grid(base.w))
+    } else {
+        None
+    };
+    let cols = fluid.map_or_else(|| n.props.columns.unwrap_or(2).max(1), |g| g.columns);
+    let gutter = fluid.map_or(0, |g| g.gutter);
+    let content = match fluid {
+        Some(g) => inset(base, g.margin),
+        None => base,
+    };
+    // Integer division: the remainder pixels go to the leftmost columns.
+    let col_total = (content.w - gutter.saturating_mul(cols.saturating_sub(1))).max(0);
+    let col_w = col_total / cols;
+    let col_rem = col_total % cols;
     let rows = (kids.len() as i64 + cols - 1) / cols;
 
     // Row heights: the tallest natural height in each row.
@@ -1003,6 +1062,10 @@ fn place_grid(
                 out,
             );
             x += w;
+            // The gutter separates two columns; the last one adds no trailing gap.
+            if col + 1 < cols {
+                x += gutter;
+            }
         }
         y += h;
     }
