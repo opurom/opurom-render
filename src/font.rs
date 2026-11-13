@@ -96,7 +96,7 @@ pub fn glyph(ch: char) -> Option<[u8; 7]> {
         'm' => "00000000001101010101101011000110001",
         'n' => "00000000001111010001100011000110001",
         'o' => "00000000000111010001100011000101110",
-        'p' => "00000111101000110001111101000010000",
+        'p' => "00000000001111010001111101000011000",
         'q' => "00000011111000110001011110000100001",
         'r' => "00000000001011011001100001000010000",
         's' => "00000000000111110000011100000111110",
@@ -105,7 +105,7 @@ pub fn glyph(ch: char) -> Option<[u8; 7]> {
         'v' => "00000000001000110001100010101000100",
         'w' => "00000000001000110001101011010101010",
         'x' => "00000000001000101010001000101010001",
-        'y' => "00000100011000110001011110000101110",
+        'y' => "00000000001000110001011110000101110",
         'z' => "00000000001111100010001000100011111",
         '{' => "00110001000010001000001000010000110",
         '|' => "00100001000010000100001000010000100",
@@ -157,5 +157,27 @@ mod tests {
         assert_ne!(g[5], q[5]);
         assert_ne!(g[6], nine[6]);
         assert_eq!(g[6], 0b11110);
+    }
+
+    #[test]
+    fn p_and_y_have_descenders_distinct_from_capitals() {
+        let (p, capital_p) = (glyph('p').unwrap(), glyph('P').unwrap());
+        let (y, capital_y) = (glyph('y').unwrap(), glyph('Y').unwrap());
+        assert_ne!(p, capital_p, "p must not read as P");
+        assert_ne!(y, capital_y, "y must not read as Y");
+        // Both bowls start at x-height; their tails reach the bottom row with
+        // ink beyond the capitals' straight stems.
+        assert_eq!(p[0] | p[1], 0);
+        assert_eq!(y[0] | y[1], 0);
+        assert_ne!(
+            p[6] & !capital_p[6],
+            0,
+            "p needs descender ink past P's stem"
+        );
+        assert_ne!(
+            y[6] & !capital_y[6],
+            0,
+            "y needs descender ink past Y's stem"
+        );
     }
 }
