@@ -1304,7 +1304,7 @@ mod tests {
         ],
         "tree": {"id": 0, "kind": "Text", "props": {"value": "{count}"},
                  "children": [], "events": {}},
-        "theme": {"mode": "light", "accent": "#4F46E5", "radius": 8}
+        "theme": {"mode": "light", "accent": "#097FEB", "radius": 8}
     }"##;
 
     #[test]

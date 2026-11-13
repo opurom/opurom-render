@@ -10,7 +10,7 @@ const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/capability_counter_command
 
 fn ir_with(effects: &str) -> String {
     format!(
-        r##"{{"ir":"0.1.0","app":"CommandsProof","state":[],"tree":{{"id":0,"kind":"Column","props":{{"gap":6,"padding":6}},"children":[{{"id":1,"kind":"Container","props":{{"width":64,"height":32,"radius":6,"color":"#112233","effects":{effects}}},"children":[],"events":{{}}}}],"events":{{}}}},"theme":{{"mode":"dark","accent":"#4F46E5","radius":4}}}}"##
+        r##"{{"ir":"0.1.0","app":"CommandsProof","state":[],"tree":{{"id":0,"kind":"Column","props":{{"gap":6,"padding":6}},"children":[{{"id":1,"kind":"Container","props":{{"width":64,"height":32,"radius":6,"color":"#112233","effects":{effects}}},"children":[],"events":{{}}}}],"events":{{}}}},"theme":{{"mode":"dark","accent":"#097FEB","radius":4}}}}"##
     )
 }
 
