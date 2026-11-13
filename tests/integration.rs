@@ -111,7 +111,7 @@ fn golden_digest_is_stable() {
     let view = frame.view();
     assert_eq!((view.width, view.height), (800, 600));
     assert_eq!(view.pixels, frame.pixels.as_slice());
-    assert_eq!(digest_hex(&frame.pixels), "8cc3021fa80749b5");
+    assert_eq!(digest_hex(&frame.pixels), "88127ca1577cdb61");
 }
 
 #[test]

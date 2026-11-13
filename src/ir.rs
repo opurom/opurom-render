@@ -1066,9 +1066,14 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
     };
     match op {
         Op::Add => {
-            if decl.typ != ValueType::Int || !matches!(value, Some(StateValue::Int(_))) {
+            let numeric = match &value {
+                Some(StateValue::Int(_)) => true,
+                Some(_) => false,
+                None => value_from.is_some(),
+            };
+            if decl.typ != ValueType::Int || !numeric {
                 return Err(bad(format!(
-                    "{what}: add needs an int target and numeric value"
+                    "{what}: add needs an int target and an int value or valueFrom"
                 )));
             }
         }
