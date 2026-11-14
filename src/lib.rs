@@ -33,6 +33,7 @@ pub mod font;
 pub mod icons;
 pub mod ir;
 pub mod layout;
+pub mod nav;
 pub mod particles;
 pub mod primitives;
 pub mod raster;
@@ -56,6 +57,7 @@ pub use layout::{
     fluid_grid, layout, layout_at, Breakpoint, Control, Direction, Effects, FluidGrid, LaidOut,
     Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH, SETTLED_MS,
 };
+pub use nav::{NavError, Navigation, Navigator, MAX_STACK_DEPTH};
 pub use particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 pub use svg::{svg, svg_at};
 
