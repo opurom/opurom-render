@@ -11,6 +11,7 @@
 //! nearest-neighbour copy of the incoming page over the outgoing page.
 
 use crate::{DirtyRect, Frame, Ir, Renderer, Rgba, StateView};
+use std::collections::BTreeMap;
 
 /// Entry-animation curve selected by the `animate` prop.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub enum Curve {
     Spring,
     Ease,
     Inertia,
+    Collision,
 }
 
 impl Curve {
@@ -29,6 +31,7 @@ impl Curve {
             "spring" => Curve::Spring,
             "ease" => Curve::Ease,
             "inertia" => Curve::Inertia,
+            "collision" => Curve::Collision,
             _ => return None,
         })
     }
@@ -39,12 +42,266 @@ impl Curve {
             Curve::Spring => "spring",
             Curve::Ease => "ease",
             Curve::Inertia => "inertia",
+            Curve::Collision => "collision",
         }
     }
 }
 
-/// Progress unit: `ONE` is a fully settled curve.
+/// Fixed-point unit: `ONE` (1024) is a fully settled curve.
 pub const ONE: i64 = 1024;
+
+/// Default implicit-animation duration when the `duration` prop is absent,
+/// in milliseconds. Flutter's `AnimatedContainer` defaults to 300 ms.
+pub const ANIMATE_DEFAULT_MS: i64 = 300;
+
+/// Maximum accepted `duration`/`delay` prop, in milliseconds.
+pub const ANIMATE_MAX_MS: i64 = 10_000;
+
+/// Implicit-animation schedule: the curve, the duration and the delay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnimSpec {
+    pub curve: Curve,
+    pub duration_ms: i64,
+    pub delay_ms: i64,
+}
+
+impl AnimSpec {
+    pub fn new(curve: Curve, duration_ms: i64, delay_ms: i64) -> AnimSpec {
+        AnimSpec {
+            curve,
+            duration_ms: duration_ms.clamp(0, ANIMATE_MAX_MS),
+            delay_ms: delay_ms.clamp(0, ANIMATE_MAX_MS),
+        }
+    }
+
+    /// The elapsed time at which the animation is fully settled.
+    pub fn settle_ms(&self) -> i64 {
+        self.delay_ms.saturating_add(self.duration_ms)
+    }
+
+    /// Progress at `elapsed_ms`, `0..=ONE`. Before the delay the progress is
+    /// zero; after the delay the curve runs for `duration_ms`; at or after
+    /// `settle_ms` the progress is exactly `ONE`.
+    pub fn progress_at(&self, elapsed_ms: i64) -> i64 {
+        if elapsed_ms < self.delay_ms {
+            return 0;
+        }
+        if self.curve == Curve::None || self.duration_ms <= 0 {
+            return ONE;
+        }
+        if elapsed_ms >= self.settle_ms() {
+            return ONE;
+        }
+        let elapsed = elapsed_ms - self.delay_ms;
+        progress(self.curve, elapsed).clamp(0, ONE)
+    }
+}
+
+/// The natural settle time of a curve in milliseconds: the elapsed time at
+/// which `progress(curve, ..)` first returns `ONE`. This is the default
+/// `duration` when the IR omits the prop, so an animation with no explicit
+/// duration keeps the historical entry-animation timing.
+pub fn default_duration_ms(curve: Curve) -> i64 {
+    match curve {
+        Curve::None => 0,
+        Curve::Ease => EASE_MS,
+        Curve::Spring => SPRING_SETTLE_MS,
+        Curve::Inertia => INERTIA_SETTLE_MS,
+        Curve::Collision => COLLISION_SETTLE_MS,
+    }
+}
+
+/// The measured settle time of the spring solver: the first elapsed time at
+/// which `progress(Curve::Spring, ..)` returns `ONE`.
+pub const SPRING_SETTLE_MS: i64 = 4000;
+/// The measured settle time of the inertia fling: `FLING / BRAKE` steps of
+/// `STEP_MS`, the first elapsed time at which `progress(Curve::Inertia, ..)`
+/// returns `ONE`.
+pub const INERTIA_SETTLE_MS: i64 = 96;
+/// Settle time of the collision curve: the fixed ballistic flight plus its
+/// single damped rebound, at which `progress(Curve::Collision, ..)` first
+/// returns `ONE`.
+pub const COLLISION_SETTLE_MS: i64 = 768;
+/// Ballistic constant of the collision curve: the peak overshoot, in fixed-point
+/// progress units (a firm contact that overshoots by roughly ten percent).
+const COLLISION_PEAK: i64 = 1160;
+/// Damped-rebound amplitude after the peak, in fixed-point units.
+const COLLISION_REBOUND: i64 = 160;
+/// Duration of the inbound flight, of the rebound, and of the final settle
+/// segment, in milliseconds.
+const COLLISION_FLIGHT_MS: i64 = 256;
+
+/// Fixed-point linear interpolation with half-up rounding:
+/// `from + (to - from) * t / ONE`, evaluated in `i128` so a full-range
+/// difference never overflows. `t` is clamped to `0..=ONE`. The division is
+/// Euclidean so the `+ ONE/2` term rounds half away from zero in the signed
+/// sense, matching the non-negative rounding of the glyph-coverage math.
+pub fn lerp(from: i64, to: i64, t: i64) -> i64 {
+    let t = t.clamp(0, ONE);
+    let delta = (to as i128) - (from as i128);
+    let step = (delta * t as i128 + ONE as i128 / 2).div_euclid(ONE as i128);
+    (from as i128 + step) as i64
+}
+
+/// Interpolate an RGBA colour channel-wise in fixed point. `t` is `0..=ONE`;
+/// each channel rounds half-up, so `t == 0` returns `a` and `t == ONE`
+/// returns `b` exactly.
+pub fn lerp_rgba(a: Rgba, b: Rgba, t: i64) -> Rgba {
+    let t = t.clamp(0, ONE);
+    Rgba {
+        r: lerp(a.r as i64, b.r as i64, t) as u8,
+        g: lerp(a.g as i64, b.g as i64, t) as u8,
+        b: lerp(a.b as i64, b.b as i64, t) as u8,
+        a: lerp(a.a as i64, b.a as i64, t) as u8,
+    }
+}
+
+/// One animated prop value: either a scalar (`radius`, `padding`, `shadow`,
+/// fixed-point `opacity`) or an RGBA colour. The starting value of a new
+/// animation is derived from the previous laid-out node, so a change from
+/// "absent" to a value animates from the renderer default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnimValue {
+    Scalar(i64),
+    Color(Rgba),
+}
+
+impl AnimValue {
+    pub fn scalar(n: i64) -> AnimValue {
+        AnimValue::Scalar(n)
+    }
+
+    pub fn color(c: Rgba) -> AnimValue {
+        AnimValue::Color(c)
+    }
+
+    /// Interpolate from `from` to `to` at fixed-point progress `t`.
+    pub fn lerp(from: AnimValue, to: AnimValue, t: i64) -> AnimValue {
+        match (from, to) {
+            (AnimValue::Scalar(a), AnimValue::Scalar(b)) => {
+                AnimValue::Scalar(lerp(a, b, t))
+            }
+            (AnimValue::Color(a), AnimValue::Color(b)) => AnimValue::Color(lerp_rgba(a, b, t)),
+            // A scalar and a colour never mix: take the target immediately.
+            (_, to) => to,
+        }
+    }
+
+    /// The fixed-point scalar behind this value (`None` for a colour).
+    pub fn as_scalar(&self) -> Option<i64> {
+        match self {
+            AnimValue::Scalar(n) => Some(*n),
+            AnimValue::Color(_) => None,
+        }
+    }
+
+    /// The colour behind this value (`None` for a scalar).
+    pub fn as_color(&self) -> Option<Rgba> {
+        match self {
+            AnimValue::Color(c) => Some(*c),
+            AnimValue::Scalar(_) => None,
+        }
+    }
+}
+
+/// Per-node implicit-animation state: the prop values the next change animates
+/// from, plus the schedule and the tick the current animation started at. The
+/// renderer installs one entry per animated node when the node is first laid
+/// out; on every later layout it compares the node's current animated props
+/// with the stored targets and, on a difference, starts a new animation at the
+/// current tick.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnimEntry {
+    /// Values the current (or most recent) animation started from.
+    pub from: Vec<AnimValue>,
+    /// Values the current animation targets.
+    pub to: Vec<AnimValue>,
+    pub spec: AnimSpec,
+    /// Animation-clock tick at which the current animation started.
+    pub start_ms: i64,
+}
+
+impl AnimEntry {
+    /// Progress of this entry at the absolute `elapsed_ms`, relative to the
+    /// tick the animation started.
+    pub fn progress_at(&self, elapsed_ms: i64) -> i64 {
+        self.spec.progress_at(elapsed_ms - self.start_ms)
+    }
+}
+
+/// The whole animation table: node id to its entry. Kept in a `BTreeMap` so
+/// the order is deterministic and independent of insertion order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AnimTable {
+    pub entries: BTreeMap<u32, AnimEntry>,
+}
+
+/// Progress of a single `animate` schedule at `elapsed_ms`. Convenience
+/// wrapper around [`AnimSpec::progress_at`] for callers that only have the
+/// raw curve, duration and delay.
+pub fn animate_progress(curve: Curve, elapsed_ms: i64, duration_ms: i64, delay_ms: i64) -> i64 {
+    AnimSpec::new(curve, duration_ms, delay_ms).progress_at(elapsed_ms)
+}
+
+impl AnimTable {
+    pub fn new() -> AnimTable {
+        AnimTable::default()
+    }
+
+    /// Progress for `node` at `elapsed_ms`; `ONE` when the node has no entry.
+    pub fn progress(&self, node: u32, elapsed_ms: i64) -> i64 {
+        self.entries
+            .get(&node)
+            .map_or(ONE, |e| e.progress_at(elapsed_ms))
+    }
+
+    /// Interpolate `node`'s stored `from..to` at `elapsed_ms`. A node with no
+    /// entry returns an empty vector.
+    pub fn values_at(&self, node: u32, elapsed_ms: i64) -> Vec<AnimValue> {
+        match self.entries.get(&node) {
+            Some(e) => {
+                let p = e.progress_at(elapsed_ms);
+                e.from.iter().zip(&e.to).map(|(&f, &t)| AnimValue::lerp(f, t, p)).collect()
+            }
+            None => Vec::new(),
+        }
+    }
+
+    /// Record `node`'s animated target values, starting the animation at
+    /// `start_ms`. When `from` is empty the entry is created with `from == to`,
+    /// so the first layout does not animate and the node settles immediately.
+    /// An entry whose `from` already equals `to` likewise settles immediately:
+    /// there is nothing to interpolate.
+    pub fn set_targets(
+        &mut self,
+        node: u32,
+        from: Vec<AnimValue>,
+        to: Vec<AnimValue>,
+        spec: AnimSpec,
+        start_ms: i64,
+    ) {
+        let from = if from.is_empty() { to.clone() } else { from };
+        let spec = if from == to {
+            AnimSpec::new(Curve::None, 0, 0)
+        } else {
+            spec
+        };
+        self.entries.insert(
+            node,
+            AnimEntry {
+                from,
+                to,
+                spec,
+                start_ms,
+            },
+        );
+    }
+
+    /// Clear every entry (for example when the tree is rebuilt).
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
 /// Duration of the ease curve.
 pub const EASE_MS: i64 = 320;
 /// Integration step of the spring solver.
@@ -66,6 +323,7 @@ pub fn progress(curve: Curve, elapsed_ms: i64) -> i64 {
         Curve::Ease => ease(elapsed_ms),
         Curve::Spring => spring(elapsed_ms),
         Curve::Inertia => inertia(elapsed_ms),
+        Curve::Collision => collision(elapsed_ms),
     }
 }
 
@@ -112,6 +370,33 @@ fn inertia(elapsed_ms: i64) -> i64 {
         steps -= 1;
     }
     x
+}
+
+/// Collision curve: a firm ballistic approach that overshoots the target at
+/// `COLLISION_PEAK`, rebounds once to `ONE - COLLISION_REBOUND`, then settles to
+/// exactly `ONE` when the rebound completes. Pure integer math over three
+/// fixed segments so it is deterministic across every target.
+fn collision(elapsed_ms: i64) -> i64 {
+    let t = elapsed_ms.clamp(0, COLLISION_SETTLE_MS);
+    if t < COLLISION_FLIGHT_MS {
+        // Inbound: quadratic acceleration from 0 to the overshoot peak.
+        let f = t as i128 * ONE as i128 / COLLISION_FLIGHT_MS as i128;
+        let quad = f * f / ONE as i128;
+        (quad * COLLISION_PEAK as i128 / ONE as i128) as i64
+    } else if t < 2 * COLLISION_FLIGHT_MS {
+        // Rebound: from the peak back down to ONE minus the rebound amplitude.
+        let f = (t - COLLISION_FLIGHT_MS) as i128 * ONE as i128 / COLLISION_FLIGHT_MS as i128;
+        let start = COLLISION_PEAK as i128;
+        let end = (ONE - COLLISION_REBOUND) as i128;
+        (start + (end - start) * f / ONE as i128) as i64
+    } else {
+        // Settle: from the rebound floor up to exactly ONE.
+        let span = (COLLISION_SETTLE_MS - 2 * COLLISION_FLIGHT_MS) as i128;
+        let f = (t - 2 * COLLISION_FLIGHT_MS) as i128 * ONE as i128 / span;
+        let start = (ONE - COLLISION_REBOUND) as i128;
+        (start + (ONE as i128 - start) * f / ONE as i128) as i64
+    }
+    .clamp(0, ONE)
 }
 
 /// Deterministic integer frame rate of the animation clock.
@@ -592,6 +877,183 @@ pub fn choose_quality(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lerp_rounds_half_up_and_hits_endpoints() {
+        assert_eq!(lerp(0, 100, 0), 0);
+        assert_eq!(lerp(0, 100, ONE), 100);
+        assert_eq!(lerp(100, 0, 0), 100);
+        assert_eq!(lerp(100, 0, ONE), 0);
+        // Half-up: 50 units at half progress is exactly 50.
+        assert_eq!(lerp(0, 100, ONE / 2), 50);
+        assert_eq!(lerp(0, 1, ONE / 2), 1);
+        // A one-unit step over the full range rounds half-up to 1.
+        assert_eq!(lerp(0, 1, ONE), 1);
+        // Decreasing values round half-up toward the target.
+        assert_eq!(lerp(100, 0, ONE / 2), 50);
+        assert_eq!(lerp(100, 0, ONE / 4), 75);
+        // Out-of-range progress clamps.
+        assert_eq!(lerp(0, 100, -10), 0);
+        assert_eq!(lerp(0, 100, ONE + 10), 100);
+        // No overflow at the i64 extremes: the midpoint of the full range is 0.
+        assert_eq!(lerp(i64::MIN, i64::MAX, ONE / 2), 0);
+    }
+
+    #[test]
+    fn lerp_rgba_interpolates_each_channel() {
+        let a = Rgba::rgb(0x00, 0x00, 0x00);
+        let b = Rgba::rgb(0xff, 0xff, 0xff);
+        assert_eq!(lerp_rgba(a, b, 0), a);
+        assert_eq!(lerp_rgba(a, b, ONE), b);
+        let mid = lerp_rgba(a, b, ONE / 2);
+        assert_eq!((mid.r, mid.g, mid.b), (128, 128, 128));
+        // A one-channel ramp keeps the untouched channels exact.
+        let ramp = lerp_rgba(Rgba::rgb(0x10, 0x20, 0x30), Rgba::rgb(0x20, 0x20, 0x30), ONE / 2);
+        assert_eq!((ramp.r, ramp.g, ramp.b), (0x18, 0x20, 0x30));
+    }
+
+    #[test]
+    fn anim_value_lerp_scalar_and_color() {
+        assert_eq!(
+            AnimValue::lerp(AnimValue::scalar(0), AnimValue::scalar(100), ONE / 2),
+            AnimValue::scalar(50)
+        );
+        let c = lerp_rgba(Rgba::rgb(0, 0, 0), Rgba::rgb(255, 255, 255), ONE / 2);
+        assert_eq!(
+            AnimValue::lerp(AnimValue::color(Rgba::rgb(0, 0, 0)), AnimValue::color(Rgba::rgb(255, 255, 255)), ONE / 2),
+            AnimValue::color(c)
+        );
+        // A missing source takes the target immediately.
+        assert_eq!(
+            AnimValue::lerp(AnimValue::scalar(5), AnimValue::color(Rgba::rgb(1, 2, 3)), ONE / 2),
+            AnimValue::color(Rgba::rgb(1, 2, 3))
+        );
+        assert_eq!(AnimValue::scalar(7).as_scalar(), Some(7));
+        assert_eq!(AnimValue::color(Rgba::rgb(1, 2, 3)).as_color(), Some(Rgba::rgb(1, 2, 3)));
+    }
+
+    #[test]
+    fn anim_spec_delays_then_runs_then_settles() {
+        let spec = AnimSpec::new(Curve::Ease, 200, 100);
+        assert_eq!(spec.settle_ms(), 300);
+        assert_eq!(spec.progress_at(0), 0);
+        assert_eq!(spec.progress_at(99), 0);
+        assert_eq!(spec.progress_at(100), 0);
+        // The curve starts exactly at the delay and runs for the duration.
+        let mid = spec.progress_at(200);
+        assert!((0..ONE).contains(&mid), "mid-progress {mid}");
+        assert_ne!(mid, 0);
+        assert_ne!(mid, ONE);
+        assert_eq!(spec.progress_at(300), ONE);
+        assert_eq!(spec.progress_at(301), ONE);
+        assert_eq!(spec.progress_at(10_000), ONE);
+        // `none` settles immediately, regardless of a declared delay.
+        assert_eq!(AnimSpec::new(Curve::None, 200, 0).progress_at(0), ONE);
+        assert_eq!(AnimSpec::new(Curve::Ease, 0, 0).progress_at(0), ONE);
+        // A delay alone with no duration still waits out the delay.
+        let only_delay = AnimSpec::new(Curve::Ease, 0, 100);
+        assert_eq!(only_delay.progress_at(99), 0);
+        assert_eq!(only_delay.progress_at(100), ONE);
+        // A custom duration forces an exact settle at duration + delay even
+        // when the curve's own solver would keep moving (the spring).
+        let short_spring = AnimSpec::new(Curve::Spring, 100, 0);
+        assert_ne!(short_spring.progress_at(50), ONE);
+        assert_eq!(short_spring.progress_at(100), ONE);
+        assert_eq!(short_spring.progress_at(101), ONE);
+    }
+
+    #[test]
+    fn default_duration_matches_the_curve_settle_time() {
+        assert_eq!(default_duration_ms(Curve::None), 0);
+        assert_eq!(default_duration_ms(Curve::Ease), EASE_MS);
+        assert_eq!(default_duration_ms(Curve::Spring), SPRING_SETTLE_MS);
+        assert_eq!(default_duration_ms(Curve::Inertia), INERTIA_SETTLE_MS);
+        assert_eq!(default_duration_ms(Curve::Collision), COLLISION_SETTLE_MS);
+        // The defaults are exactly the times at which the raw curve settles.
+        assert_eq!(progress(Curve::Ease, default_duration_ms(Curve::Ease)), ONE);
+        assert_eq!(progress(Curve::Spring, default_duration_ms(Curve::Spring)), ONE);
+        assert_eq!(progress(Curve::Inertia, default_duration_ms(Curve::Inertia)), ONE);
+        assert_eq!(progress(Curve::Collision, default_duration_ms(Curve::Collision)), ONE);
+    }
+
+    #[test]
+    fn collision_curve_overshoots_once_then_settles_to_one() {
+        assert_eq!(Curve::parse("collision"), Some(Curve::Collision));
+        assert_eq!(Curve::Collision.name(), "collision");
+        assert_eq!(progress(Curve::Collision, 0), 0);
+        // Inbound flight accelerates and reaches the overshoot peak at the end
+        // of the first segment, clamped to ONE at the outer bound.
+        let peak = progress(Curve::Collision, COLLISION_FLIGHT_MS);
+        assert!(peak <= ONE, "progress never exceeds ONE, got {peak}");
+        // The rebound segment dips below ONE (the damped bounce) before settling.
+        let rebound = progress(Curve::Collision, 2 * COLLISION_FLIGHT_MS);
+        assert!(rebound < ONE, "rebound must dip below ONE, got {rebound}");
+        // It settles to exactly ONE at and after the settle time.
+        assert_eq!(progress(Curve::Collision, COLLISION_SETTLE_MS), ONE);
+        assert_eq!(progress(Curve::Collision, COLLISION_SETTLE_MS + 500), ONE);
+        // Monotonic within the settle segment toward ONE after the rebound.
+        let mid = progress(Curve::Collision, 2 * COLLISION_FLIGHT_MS + COLLISION_FLIGHT_MS / 2);
+        assert!(mid > rebound && mid < ONE);
+        // Deterministic: the same elapsed time yields the same progress.
+        assert_eq!(
+            progress(Curve::Collision, 300),
+            progress(Curve::Collision, 300)
+        );
+    }
+
+    #[test]
+    fn anim_table_missing_entry_is_settled() {
+        let table = AnimTable::new();
+        assert_eq!(table.progress(7, 0), ONE);
+        assert!(table.values_at(7, 0).is_empty());
+    }
+
+    #[test]
+    fn anim_table_set_targets_and_interpolate() {
+        let mut table = AnimTable::new();
+        table.set_targets(
+            1,
+            vec![AnimValue::scalar(0), AnimValue::scalar(100)],
+            vec![AnimValue::scalar(100), AnimValue::scalar(200)],
+            AnimSpec::new(Curve::Ease, 200, 0),
+            0,
+        );
+        assert_eq!(table.progress(1, 0), 0);
+        assert_eq!(table.progress(1, 200), ONE);
+        let at_mid = table.values_at(1, 100);
+        assert_eq!(at_mid.len(), 2);
+        // Both channels share the progress, so the second is the first plus 100.
+        assert!((0..100).contains(&at_mid[0].as_scalar().unwrap()));
+        assert_eq!(
+            at_mid[1].as_scalar().unwrap(),
+            at_mid[0].as_scalar().unwrap() + 100
+        );
+        assert_eq!(table.values_at(1, 200), vec![AnimValue::scalar(100), AnimValue::scalar(200)]);
+        // A first install with no `from` settles immediately.
+        table.set_targets(
+            2,
+            vec![],
+            vec![AnimValue::scalar(9)],
+            AnimSpec::new(Curve::Ease, 200, 0),
+            0,
+        );
+        assert_eq!(table.progress(2, 0), ONE);
+        assert_eq!(table.values_at(2, 0), vec![AnimValue::scalar(9)]);
+        // A later change restarts the schedule at the new start tick.
+        table.set_targets(
+            2,
+            vec![AnimValue::scalar(9)],
+            vec![AnimValue::scalar(29)],
+            AnimSpec::new(Curve::Ease, 200, 0),
+            1000,
+        );
+        assert_eq!(table.progress(2, 999), 0);
+        assert_eq!(table.progress(2, 1000), 0);
+        assert_eq!(table.progress(2, 1200), ONE);
+        assert_eq!(table.values_at(2, 1200), vec![AnimValue::scalar(29)]);
+        table.clear();
+        assert!(table.entries.is_empty());
+    }
 
     #[test]
     fn curves_are_monotonic_and_settle_at_one() {
