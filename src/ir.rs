@@ -373,6 +373,8 @@ pub struct Props {
     pub delay: Option<i64>,
     // Kind props.
     pub columns: Option<i64>,
+    /// Column count the compact tier should keep; `None` stacks to one column.
+    pub compact_columns: Option<i64>,
     pub labels: Vec<String>,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -1142,6 +1144,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         duration: anim_duration_prop(o, "duration", what)?,
         delay: anim_duration_prop(o, "delay", what)?,
         columns: opt_integer(o, "columns", what)?,
+        compact_columns: opt_integer(o, "compactColumns", what)?,
         labels: labels_prop(o, "labels", what)?,
         min: opt_signed_integer(o, "min", what)?,
         max: opt_signed_integer(o, "max", what)?,

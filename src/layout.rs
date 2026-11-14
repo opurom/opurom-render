@@ -1299,10 +1299,14 @@ fn place_grid(
     };
     let authored = fluid.map_or_else(|| n.props.columns.unwrap_or(2).max(1), |g| g.columns);
     // The compact tier stacks every Grid into one column, mirroring the DOM
-    // emitter's `@media (max-width: 599px) .grid { 1fr }`. An authored desktop
-    // column count would otherwise squeeze each cell below its text width.
+    // emitter's `@media (max-width: 599px) .grid { 1fr }`. A Grid that is
+    // really one horizontal row (avatar + label + badge + meter) declares
+    // `compactColumns` to keep its authored count on a phone.
     let cols = if bp == Breakpoint::Compact {
-        1
+        n.props
+            .compact_columns
+            .unwrap_or(1)
+            .clamp(1, MAX_GRID_COLUMNS as i64)
     } else {
         authored
     };

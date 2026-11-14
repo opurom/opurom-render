@@ -460,3 +460,31 @@ fn the_fluid_grid_layout_is_identical_across_two_renderers() {
         assert_eq!(a, b, "the layout must be deterministic at {width}");
     }
 }
+
+#[test]
+fn compact_columns_keep_a_declared_row_count_on_a_phone() {
+    // A Grid that is really one horizontal row (avatar, label, badge, meter)
+    // declares compactColumns so the compact tier does not stack its four
+    // cells into empty strips. Wider tiers keep their own authored count.
+    let ir = parse_ir(&FLUID_GRID_IR.replace(
+        "\"props\": {}",
+        "\"props\": { \"columns\": 4, \"compactColumns\": 4 }",
+    ))
+    .expect("the grid IR must parse");
+    let state = StateView::from_ir(&ir);
+    let compact = layout(&ir, &state, 320, 900);
+    for id in 1..=4 {
+        assert_eq!(
+            node(&compact, id).rect.y,
+            node(&compact, 1).rect.y,
+            "cell {id} stays in the first row"
+        );
+    }
+    assert!(node(&compact, 5).rect.y > node(&compact, 1).rect.y,
+        "the fifth cell wraps to the next row");
+    // Without the declaration the same IR stacks into one column.
+    let plain = parse_ir(&FLUID_GRID_IR.replace("\"props\": {}", "\"props\": { \"columns\": 4 }"))
+        .unwrap();
+    let stacked = layout(&plain, &StateView::from_ir(&plain), 320, 900);
+    assert!(node(&stacked, 2).rect.y > node(&stacked, 1).rect.y);
+}
