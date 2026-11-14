@@ -275,10 +275,10 @@ fn capability_spec_catalog_is_byte_identical_to_the_vendored_copy() {
     let b = fs::read(&vendored).unwrap();
     assert_eq!(a, b, "contract and vendored catalog must be byte-identical");
     let doc: serde_json::Value = serde_json::from_slice(&a).unwrap();
-    assert_eq!(doc["count"], 240);
+    assert_eq!(doc["count"], 260);
     assert_eq!(doc["primitives"], 100);
     let list = doc["components"].as_array().unwrap();
-    assert_eq!(list.len(), 240);
+    assert_eq!(list.len(), 260);
     let prims: HashSet<&str> = list.iter().map(|c| c[1].as_str().unwrap()).collect();
     assert_eq!(prims.len(), 100);
     for s in CONTRACTS.iter() {
