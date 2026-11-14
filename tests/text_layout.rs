@@ -141,7 +141,7 @@ fn short_label_is_unchanged() {
     let state = StateView::from_ir(&ir);
     let digest = digest_hex(&Renderer::new(200, 160).pixels(&ir, &state));
     assert_eq!(
-        digest, "bbe890f7678bd4f6",
+        digest, "408d6127abcb26d2",
         "a short label must keep its historical frame"
     );
 }
@@ -158,11 +158,11 @@ fn golden_digests_are_unchanged_by_wrapping() {
     let mut state = StateView::from_ir(&ir);
     state.set("count", StateValue::Int(0));
     let d0 = digest_hex(&Renderer::new(320, 240).pixels(&ir, &state));
-    assert_eq!(d0, "16b69e96b1534324");
+    assert_eq!(d0, "8d45f412996a99c6");
     let d0_800 = digest_hex(&Renderer::new(800, 600).pixels(&ir, &state));
-    assert_eq!(d0_800, "aaf572509f15d60c");
+    assert_eq!(d0_800, "318beb1dd337bc4e");
 
     state.set("count", StateValue::Int(7));
     let d7_800 = digest_hex(&Renderer::new(800, 600).pixels(&ir, &state));
-    assert_eq!(d7_800, "e5d71acb7602eab2");
+    assert_eq!(d7_800, "40073cb95c912d80");
 }

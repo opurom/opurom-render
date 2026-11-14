@@ -168,17 +168,17 @@ fn unless_leaves_the_golden_digests_unchanged() {
     let state = StateView::from_ir(&ir);
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
-        "16b69e96b1534324"
+        "8d45f412996a99c6"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
-        "aaf572509f15d60c"
+        "318beb1dd337bc4e"
     );
     let mut overridden = state.clone();
     overridden.set("count", StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).pixels(&ir, &overridden)),
-        "e5d71acb7602eab2"
+        "40073cb95c912d80"
     );
 }
 

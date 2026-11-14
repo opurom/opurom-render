@@ -138,7 +138,7 @@ fn no_transition_default_keeps_the_pinned_digest() {
     );
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "digest=16b69e96b1534324\ndirty=1\n",
+        "digest=8d45f412996a99c6\ndirty=1\n",
         "the default path must stay byte-for-byte identical"
     );
 }

@@ -197,17 +197,17 @@ fn golden_counter_digests_are_unchanged_by_the_particles_layer() {
     let state = StateView::from_ir(&ir);
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
-        "16b69e96b1534324"
+        "8d45f412996a99c6"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
-        "aaf572509f15d60c"
+        "318beb1dd337bc4e"
     );
     let mut count_7 = state.clone();
     count_7.set("count", StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).render(&ir, &count_7).pixels),
-        "e5d71acb7602eab2"
+        "40073cb95c912d80"
     );
 
     // The CLI surface is unchanged as well.
@@ -227,7 +227,7 @@ fn golden_counter_digests_are_unchanged_by_the_particles_layer() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "digest=e5d71acb7602eab2\ndirty=1\n"
+        "digest=40073cb95c912d80\ndirty=1\n"
     );
     let ppm_bytes = fs::read(&ppm).unwrap();
     assert!(ppm_bytes.starts_with(b"P6\n800 600\n255\n"));

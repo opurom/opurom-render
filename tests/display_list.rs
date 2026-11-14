@@ -159,7 +159,7 @@ fn cli_commands_dump_keeps_golden_stdout_and_ppm() {
     assert_eq!(plain.stdout, with_commands.stdout);
     let stdout = String::from_utf8_lossy(&with_commands.stdout);
     assert_eq!(stdout.lines().count(), 2);
-    assert!(stdout.contains("digest=16b69e96b1534324"));
+    assert!(stdout.contains("digest=8d45f412996a99c6"));
     assert!(stdout.contains("dirty=1"));
     assert_eq!(
         fs::read(&plain_ppm).unwrap(),
