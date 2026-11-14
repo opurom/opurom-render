@@ -596,7 +596,11 @@ fn opt_signed_integer(
 /// Optional implicit-animation `duration`/`delay` prop: a non-negative
 /// millisecond count within `ANIMATE_MAX_MS`. An absent prop is `None`, so the
 /// renderer applies its default duration and a zero delay.
-fn anim_duration_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<i64>, IrError> {
+fn anim_duration_prop(
+    o: &Map<String, Value>,
+    key: &str,
+    what: &str,
+) -> Result<Option<i64>, IrError> {
     match opt_integer(o, key, what)? {
         Some(n) if n > crate::anim::ANIMATE_MAX_MS => Err(bad(format!(
             "{what}.{key} must be between 0 and {}",

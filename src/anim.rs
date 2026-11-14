@@ -178,9 +178,7 @@ impl AnimValue {
     /// Interpolate from `from` to `to` at fixed-point progress `t`.
     pub fn lerp(from: AnimValue, to: AnimValue, t: i64) -> AnimValue {
         match (from, to) {
-            (AnimValue::Scalar(a), AnimValue::Scalar(b)) => {
-                AnimValue::Scalar(lerp(a, b, t))
-            }
+            (AnimValue::Scalar(a), AnimValue::Scalar(b)) => AnimValue::Scalar(lerp(a, b, t)),
             (AnimValue::Color(a), AnimValue::Color(b)) => AnimValue::Color(lerp_rgba(a, b, t)),
             // A scalar and a colour never mix: take the target immediately.
             (_, to) => to,
@@ -261,7 +259,11 @@ impl AnimTable {
         match self.entries.get(&node) {
             Some(e) => {
                 let p = e.progress_at(elapsed_ms);
-                e.from.iter().zip(&e.to).map(|(&f, &t)| AnimValue::lerp(f, t, p)).collect()
+                e.from
+                    .iter()
+                    .zip(&e.to)
+                    .map(|(&f, &t)| AnimValue::lerp(f, t, p))
+                    .collect()
             }
             None => Vec::new(),
         }
@@ -908,7 +910,11 @@ mod tests {
         let mid = lerp_rgba(a, b, ONE / 2);
         assert_eq!((mid.r, mid.g, mid.b), (128, 128, 128));
         // A one-channel ramp keeps the untouched channels exact.
-        let ramp = lerp_rgba(Rgba::rgb(0x10, 0x20, 0x30), Rgba::rgb(0x20, 0x20, 0x30), ONE / 2);
+        let ramp = lerp_rgba(
+            Rgba::rgb(0x10, 0x20, 0x30),
+            Rgba::rgb(0x20, 0x20, 0x30),
+            ONE / 2,
+        );
         assert_eq!((ramp.r, ramp.g, ramp.b), (0x18, 0x20, 0x30));
     }
 
@@ -920,16 +926,27 @@ mod tests {
         );
         let c = lerp_rgba(Rgba::rgb(0, 0, 0), Rgba::rgb(255, 255, 255), ONE / 2);
         assert_eq!(
-            AnimValue::lerp(AnimValue::color(Rgba::rgb(0, 0, 0)), AnimValue::color(Rgba::rgb(255, 255, 255)), ONE / 2),
+            AnimValue::lerp(
+                AnimValue::color(Rgba::rgb(0, 0, 0)),
+                AnimValue::color(Rgba::rgb(255, 255, 255)),
+                ONE / 2
+            ),
             AnimValue::color(c)
         );
         // A missing source takes the target immediately.
         assert_eq!(
-            AnimValue::lerp(AnimValue::scalar(5), AnimValue::color(Rgba::rgb(1, 2, 3)), ONE / 2),
+            AnimValue::lerp(
+                AnimValue::scalar(5),
+                AnimValue::color(Rgba::rgb(1, 2, 3)),
+                ONE / 2
+            ),
             AnimValue::color(Rgba::rgb(1, 2, 3))
         );
         assert_eq!(AnimValue::scalar(7).as_scalar(), Some(7));
-        assert_eq!(AnimValue::color(Rgba::rgb(1, 2, 3)).as_color(), Some(Rgba::rgb(1, 2, 3)));
+        assert_eq!(
+            AnimValue::color(Rgba::rgb(1, 2, 3)).as_color(),
+            Some(Rgba::rgb(1, 2, 3))
+        );
     }
 
     #[test]
@@ -971,9 +988,18 @@ mod tests {
         assert_eq!(default_duration_ms(Curve::Collision), COLLISION_SETTLE_MS);
         // The defaults are exactly the times at which the raw curve settles.
         assert_eq!(progress(Curve::Ease, default_duration_ms(Curve::Ease)), ONE);
-        assert_eq!(progress(Curve::Spring, default_duration_ms(Curve::Spring)), ONE);
-        assert_eq!(progress(Curve::Inertia, default_duration_ms(Curve::Inertia)), ONE);
-        assert_eq!(progress(Curve::Collision, default_duration_ms(Curve::Collision)), ONE);
+        assert_eq!(
+            progress(Curve::Spring, default_duration_ms(Curve::Spring)),
+            ONE
+        );
+        assert_eq!(
+            progress(Curve::Inertia, default_duration_ms(Curve::Inertia)),
+            ONE
+        );
+        assert_eq!(
+            progress(Curve::Collision, default_duration_ms(Curve::Collision)),
+            ONE
+        );
     }
 
     #[test]
@@ -992,7 +1018,10 @@ mod tests {
         assert_eq!(progress(Curve::Collision, COLLISION_SETTLE_MS), ONE);
         assert_eq!(progress(Curve::Collision, COLLISION_SETTLE_MS + 500), ONE);
         // Monotonic within the settle segment toward ONE after the rebound.
-        let mid = progress(Curve::Collision, 2 * COLLISION_FLIGHT_MS + COLLISION_FLIGHT_MS / 2);
+        let mid = progress(
+            Curve::Collision,
+            2 * COLLISION_FLIGHT_MS + COLLISION_FLIGHT_MS / 2,
+        );
         assert!(mid > rebound && mid < ONE);
         // Deterministic: the same elapsed time yields the same progress.
         assert_eq!(
@@ -1028,7 +1057,10 @@ mod tests {
             at_mid[1].as_scalar().unwrap(),
             at_mid[0].as_scalar().unwrap() + 100
         );
-        assert_eq!(table.values_at(1, 200), vec![AnimValue::scalar(100), AnimValue::scalar(200)]);
+        assert_eq!(
+            table.values_at(1, 200),
+            vec![AnimValue::scalar(100), AnimValue::scalar(200)]
+        );
         // A first install with no `from` settles immediately.
         table.set_targets(
             2,
