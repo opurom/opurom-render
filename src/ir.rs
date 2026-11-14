@@ -58,6 +58,9 @@ pub enum ValueType {
     Int,
     Bool,
     Str,
+    /// Compile-time string list; expanded to literals before rendering, so it
+    /// carries no runtime value and never appears in interpolation.
+    List,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +68,7 @@ pub enum StateValue {
     Int(i64),
     Bool(bool),
     Str(String),
+    List(Vec<String>),
 }
 
 impl StateValue {
@@ -73,6 +77,7 @@ impl StateValue {
             StateValue::Int(_) => ValueType::Int,
             StateValue::Bool(_) => ValueType::Bool,
             StateValue::Str(_) => ValueType::Str,
+            StateValue::List(_) => ValueType::List,
         }
     }
 
@@ -82,6 +87,8 @@ impl StateValue {
             StateValue::Int(n) => n.to_string(),
             StateValue::Bool(b) => b.to_string(),
             StateValue::Str(s) => s.clone(),
+            // List state never interpolates; subscripts are lowered to literals.
+            StateValue::List(_) => String::new(),
         }
     }
 
@@ -352,6 +359,10 @@ pub struct Props {
     pub opacity: Option<i64>,
     pub border: Option<Rgba>,
     pub animate: Curve,
+    /// Implicit-animation duration in milliseconds (`animate` prop).
+    pub duration: Option<i64>,
+    /// Implicit-animation start delay in milliseconds (`animate` prop).
+    pub delay: Option<i64>,
     // Kind props.
     pub columns: Option<i64>,
     pub labels: Vec<String>,
@@ -579,6 +590,19 @@ fn opt_signed_integer(
     match o.get(key) {
         Some(v) => Ok(Some(integer(v, &format!("{what}.{key}"))?)),
         None => Ok(None),
+    }
+}
+
+/// Optional implicit-animation `duration`/`delay` prop: a non-negative
+/// millisecond count within `ANIMATE_MAX_MS`. An absent prop is `None`, so the
+/// renderer applies its default duration and a zero delay.
+fn anim_duration_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<i64>, IrError> {
+    match opt_integer(o, key, what)? {
+        Some(n) if n > crate::anim::ANIMATE_MAX_MS => Err(bad(format!(
+            "{what}.{key} must be between 0 and {}",
+            crate::anim::ANIMATE_MAX_MS
+        ))),
+        other => Ok(other),
     }
 }
 
@@ -967,7 +991,17 @@ fn particles_prop(o: &Map<String, Value>, what: &str) -> Result<Option<Particles
 }
 
 fn state_value(v: &Value, expected: Option<ValueType>, what: &str) -> Result<StateValue, IrError> {
-    let value = if let Some(s) = v.as_str() {
+    let value = if let Some(arr) = v.as_array() {
+        let mut items = Vec::with_capacity(arr.len());
+        for (i, item) in arr.iter().enumerate() {
+            items.push(
+                item.as_str()
+                    .ok_or_else(|| bad(format!("{what}[{i}] must be a string")))?
+                    .to_string(),
+            );
+        }
+        StateValue::List(items)
+    } else if let Some(s) = v.as_str() {
         StateValue::Str(s.to_string())
     } else if let Some(b) = v.as_bool() {
         StateValue::Bool(b)
@@ -1004,6 +1038,7 @@ fn state_decls(v: &Value) -> Result<Vec<StateDecl>, IrError> {
             "int" => ValueType::Int,
             "bool" => ValueType::Bool,
             "string" => ValueType::Str,
+            "list" => ValueType::List,
             other => return Err(bad(format!("{what}.type has unknown value {other:?}"))),
         };
         let init = state_value(
@@ -1075,6 +1110,8 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         opacity: unit_prop(o, "opacity", what)?,
         border: color_prop(o, "border", what)?,
         animate,
+        duration: anim_duration_prop(o, "duration", what)?,
+        delay: anim_duration_prop(o, "delay", what)?,
         columns: opt_integer(o, "columns", what)?,
         labels: labels_prop(o, "labels", what)?,
         min: opt_signed_integer(o, "min", what)?,

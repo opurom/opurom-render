@@ -123,6 +123,8 @@ fn parse_value(typ: ValueType, raw: &str) -> Result<StateValue, String> {
             _ => Err(format!("state value {raw:?} is not a bool")),
         },
         ValueType::Str => Ok(StateValue::Str(raw.to_string())),
+        // A list is compile-time data and cannot be set by a single CLI value.
+        ValueType::List => Err(format!("state value {raw:?} cannot set a list state")),
     }
 }
 
