@@ -4,6 +4,7 @@
 
 use crate::display::Command;
 use crate::icons;
+use crate::image;
 use crate::layout::Control;
 use crate::{font, Align, Kind, LaidOut, Rect, Rgba};
 
@@ -460,6 +461,9 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
     };
     draw_shadow(canvas, n);
     draw_box(canvas, n);
+    if n.kind == Kind::Image {
+        draw_image(canvas, n);
+    }
     draw_control(canvas, n);
     if n.kind == Kind::Icon {
         draw_icon(canvas, n);
@@ -509,6 +513,133 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
         match n.effects.gradient {
             Some((a, b)) => canvas.fill_rounded_gradient(n.rect, a, b, n.radius, alpha),
             None => canvas.fill_rounded(n.rect, with_alpha(fill, alpha), n.radius),
+        }
+    }
+}
+
+/// Pixel bounds of a node rect after the effective canvas clip and viewport.
+fn image_bounds(canvas: &Canvas, r: Rect) -> Rect {
+    let clip = canvas.effective_clip();
+    let x0 = r.x.max(clip.x).max(0);
+    let y0 = r.y.max(clip.y).max(0);
+    let x1 =
+        r.x.saturating_add(r.w)
+            .min(clip.x.saturating_add(clip.w))
+            .min(canvas.width as i64);
+    let y1 =
+        r.y.saturating_add(r.h)
+            .min(clip.y.saturating_add(clip.h))
+            .min(canvas.height as i64);
+    Rect {
+        x: x0,
+        y: y0,
+        w: (x1 - x0).max(0),
+        h: (y1 - y0).max(0),
+    }
+}
+
+fn image_radius(n: &LaidOut, inner: Rect) -> i64 {
+    (n.radius - n.border_w)
+        .max(0)
+        .min(inner.w.min(inner.h).max(0) / 2)
+}
+
+/// Draw the cached PNG into the inner border rect with integer nearest-neighbour
+/// sampling. Missing or invalid resources get a deterministic rounded X.
+fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
+    let Some(src) = n.image_src.as_deref() else {
+        return;
+    };
+    let inner = inset(n.rect, n.border_w);
+    if inner.w <= 0 || inner.h <= 0 {
+        return;
+    }
+    let Some(image) = image::cached(src) else {
+        draw_image_placeholder(canvas, n, inner);
+        return;
+    };
+    let fit = image::fit_rect(
+        image.width,
+        image.height,
+        Rect {
+            x: 0,
+            y: 0,
+            w: inner.w,
+            h: inner.h,
+        },
+        n.image_fit,
+    );
+    if fit.w <= 0 || fit.h <= 0 {
+        return;
+    }
+    let bounds = image_bounds(canvas, inner);
+    let radius = image_radius(n, inner);
+    let opacity = n.effects.opacity.clamp(0, UNIT);
+    for y in bounds.y..bounds.y.saturating_add(bounds.h) {
+        let v = y - inner.y - fit.y;
+        if v < 0 || v >= fit.h {
+            continue;
+        }
+        let sy = ((v as i128 * image.height as i128) / fit.h as i128)
+            .clamp(0, image.height as i128 - 1) as usize;
+        for x in bounds.x..bounds.x.saturating_add(bounds.w) {
+            let u = x - inner.x - fit.x;
+            if u < 0 || u >= fit.w || Canvas::outside_round(inner, x, y, radius) {
+                continue;
+            }
+            let sx = ((u as i128 * image.width as i128) / fit.w as i128)
+                .clamp(0, image.width as i128 - 1) as usize;
+            let Some(index) = (sy * image.width + sx).checked_mul(4) else {
+                continue;
+            };
+            let Some(px) = image.pixels.get(index..index + 4) else {
+                continue;
+            };
+            let alpha = ((i64::from(px[3]) * opacity + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+            if alpha == 0 {
+                continue;
+            }
+            canvas.set(
+                x,
+                y,
+                Rgba {
+                    r: px[0],
+                    g: px[1],
+                    b: px[2],
+                    a: alpha,
+                },
+            );
+        }
+    }
+}
+
+/// Neutral rounded box with a diagonal cross for missing/unreadable PNGs.
+fn draw_image_placeholder(canvas: &mut Canvas, n: &LaidOut, inner: Rect) {
+    let bounds = image_bounds(canvas, inner);
+    let radius = image_radius(n, inner);
+    let bg = with_alpha(Rgba::rgb(0x86, 0x8e, 0x98), n.effects.opacity);
+    let cross = with_alpha(Rgba::rgb(0xf1, 0xf3, 0xf5), n.effects.opacity);
+    let w = inner.w as i128;
+    let h = inner.h as i128;
+    let limit = ((w * w + h * h) / 4).max(1);
+    for y in bounds.y..bounds.y.saturating_add(bounds.h) {
+        let v = (y - inner.y) as i128;
+        for x in bounds.x..bounds.x.saturating_add(bounds.w) {
+            if Canvas::outside_round(inner, x, y, radius) {
+                continue;
+            }
+            let u = (x - inner.x) as i128;
+            let d1 = (u * h - v * w).abs();
+            let d2 = (u * h + v * w - w * h).abs();
+            canvas.set(
+                x,
+                y,
+                if d1 <= limit || d2 <= limit {
+                    cross
+                } else {
+                    bg
+                },
+            );
         }
     }
 }
@@ -585,6 +716,28 @@ fn wrap_text(text: &str, max: usize) -> Vec<String> {
     }
     if !cur.is_empty() {
         lines.push(cur);
+    }
+    lines
+}
+
+/// Wrapped lines with an optional `maxLines` cap: the last retained line is
+/// hard-truncated to the same integer glyph width and ends in ASCII dots.
+fn wrap_text_limited(text: &str, max: usize, max_lines: Option<usize>) -> Vec<String> {
+    let mut lines = wrap_text(text, max);
+    let Some(limit) = max_lines else {
+        return lines;
+    };
+    if lines.len() <= limit {
+        return lines;
+    }
+    lines.truncate(limit);
+    if let Some(last) = lines.last_mut() {
+        let width = max.max(1);
+        let dots: String = "...".chars().take(width).collect();
+        let keep = width.saturating_sub(dots.chars().count());
+        let mut shortened: String = last.trim_end().chars().take(keep).collect();
+        shortened.push_str(&dots);
+        *last = shortened;
     }
     lines
 }
@@ -1178,7 +1331,10 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
         }
     };
     // Text that already fits keeps the historical single-line placement, so
-    // committed frames are byte for byte unchanged.
+    // committed frames are byte for byte unchanged. A zero line cap is opt-in.
+    if n.max_lines == Some(0) {
+        return;
+    }
     if tw <= n.rect.w {
         draw_glyphs(canvas, text, x0, y0, scale, color);
         return;
@@ -1189,7 +1345,7 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
     let adv = font::advance(scale).max(1);
     let max_chars = ((n.rect.w - 2 * pad).max(adv) / adv) as usize;
     let line_h = font::GLYPH_H * scale + 2;
-    let lines = wrap_text(text, max_chars);
+    let lines = wrap_text_limited(text, max_chars, n.max_lines);
     let total_h = line_h.saturating_mul(lines.len() as i64);
     let (x_base, y_base) = match n.text_origin {
         Some((ox, oy)) => (ox, oy),
@@ -1411,7 +1567,7 @@ mod tests {
         // Every printable ASCII glyph lives in the high-resolution atlas, so a
         // real character at scale 3 exercises the smooth raster path.
         let ch = 'M';
-        let rows = font::smooth_glyph(ch).unwrap();
+        let _rows = font::smooth_glyph(ch).unwrap();
         let scale = 3;
         assert_eq!(font::advance(scale), (font::GLYPH_W + 1) * scale);
 
@@ -1451,6 +1607,25 @@ mod tests {
         // No space fits: the earlier word moves to the next line.
         assert_eq!(wrap_text("ab cd", 2), vec!["ab", "cd"]);
         assert_eq!(wrap_text("a b c d", 1), vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn max_lines_truncates_with_ascii_ellipsis() {
+        let unlimited = wrap_text("alpha beta gamma delta", 10);
+        assert_eq!(unlimited, vec!["alpha beta", "gamma", "delta"]);
+        assert_eq!(
+            wrap_text_limited("alpha beta gamma delta", 10, Some(2)),
+            vec!["alpha beta", "gamma..."]
+        );
+        assert_eq!(wrap_text_limited("abcdef", 2, Some(1)), vec![".."]);
+        assert_eq!(
+            wrap_text_limited("any text", 4, Some(0)),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            wrap_text_limited("alpha beta gamma delta", 10, None),
+            unlimited
+        );
     }
 }
 

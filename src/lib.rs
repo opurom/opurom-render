@@ -23,7 +23,8 @@
 //! backend. The component library hardening adds 68 more distinct drawn primitives
 //! for a 100-primitive library, each with a deterministic integer-only drawing, a
 //! documented prop schema and an a11y default role; none of them change an earlier
-//! frame.
+//! frame. The media layer adds opt-in dependency-free PNG images and text line
+//! limits/alignment, also leaving earlier frames byte-identical.
 
 pub mod a11y;
 pub mod anim;
@@ -32,6 +33,7 @@ pub mod effects;
 pub mod font;
 pub mod gestures;
 pub mod icons;
+pub mod image;
 pub mod ir;
 pub mod layout;
 pub mod nav;
@@ -56,6 +58,9 @@ pub use gestures::{
     DOUBLE_TAP_SLOP, DRAG_THRESHOLD, LONG_PRESS_MS, TAP_TIMEOUT_MS,
 };
 pub use icons::{icon_coverage, icon_shape, IconShape, Shape, ICON_NAMES};
+pub use image::{
+    CacheStats, Image, ImageFit, CACHE_CAPACITY, MAX_DECODED_BYTES, MAX_IMAGE_DIMENSION,
+};
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props,
     Role, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,

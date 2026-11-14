@@ -36,7 +36,10 @@ fn compact_text_children_keep_a_full_line_and_do_not_overlap() {
     assert_eq!(rects.len(), 3, "all three text children are laid out");
     // size 14 -> scale 2, GLYPH_H 7 -> a 14 px band.
     for (id, _, h) in &rects {
-        assert!(*h >= 14, "node {id} must keep at least one glyph line, got {h}");
+        assert!(
+            *h >= 14,
+            "node {id} must keep at least one glyph line, got {h}"
+        );
     }
     for pair in rects.windows(2) {
         let (_, y0, h0) = pair[0];

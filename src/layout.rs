@@ -3,6 +3,7 @@
 
 use crate::anim::{default_duration_ms, AnimSpec, AnimTable, AnimValue, Curve};
 use crate::effects::{VisualEffect, VisualEffectKind, EFFECT_UNIT};
+use crate::image::ImageFit;
 use crate::ir::Contrast;
 use crate::particles::Particles;
 use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateView, Theme, ThemeMode};
@@ -249,6 +250,11 @@ pub struct LaidOut {
     pub text_color: Option<Rgba>,
     pub text_scale: i64,
     pub text_align: Align,
+    /// Optional wrapped line limit for Text nodes; `None` keeps legacy clipping.
+    pub max_lines: Option<usize>,
+    /// PNG path for an Image node; absent means the historical placeholder box.
+    pub image_src: Option<String>,
+    pub image_fit: ImageFit,
     pub effects: Effects,
     /// Typed software effects, in IR array order.
     pub visual_effects: Vec<VisualEffect>,
@@ -913,7 +919,7 @@ fn place(
         Kind::Text => (
             Some(node_text(n, state)),
             Some(n.props.color.unwrap_or(pal.fg)),
-            inherited_align,
+            n.props.text_align.unwrap_or(inherited_align),
         ),
         Kind::Button => (
             Some(node_text(n, state)),
@@ -986,6 +992,17 @@ fn place(
         text_color,
         text_scale: scale,
         text_align,
+        max_lines: if n.kind == Kind::Text {
+            n.props.max_lines
+        } else {
+            None
+        },
+        image_src: if n.kind == Kind::Image {
+            n.props.src.clone()
+        } else {
+            None
+        },
+        image_fit: n.props.fit,
         effects,
         visual_effects,
         particles: n.props.particles,

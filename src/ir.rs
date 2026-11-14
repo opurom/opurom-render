@@ -15,6 +15,7 @@ use crate::effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
 use crate::gestures::GestureKind;
+use crate::image::ImageFit;
 use crate::particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 use crate::Rgba;
 use serde_json::{Map, Value};
@@ -335,6 +336,10 @@ pub struct Props {
     pub padding: i64,
     pub margin: i64,
     pub align: Align,
+    /// Explicit text alignment. `None` keeps the historical inherited layout alignment.
+    pub text_align: Option<Align>,
+    /// Optional maximum wrapped line count for `Text` nodes (ellipsis on overflow).
+    pub max_lines: Option<usize>,
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub radius: Option<i64>,
@@ -349,7 +354,10 @@ pub struct Props {
     pub name: Option<String>,
     pub placeholder: Option<String>,
     pub bind: Option<String>,
+    /// PNG resource path for an `Image` node (relative paths use the process CWD).
     pub src: Option<String>,
+    /// Integer aspect-ratio policy for an `Image` node (default `contain`).
+    pub fit: ImageFit,
     pub size: Option<i64>,
     // Canonical style effects.
     pub shadow: Option<i64>,
@@ -1060,11 +1068,20 @@ fn state_decls(v: &Value) -> Result<Vec<StateDecl>, IrError> {
 
 fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
     let what = "props";
-    let align = match opt_string(o, "align", what)?.as_deref() {
+    let align_value = opt_string(o, "align", what)?;
+    let align = match align_value.as_deref() {
         None | Some("start") | Some("left") | Some("top") => Align::Start,
         Some("center") | Some("middle") => Align::Center,
         Some("end") | Some("right") | Some("bottom") => Align::End,
         Some(other) => return Err(bad(format!("{what}.align has unknown value {other:?}"))),
+    };
+    let text_align = align_value.map(|_| align);
+    let fit = match opt_string(o, "fit", what)?.as_deref() {
+        None => ImageFit::default(),
+        Some("fill") => ImageFit::Fill,
+        Some("contain") => ImageFit::Contain,
+        Some("cover") => ImageFit::Cover,
+        Some(other) => return Err(bad(format!("{what}.fit has unknown value {other:?}"))),
     };
     let shadow = match opt_integer(o, "shadow", what)? {
         Some(n) if n > 8 => {
@@ -1092,11 +1109,15 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         ),
         None => None,
     };
+    let max_lines =
+        opt_integer(o, "maxLines", what)?.map(|n| usize::try_from(n).unwrap_or(usize::MAX));
     Ok(Props {
         gap: opt_integer(o, "gap", what)?.unwrap_or(0),
         padding: opt_integer(o, "padding", what)?.unwrap_or(0),
         margin: opt_integer(o, "margin", what)?.unwrap_or(0),
         align,
+        text_align,
+        max_lines,
         width: opt_integer(o, "width", what)?,
         height: opt_integer(o, "height", what)?,
         radius: opt_integer(o, "radius", what)?,
@@ -1110,6 +1131,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         placeholder: opt_string(o, "placeholder", what)?,
         bind: opt_string(o, "bind", what)?,
         src: opt_string(o, "src", what)?,
+        fit,
         size: opt_integer(o, "size", what)?,
         shadow,
         gradient: gradient_prop(o, "gradient", what)?,
