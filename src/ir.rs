@@ -14,6 +14,7 @@ use crate::anim::{Curve, TransitionKind};
 use crate::effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
+use crate::gestures::GestureKind;
 use crate::particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 use crate::Rgba;
 use serde_json::{Map, Value};
@@ -361,6 +362,8 @@ pub struct Props {
     pub font_scale: Option<i64>,
     pub high_contrast: bool,
     pub role: Option<Role>,
+    /// Optional interactive gesture: `tap`, `doubleTap`, `longPress` or `drag`.
+    pub gesture: Option<GestureKind>,
     // Primitive data props.
     /// Integer series for `Chart` bar heights (also usable by other primitives).
     pub values: Vec<i64>,
@@ -1040,6 +1043,13 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         ),
         None => None,
     };
+    let gesture = match opt_string(o, "gesture", what)? {
+        Some(s) => Some(
+            GestureKind::parse(&s)
+                .ok_or_else(|| bad(format!("{what}.gesture has unknown value {s:?}")))?,
+        ),
+        None => None,
+    };
     Ok(Props {
         gap: opt_integer(o, "gap", what)?.unwrap_or(0),
         padding: opt_integer(o, "padding", what)?.unwrap_or(0),
@@ -1072,6 +1082,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         font_scale: font_scale_prop(o, "fontScale", what)?,
         high_contrast: opt_bool(o, "highContrast", what)?,
         role,
+        gesture,
         values: values_prop(o, "values", what)?,
         rows: opt_integer(o, "rows", what)?,
         effects: effects_prop(o, what)?,
@@ -1443,5 +1454,25 @@ mod tests {
         let mut o = Map::new();
         o.insert("opacity".into(), Value::from(2));
         assert!(unit_prop(&o, "opacity", "props").is_err());
+    }
+
+    #[test]
+    fn gesture_prop_parses_known_values_and_rejects_unknown() {
+        for (value, expected) in [
+            ("tap", GestureKind::Tap),
+            ("doubleTap", GestureKind::DoubleTap),
+            ("longPress", GestureKind::LongPress),
+            ("drag", GestureKind::Drag),
+        ] {
+            let mut o = Map::new();
+            o.insert("gesture".into(), Value::from(value));
+            assert_eq!(props(&o).unwrap().gesture, Some(expected), "{value}");
+        }
+        let mut o = Map::new();
+        o.insert("gesture".into(), Value::from("swipe"));
+        assert!(props(&o).is_err());
+        let mut o = Map::new();
+        o.insert("gesture".into(), Value::from(true));
+        assert!(props(&o).is_err());
     }
 }
