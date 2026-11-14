@@ -72,7 +72,7 @@ pub use interaction::{
 };
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props,
-    Role, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
+    Role, Route, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
 };
 pub use layout::{
     fluid_grid, layout, layout_animated_at, layout_at, Breakpoint, Control, Direction, Effects,

@@ -47,12 +47,56 @@ pub struct Ir {
     /// Optional page-transition kind read from the optional top-level `transition`
     /// key. `None` means the IR declares no transition.
     pub transition: Option<TransitionKind>,
+    /// Declared routes keyed by unique route name. Empty for a single-page
+    /// document, where `tree` is the only page. Non-empty when the document
+    /// declares `routes`; there is then no top-level tree and `tree` mirrors
+    /// the initial route's content, so every existing single-tree consumer
+    /// renders the entry page unchanged.
+    pub routes: BTreeMap<String, Route>,
+    /// The route `tree` mirrors when `routes` is non-empty; `None` otherwise.
+    pub initial_route: Option<String>,
+}
+
+/// One declared route: its content tree and optional title.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Route {
+    pub tree: Node,
+    pub title: Option<String>,
 }
 
 impl Ir {
     /// True when any node, visible or hidden, carries an effect prop.
     pub fn has_visual_effects(&self) -> bool {
         self.tree.has_visual_effects()
+            || self.routes.values().any(|r| r.tree.has_visual_effects())
+    }
+
+    /// The declared route named `name`, with its tree and optional title.
+    pub fn route(&self, name: &str) -> Option<&Route> {
+        self.routes.get(name)
+    }
+
+    /// A copy of this IR whose root `tree` is the declared route `name`'s
+    /// tree, so the existing single-tree layout/raster pipeline renders that
+    /// page. `None` when the document has no routes or `name` is undeclared.
+    pub fn with_route(&self, name: &str) -> Option<Ir> {
+        let route = self.routes.get(name)?;
+        let mut ir = self.clone();
+        ir.tree = route.tree.clone();
+        Some(ir)
+    }
+
+    /// Validate a `push` navigation target against the declared route set.
+    /// A single-page document has no route set and accepts any target; a
+    /// routes document rejects a target that is not a declared route.
+    pub fn check_push_target(&self, target: &str) -> Result<(), IrError> {
+        if self.routes.is_empty() || self.routes.contains_key(target) {
+            return Ok(());
+        }
+        Err(bad(format!(
+            "push target {target:?} is not a declared route (declared: {})",
+            self.routes.keys().cloned().collect::<Vec<_>>().join(", ")
+        )))
     }
 }
 
@@ -413,6 +457,10 @@ pub enum Op {
     Add,
     Sub,
     Toggle,
+    /// Navigate forward to the route named in `target`; never changes state.
+    Push,
+    /// Navigate back one page; carries no target and never changes state.
+    Pop,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1216,8 +1264,41 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         "add" => Op::Add,
         "sub" => Op::Sub,
         "toggle" => Op::Toggle,
+        "push" => Op::Push,
+        "pop" => Op::Pop,
         other => return Err(bad(format!("{what}.op has unknown value {other:?}"))),
     };
+    if matches!(op, Op::Push | Op::Pop) {
+        // Navigation actions address pages, not state: push carries the route
+        // name in `target`, pop carries nothing, and neither has a value.
+        if a.get("value").is_some() || a.get("valueFrom").is_some() {
+            return Err(bad(format!(
+                "{what}: {} takes no value",
+                if op == Op::Push { "push" } else { "pop" }
+            )));
+        }
+        let target = match op {
+            Op::Push => {
+                let target = string_field(a, "target", what)?;
+                if target.is_empty() {
+                    return Err(bad(format!("{what}: push needs a non-empty route target")));
+                }
+                target
+            }
+            _ => {
+                if a.get("target").is_some() {
+                    return Err(bad(format!("{what}: pop takes no target")));
+                }
+                String::new()
+            }
+        };
+        return Ok(Action {
+            op,
+            target,
+            value: None,
+            value_from: None,
+        });
+    }
     let target = string_field(a, "target", what)?;
     let decl = decls.iter().find(|d| d.name == target).ok_or_else(|| {
         bad(format!(
@@ -1280,6 +1361,8 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
                 }
             }
         }
+        // Navigation actions returned before reaching here.
+        Op::Push | Op::Pop => unreachable!("navigation actions return early"),
     }
     Ok(Action {
         op,
@@ -1502,8 +1585,37 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
     let app = string_field(o, "app", "IR root")?;
     let state = state_decls(required(o, "state", "IR root")?)?;
     let mut next_id = 0u32;
-    let mut tree = node(required(o, "tree", "IR root")?, &mut next_id, &state)?;
-    inherit_high_contrast(&mut tree, false);
+    // Multi-page IR is additive: a `routes` object replaces the top-level
+    // tree and `tree` mirrors the initial route, so single-tree consumers
+    // keep working; without it the document is exactly the 0.1.0 single page.
+    let (tree, routes, initial_route) = if o.contains_key("routes") {
+        if o.get("tree").is_some() {
+            return Err(bad(
+                "IR root must not declare both \"routes\" and a top-level \"tree\"",
+            ));
+        }
+        let routes = routes_map(required(o, "routes", "IR root")?, &state)?;
+        let initial = match opt_string(o, "initialRoute", "IR root")? {
+            Some(name) if routes.contains_key(&name) => name,
+            Some(name) => {
+                let declared = routes.keys().cloned().collect::<Vec<_>>().join(", ");
+                return Err(bad(format!(
+                    "IR root.initialRoute {name:?} is not a declared route (declared: {declared})"
+                )));
+            }
+            // No explicit entry route: the first declared route wins.
+            None => routes.keys().next().cloned().expect("non-empty"),
+        };
+        for route in routes.values() {
+            check_node_pushes(&route.tree, &routes)?;
+        }
+        let tree = routes[initial.as_str()].tree.clone();
+        (tree, routes, Some(initial))
+    } else {
+        let mut tree = node(required(o, "tree", "IR root")?, &mut next_id, &state)?;
+        inherit_high_contrast(&mut tree, false);
+        (tree, BTreeMap::new(), None)
+    };
     let theme = theme(required(o, "theme", "IR root")?)?;
     // Optional page-transition key; unparsable values are rejected by name.
     let transition = match o.get("transition") {
@@ -1526,7 +1638,66 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
         tree,
         theme,
         transition,
+        routes,
+        initial_route,
     })
+}
+
+/// Parse one route tree. The id counter seeds from the tree's root id, so a
+/// routes document may number each route independently or continue one global
+/// pre-order across routes; only in-tree contiguity is enforced, because only
+/// one route's tree is ever laid out at a time.
+fn route_tree(v: &Value, decls: &[StateDecl]) -> Result<Node, IrError> {
+    let o = object(v, "tree node")?;
+    let root = integer(required(o, "id", "tree node")?, "tree node.id")?;
+    if root < 0 || root > u32::MAX as i64 {
+        return Err(bad(format!("tree node.id {root} is out of u32 range")));
+    }
+    let mut next_id = root as u32;
+    node(v, &mut next_id, decls)
+}
+
+/// Parse the optional top-level `routes` object: unique non-empty route names
+/// mapping to `{ "tree": <node>, "title": <optional string> }`. JSON object
+/// keys are unique and `Map` iterates sorted, so the parsed map is
+/// deterministic regardless of authored order.
+fn routes_map(v: &Value, decls: &[StateDecl]) -> Result<BTreeMap<String, Route>, IrError> {
+    let o = object(v, "routes")?;
+    if o.is_empty() {
+        return Err(bad("\"routes\" must declare at least one route"));
+    }
+    let mut out = BTreeMap::new();
+    for (name, rv) in o {
+        if name.is_empty() {
+            return Err(bad("\"routes\" keys must be non-empty route names"));
+        }
+        let what = format!("routes.{name}");
+        let ro = object(rv, &what)?;
+        let mut tree = route_tree(required(ro, "tree", &what)?, decls)?;
+        inherit_high_contrast(&mut tree, false);
+        let title = opt_string(ro, "title", &what)?;
+        out.insert(name.clone(), Route { tree, title });
+    }
+    Ok(out)
+}
+
+/// Every `push` in a routes document must target a declared route.
+fn check_node_pushes(n: &Node, routes: &BTreeMap<String, Route>) -> Result<(), IrError> {
+    for event in &n.events {
+        for action in &event.actions {
+            if action.op == Op::Push && !routes.contains_key(&action.target) {
+                let declared = routes.keys().cloned().collect::<Vec<_>>().join(", ");
+                return Err(bad(format!(
+                    "events.{}: push target {:?} is not a declared route (declared: {declared})",
+                    event.name, action.target
+                )));
+            }
+        }
+    }
+    for child in &n.children {
+        check_node_pushes(child, routes)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

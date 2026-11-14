@@ -123,6 +123,22 @@ impl Navigator {
         Ok(self.start())
     }
 
+    /// Apply one reserved `@nav` patch value. A route name pushes that page;
+    /// `".."` pops the current page. A pop at the root is ignored (the root
+    /// page cannot go away) and returns `Ok(None)` without a transition.
+    /// Push-target validation against a declared route set is the caller's
+    /// job, via [`crate::ir::Ir::check_push_target`].
+    pub fn apply_nav(&mut self, value: &str) -> Result<Option<Navigation>, NavError> {
+        if value == ".." {
+            if self.stack.len() <= 1 {
+                return Ok(None);
+            }
+            self.stack.pop();
+            return Ok(Some(self.start()));
+        }
+        self.push(value).map(Some)
+    }
+
     /// Replace the top page without changing depth.
     pub fn replace(&mut self, page: impl Into<String>) -> Result<Navigation, NavError> {
         if self.stack.is_empty() {
