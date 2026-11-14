@@ -44,7 +44,7 @@ cargo build --offline
 # deterministic transition digest (stdout still exactly digest=... and dirty=...)
 ```
 
-Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]`.
+Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa]`.
 Relative `Image.src` paths resolve against the renderer process's current working directory, not the
 IR file's directory; absolute paths are accepted unchanged. PNG bytes are an explicit resource input,
 and a missing or invalid PNG paints a deterministic placeholder instead of failing the render.
@@ -70,6 +70,14 @@ shadow/gradient/opacity props are untouched. The budget accepts `0..=1000` and
 is validated like `--tick`. It adds one deterministic third stdout line
 `quality=budget=<ms>ms effects=on|off fields=<n> particles=<n>`; the no-flag
 path is byte-for-byte identical, so every pinned digest is unchanged. Malformed
+`--edge-aa` is opt-in 4x4 integer coverage on geometric edges (rounded boxes,
+filled discs and rings). Text and icons already carry coverage; the default path
+leaves box, circle and line edges binary so every pinned digest stays unchanged.
+Interior pixels of a shape are untouched, partial coverage is written through the
+existing integer alpha blend and the frame stays opaque. Display-list capture
+mode ignores the flag, so `--edge-aa` is rejected together with `--commands` to
+keep the GPU command stream's fixed-shape contract intact. The flag adds no
+stdout line.
 IR or a bad viewport is a
 readable stderr diagnostic with exit code 1, never a panic. A fresh process
 always reports `dirty=1` (first frame = whole surface); unchanged state within

@@ -26,9 +26,16 @@ pub struct Canvas {
     pub pixels: Vec<u8>,
     /// Optional clip rectangle (`Scroll` viewport).
     pub clip: Option<Rect>,
+    /// Opt-in 4x sub-pixel coverage on geometric edges. Off by default so the
+    /// pinned golden frames stay byte-identical; capture mode ignores it so the
+    /// display-list/GPU command stream is never altered.
+    edge_aa: bool,
     capture: bool,
     commands: Vec<Command>,
 }
+
+/// Sub-samples per axis for opt-in geometric edge coverage.
+const EDGE_AA: i64 = 4;
 
 impl Canvas {
     pub fn new(width: u32, height: u32, bg: Rgba) -> Canvas {
@@ -42,8 +49,73 @@ impl Canvas {
             height,
             pixels,
             clip: None,
+            edge_aa: false,
             capture: false,
             commands: Vec::new(),
+        }
+    }
+
+    /// Enable opt-in geometric edge coverage. Capture mode keeps its command
+    /// stream byte-identical, so this is a no-op while recording display lists.
+    pub fn set_edge_aa(&mut self, on: bool) {
+        self.edge_aa = on && !self.capture;
+    }
+
+    /// 4x4 integer coverage of a rounded-box edge at one pixel. Sub-samples are
+    /// taken in a 4x-scaled space so the existing quarter-circle predicate is
+    /// reused without floats. Interior pixels return 255 and keep the fast path.
+    fn round_coverage(r: Rect, x: i64, y: i64, rad: i64) -> u8 {
+        if rad <= 0 {
+            return 255;
+        }
+        let big = Rect {
+            x: r.x * EDGE_AA,
+            y: r.y * EDGE_AA,
+            w: r.w * EDGE_AA,
+            h: r.h * EDGE_AA,
+        };
+        let bx = x * EDGE_AA;
+        let by = y * EDGE_AA;
+        let mut hits = 0i64;
+        for sy in 0..EDGE_AA {
+            for sx in 0..EDGE_AA {
+                if !Self::outside_round(big, bx + sx, by + sy, rad * EDGE_AA) {
+                    hits += 1;
+                }
+            }
+        }
+        ((255 * hits + (EDGE_AA * EDGE_AA) / 2) / (EDGE_AA * EDGE_AA)) as u8
+    }
+
+    /// 4x4 integer coverage of a disc (`inner` is the squared inner radius for
+    /// rings; pass 0 for a filled circle) at one pixel.
+    fn circle_coverage(cx: i64, cy: i64, outer: i64, inner: i64, x: i64, y: i64) -> u8 {
+        let mut hits = 0i64;
+        for sy in 0..EDGE_AA {
+            for sx in 0..EDGE_AA {
+                let dx = (x * EDGE_AA + sx) - cx * EDGE_AA;
+                let dy = (y * EDGE_AA + sy) - cy * EDGE_AA;
+                let d = dx * dx + dy * dy;
+                if d <= outer && d > inner {
+                    hits += 1;
+                }
+            }
+        }
+        ((255 * hits + (EDGE_AA * EDGE_AA) / 2) / (EDGE_AA * EDGE_AA)) as u8
+    }
+
+    /// Blend a colour whose alpha encodes edge coverage; 255 keeps the exact
+    /// original opaque write.
+    fn set_covered(&mut self, x: i64, y: i64, c: Rgba, cov: u8) {
+        if cov == 0 {
+            return;
+        }
+        if cov == 255 {
+            self.set_quiet(x, y, c);
+        } else {
+            let mut soft = c;
+            soft.a = ((c.a as i64 * cov as i64) / 255) as u8;
+            self.set_quiet(x, y, soft);
         }
     }
 
@@ -63,6 +135,7 @@ impl Canvas {
             height,
             pixels,
             clip: None,
+            edge_aa: false,
             capture: false,
             commands: Vec::new(),
         }
@@ -220,10 +293,12 @@ impl Canvas {
         }
         for y in r.y.max(0)..y1 {
             for x in r.x.max(0)..x1 {
-                if Self::outside_round(r, x, y, rad) {
-                    continue;
+                if self.edge_aa {
+                    let cov = Self::round_coverage(r, x, y, rad);
+                    self.set_covered(x, y, c, cov);
+                } else if !Self::outside_round(r, x, y, rad) {
+                    self.set_quiet(x, y, c);
                 }
-                self.set_quiet(x, y, c);
             }
         }
     }
@@ -265,10 +340,12 @@ impl Canvas {
             let c = crate::layout::lerp_color(top, bottom, t);
             let c = with_alpha(c, alpha);
             for x in r.x.max(0)..x1 {
-                if Self::outside_round(r, x, y, rad) {
-                    continue;
+                if self.edge_aa {
+                    let cov = Self::round_coverage(r, x, y, rad);
+                    self.set_covered(x, y, c, cov);
+                } else if !Self::outside_round(r, x, y, rad) {
+                    self.set_quiet(x, y, c);
                 }
-                self.set_quiet(x, y, c);
             }
         }
     }
@@ -332,10 +409,15 @@ impl Canvas {
         let y1 = (r.y + r.h).min(self.height as i64);
         for y in r.y.max(0)..y1 {
             for x in r.x.max(0)..x1 {
-                let dx = x - cx;
-                let dy = y - cy;
-                if dx * dx + dy * dy <= limit {
-                    self.set(x, y, c);
+                if self.edge_aa {
+                    let cov = Self::circle_coverage(cx, cy, limit * EDGE_AA * EDGE_AA, 0, x, y);
+                    self.set_covered(x, y, c, cov);
+                } else {
+                    let dx = x - cx;
+                    let dy = y - cy;
+                    if dx * dx + dy * dy <= limit {
+                        self.set(x, y, c);
+                    }
                 }
             }
         }
@@ -356,11 +438,17 @@ impl Canvas {
         let y1 = (r.y + r.h).min(self.height as i64);
         for y in r.y.max(0)..y1 {
             for x in r.x.max(0)..x1 {
-                let dx = x - cx;
-                let dy = y - cy;
-                let d = dx * dx + dy * dy;
-                if d <= outer && d > inner {
-                    self.set(x, y, c);
+                if self.edge_aa {
+                    let s = EDGE_AA * EDGE_AA;
+                    let cov = Self::circle_coverage(cx, cy, outer * s, inner * s, x, y);
+                    self.set_covered(x, y, c, cov);
+                } else {
+                    let dx = x - cx;
+                    let dy = y - cy;
+                    let d = dx * dx + dy * dy;
+                    if d <= outer && d > inner {
+                        self.set(x, y, c);
+                    }
                 }
             }
         }
@@ -906,6 +994,7 @@ fn wrap_text_limited(text: &str, max: usize, max_lines: Option<usize>) -> Vec<St
 fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
     let alpha = n.effects.opacity;
     let accent = with_alpha(n.accent, alpha);
+    let metrics = n.font_metrics;
     match (&n.control, n.kind) {
         (Some(Control::Progress { value }), _) => {
             let w = (n.rect.w * (*value).clamp(0, UNIT)) / UNIT;
@@ -991,7 +1080,6 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
         }
         (Some(Control::Tabs { labels, selected }), _) => {
             let scale = n.text_scale.clamp(1, 8);
-            let adv = font::advance(scale);
             let th = font::GLYPH_H * scale;
             // High-contrast mode sets text_color even for nodes with no text.
             let label_color = match n.text_color {
@@ -1000,7 +1088,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
             };
             let mut x = n.rect.x + 2;
             for (i, label) in labels.iter().enumerate() {
-                let w = (label.chars().count() as i64) * adv;
+                let w = font::text_width(label, scale, metrics);
                 if i == *selected {
                     canvas.fill_rect(
                         Rect {
@@ -1012,7 +1100,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                         accent,
                     );
                 }
-                draw_glyphs(canvas, label, x, n.rect.y + 2, scale, label_color);
+                draw_glyphs(canvas, label, x, n.rect.y + 2, scale, label_color, metrics);
                 x += w + 8;
             }
             let _ = th;
@@ -1072,7 +1160,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                 for c in 0..cols {
                     if let Some(label) = headers.get(c as usize) {
                         let ty = n.rect.y + ((rh - font::GLYPH_H) / 2).max(0);
-                        draw_glyphs(canvas, label, n.rect.x + c * cw + 2, ty, 1, on);
+                        draw_glyphs(canvas, label, n.rect.x + c * cw + 2, ty, 1, on, metrics);
                     }
                 }
                 for c in 1..cols {
@@ -1108,6 +1196,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                             n.rect.y + (r + 1) * rh + 2,
                             1,
                             ink,
+                            metrics,
                         );
                         num += 1;
                     }
@@ -1176,6 +1265,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                         n.rect.y + 2,
                         1,
                         on,
+                        metrics,
                     );
                 }
                 for c in 1..cols {
@@ -1226,6 +1316,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                             n.rect.y + (r + 1) * rh + 2,
                             1,
                             col,
+                            metrics,
                         );
                         day += 1;
                     }
@@ -1235,15 +1326,23 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
         (Some(Control::RichText { text }), _) => {
             let scale = n.text_scale.clamp(1, 8);
             let line_h = font::GLYPH_H * scale + 2;
-            let max_chars =
-                (n.rect.w.saturating_sub(4) / font::advance(scale).max(1)).max(1) as usize;
+            let lines = match metrics {
+                font::FontMetrics::Fixed => {
+                    let max_chars =
+                        (n.rect.w.saturating_sub(4) / font::advance(scale).max(1)).max(1) as usize;
+                    wrap_text(text, max_chars)
+                }
+                font::FontMetrics::Proportional => {
+                    font::wrap_width(text, n.rect.w.saturating_sub(4).max(1), scale)
+                }
+            };
             let ink = with_alpha(n.text_color.unwrap_or(INK), alpha);
-            for (i, wrapped) in wrap_text(text, max_chars).iter().enumerate() {
+            for (i, wrapped) in lines.iter().enumerate() {
                 let y = n.rect.y + 2 + i as i64 * line_h;
                 if y >= n.rect.y + n.rect.h {
                     break;
                 }
-                draw_glyphs(canvas, wrapped, n.rect.x + 2, y, scale, ink);
+                draw_glyphs(canvas, wrapped, n.rect.x + 2, y, scale, ink, metrics);
             }
         }
         (Some(Control::Player), _) => {
@@ -1356,6 +1455,7 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                         y + ((ih - font::GLYPH_H) / 2).max(0),
                         1,
                         col,
+                        metrics,
                     );
                     if i + 1 < items.len() {
                         canvas.fill_rect(
@@ -1394,10 +1494,10 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                 bubble,
             );
             let scale = n.text_scale.clamp(1, 8);
-            let tlen = (text.chars().count() as i64) * font::advance(scale);
+            let tlen = font::text_width(text, scale, metrics);
             let tx = body.x + ((body.w - tlen) / 2).max(2);
             let ty = body.y + ((body.h - font::GLYPH_H * scale) / 2).max(0);
-            draw_glyphs(canvas, text, tx, ty, scale, on);
+            draw_glyphs(canvas, text, tx, ty, scale, on, metrics);
         }
         (Some(Control::Extended { code, values }), _) => {
             crate::primitives::draw(canvas, *code, values, n.rect, accent, alpha);
@@ -1475,7 +1575,8 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
         n.effects.opacity,
     );
     let scale = n.text_scale.clamp(1, 8);
-    let tw = (text.chars().count() as i64).saturating_mul(font::advance(scale));
+    let metrics = n.font_metrics;
+    let tw = font::text_width(text, scale, metrics);
     let th = font::GLYPH_H * scale;
     let pad = n.border_w.max(0) + 2;
     let (x0, y0) = match n.text_origin {
@@ -1496,16 +1597,26 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
         return;
     }
     if tw <= n.rect.w {
-        draw_glyphs(canvas, text, x0, y0, scale, color);
+        draw_glyphs(canvas, text, x0, y0, scale, color, metrics);
         return;
     }
     // Overflowing text is wrapped into lines that fit the node and then painted
     // through the canvas clip, so no glyph pixel spills onto a neighbour or the
-    // next node; lines past the bottom edge are clipped the same way.
-    let adv = font::advance(scale).max(1);
-    let max_chars = ((n.rect.w - 2 * pad).max(adv) / adv) as usize;
+    // next node; lines past the bottom edge are clipped the same way. Fixed
+    // metrics keep the historical char-count wrap; proportional metrics wrap on
+    // the same measured pixel width used above.
     let line_h = font::GLYPH_H * scale + 2;
-    let lines = wrap_text_limited(text, max_chars, n.max_lines);
+    let lines = match metrics {
+        font::FontMetrics::Fixed => {
+            let adv = font::advance(scale).max(1);
+            let max_chars = ((n.rect.w - 2 * pad).max(adv) / adv) as usize;
+            wrap_text_limited(text, max_chars, n.max_lines)
+        }
+        font::FontMetrics::Proportional => {
+            let max_w = (n.rect.w - 2 * pad).max(1);
+            font::wrap_width_limited(text, max_w, scale, n.max_lines)
+        }
+    };
     let total_h = line_h.saturating_mul(lines.len() as i64);
     let (x_base, y_base) = match n.text_origin {
         Some((ox, oy)) => (ox, oy),
@@ -1517,7 +1628,7 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
     let prev_clip = canvas.clip;
     canvas.clip = Some(intersect(canvas.effective_clip(), n.rect));
     for (i, line) in lines.iter().enumerate() {
-        let lw = (line.chars().count() as i64).saturating_mul(font::advance(scale));
+        let lw = font::text_width(line, scale, metrics);
         let x = match n.text_origin {
             Some((ox, _)) => ox,
             None => match n.text_align {
@@ -1526,7 +1637,7 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
                 Align::End => n.rect.x + (n.rect.w - lw - pad).max(pad),
             },
         };
-        draw_glyphs(canvas, line, x, y_base + (i as i64) * line_h, scale, color);
+        draw_glyphs(canvas, line, x, y_base + (i as i64) * line_h, scale, color, metrics);
     }
     canvas.clip = prev_clip;
 }
@@ -1591,31 +1702,39 @@ fn glyph_coverage(rows: &[u8; 7], scale: i64, px: i64, py: i64) -> i64 {
     (sum + AA_GRID * AA_GRID / 2) / (AA_GRID * AA_GRID)
 }
 
-/// Draw a text run with the built-in bitmap font, blending partial coverage
-/// over whatever is already on the canvas.
-fn draw_glyphs(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: i64, color: Rgba) {
+/// Draw a text run, blending partial coverage over whatever is on the canvas.
+fn draw_glyphs(
+    canvas: &mut Canvas,
+    text: &str,
+    x0: i64,
+    y0: i64,
+    scale: i64,
+    color: Rgba,
+    metrics: font::FontMetrics,
+) {
     if scale >= font::SMOOTH_MIN_SCALE {
-        draw_glyphs_smooth(canvas, text, x0, y0, scale, color);
+        draw_glyphs_smooth(canvas, text, x0, y0, scale, color, metrics);
         return;
     }
-    for (idx, ch) in text.chars().enumerate() {
-        let rows = match font::glyph(ch) {
-            Some(r) => r,
-            None => continue, // unsupported codepoint still consumes its advance
-        };
-        if rows == [0; 7] {
-            continue;
-        }
-        let gx = x0 + (idx as i64).saturating_mul(font::advance(scale));
-        for py in 0..font::GLYPH_H * scale {
-            for px in 0..font::GLYPH_W * scale {
-                let cov = glyph_coverage(&rows, scale, px, py);
-                let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
-                if a != 0 {
-                    canvas.set(gx + px, y0 + py, Rgba { a, ..color });
+    // Block path is unreachable for the clamped scale (>= 1 uses the smooth
+    // set); keep a running pen so every glyph consumes its selected advance.
+    let mut pen = x0;
+    for ch in text.chars() {
+        let adv = font::glyph_advance(ch, scale, metrics);
+        if let Some(rows) = font::glyph(ch) {
+            if rows != [0; 7] {
+                for py in 0..font::GLYPH_H * scale {
+                    for px in 0..font::GLYPH_W * scale {
+                        let cov = glyph_coverage(&rows, scale, px, py);
+                        let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+                        if a != 0 {
+                            canvas.set(pen + px, y0 + py, Rgba { a, ..color });
+                        }
+                    }
                 }
             }
         }
+        pen = pen.saturating_add(adv);
     }
 }
 
@@ -1632,6 +1751,8 @@ fn smooth_coverage(
     h_out: i64,
     px: i64,
     py: i64,
+    first: i64,
+    cells: i64,
 ) -> i64 {
     let level = font::SMOOTH_LEVEL;
     let cell = |c: i64, r: i64| -> i64 {
@@ -1642,8 +1763,9 @@ fn smooth_coverage(
             0
         }
     };
-    // Map the output box onto the source grid: source cell = coord * dims / out.
-    let src_w = font::SMOOTH_W;
+    // Fixed passes `(0, SMOOTH_W)`: this reproduces the historical full-cell
+    // mapping exactly. Proportional starts at the first inked column and maps
+    // only `cells` source columns, cropping the left bearing without distortion.
     let src_h = font::SMOOTH_H;
     let in_w = (w_out * SMOOTH_AA).max(1);
     let in_h = (h_out * SMOOTH_AA).max(1);
@@ -1655,8 +1777,9 @@ fn smooth_coverage(
         let ny = cy + 1;
         for sx in 0..SMOOTH_AA {
             let sub_x = px * SMOOTH_AA + sx;
-            let cx = sub_x * src_w / in_w;
-            let fx = (sub_x * src_w * 16 / in_w) % 16;
+            let cpos = sub_x * cells;
+            let cx = first + cpos / in_w;
+            let fx = (cpos * 16 / in_w) % 16;
             let nx = cx + 1;
             let v00 = cell(cx, cy);
             let v10 = cell(nx, cy);
@@ -1674,47 +1797,56 @@ fn smooth_coverage(
 /// Draw a run with the high-resolution glyph set. Characters outside the set
 /// fall back to the 5x7 bitmap rasterised at the same scale so a mixed run
 /// still has no gaps.
-fn draw_glyphs_smooth(canvas: &mut Canvas, text: &str, x0: i64, y0: i64, scale: i64, color: Rgba) {
-    // A high-resolution glyph is drawn into exactly the same mono advance and
-    // text band as the block font: the 12x14 source cell matches the 6:7
-    // advance/band aspect, so the mapping scales uniformly at every integer
-    // scale and layout widths and SVG metrics stay identical.
-    let w_out = font::advance(scale);
+fn draw_glyphs_smooth(
+    canvas: &mut Canvas,
+    text: &str,
+    x0: i64,
+    y0: i64,
+    scale: i64,
+    color: Rgba,
+    metrics: font::FontMetrics,
+) {
+    // Each glyph is drawn into a box as wide as its pen advance. Fixed maps the
+    // whole 12x14 source cell into that box (byte-identical to the historical
+    // mono layout). Proportional crops the left bearing and maps only the ink
+    // plus a trailing gap into the box, so ink is never distorted.
     let band_h = font::GLYPH_H * scale;
-    for (idx, ch) in text.chars().enumerate() {
-        let gx = x0 + (idx as i64).saturating_mul(w_out);
+    let mut pen = x0;
+    for ch in text.chars() {
+        let adv = font::glyph_advance(ch, scale, metrics);
+        let w_out = adv;
+        let (first, cells) = font::coverage_window(ch, metrics);
         match font::smooth_glyph(ch) {
             Some(rows) => {
-                if rows.iter().all(|&r| r == 0) {
-                    continue;
-                }
-                for py in 0..band_h {
-                    for px in 0..w_out {
-                        let cov = smooth_coverage(&rows, w_out, band_h, px, py);
-                        let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
-                        if a != 0 {
-                            canvas.set(gx + px, y0 + py, Rgba { a, ..color });
+                if !rows.iter().all(|&r| r == 0) {
+                    for py in 0..band_h {
+                        for px in 0..w_out {
+                            let cov = smooth_coverage(&rows, w_out, band_h, px, py, first, cells);
+                            let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+                            if a != 0 {
+                                canvas.set(pen + px, y0 + py, Rgba { a, ..color });
+                            }
                         }
                     }
                 }
             }
             None => {
                 if let Some(rows) = font::glyph(ch) {
-                    if rows == [0; 7] {
-                        continue;
-                    }
-                    for py in 0..band_h {
-                        for px in 0..font::GLYPH_W * scale {
-                            let cov = glyph_coverage(&rows, scale, px, py);
-                            let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
-                            if a != 0 {
-                                canvas.set(gx + px, y0 + py, Rgba { a, ..color });
+                    if rows != [0; 7] {
+                        for py in 0..band_h {
+                            for px in 0..font::GLYPH_W * scale {
+                                let cov = glyph_coverage(&rows, scale, px, py);
+                                let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+                                if a != 0 {
+                                    canvas.set(pen + px, y0 + py, Rgba { a, ..color });
+                                }
                             }
                         }
                     }
                 }
             }
         }
+        pen = pen.saturating_add(adv);
     }
 }
 
@@ -1733,7 +1865,15 @@ mod tests {
 
         let bg = Rgba::rgb(255, 255, 255);
         let mut canvas = Canvas::new(60, 40, bg);
-        draw_glyphs(&mut canvas, "MM", 2, 2, scale, Rgba::rgb(0, 0, 0));
+        draw_glyphs(
+            &mut canvas,
+            "MM",
+            2,
+            2,
+            scale,
+            Rgba::rgb(0, 0, 0),
+            font::FontMetrics::Fixed,
+        );
         let pixel = |x: i64, y: i64| -> [u8; 3] {
             let i = (y as usize * canvas.width as usize + x as usize) * 4;
             [canvas.pixels[i], canvas.pixels[i + 1], canvas.pixels[i + 2]]

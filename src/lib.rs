@@ -84,6 +84,7 @@ pub use perf::{
     TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
 };
 pub use svg::{svg, svg_at};
+pub use font::FontMetrics;
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,6 +195,8 @@ pub struct Renderer {
     /// current prop targets. A `RefCell` lets the `&self` snapshot methods
     /// advance the animation without changing their signatures.
     anim: RefCell<AnimTable>,
+    /// Opt-in 4x geometric edge coverage; off by default for golden parity.
+    edge_aa: bool,
 }
 
 impl Renderer {
@@ -212,7 +215,14 @@ impl Renderer {
             redrawn_nodes: 0,
             redraw_pixels: 0,
             anim: RefCell::new(AnimTable::new()),
+            edge_aa: false,
         })
+    }
+
+    /// Enable opt-in geometric edge coverage on the software raster. The
+    /// default path stays byte-identical; capture/display-list output ignores it.
+    pub fn set_edge_aa(&mut self, on: bool) {
+        self.edge_aa = on;
     }
 
     /// Convenience constructor; use `try_new` for untrusted CLI input.
@@ -279,6 +289,7 @@ impl Renderer {
             &mut self.anim.borrow_mut(),
         );
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
+        canvas.set_edge_aa(self.edge_aa);
         for n in &laid {
             raster::draw(&mut canvas, n);
         }
@@ -308,6 +319,7 @@ impl Renderer {
             &mut AnimTable::new(),
         );
         let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.stage);
+        canvas.set_edge_aa(self.edge_aa);
         for n in &laid {
             let frame = crate::effects::EffectFrame::new(self.width, self.height, n);
             if frame.has_local {
@@ -375,6 +387,7 @@ impl Renderer {
     fn raster_laid(&self, laid: &[LaidOut], theme: &Theme) -> Vec<u8> {
         let pal = Palette::from_theme(theme);
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
+        canvas.set_edge_aa(self.edge_aa);
         for n in laid {
             raster::draw(&mut canvas, n);
         }
@@ -427,6 +440,7 @@ impl Renderer {
             } else {
                 let mut canvas =
                     raster::Canvas::from_pixels(self.width, self.height, prev.to_vec());
+                canvas.set_edge_aa(self.edge_aa);
                 canvas.clip = Some(region);
                 canvas.fill_rect(region, pal.stage);
                 let mut redrawn = 0usize;

@@ -242,8 +242,11 @@ fn capability_control_carries_code_and_series() {
 fn capability_cli_is_deterministic_across_processes() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let exe = env!("CARGO_BIN_EXE_opurom-render");
+    // Concurrent cargo test processes share CARGO_TARGET_TMPDIR; a process-unique
+    // prefix keeps the CLI fixtures from being overwritten by another binary.
+    let tag = format!("capability-when-{}-", std::process::id());
     for contract in [&CONTRACTS[0], &CONTRACTS[34], &CONTRACTS[67]] {
-        let ir_path = dir.join(format!("capability-{}.opuir.json", contract.name));
+        let ir_path = dir.join(format!("{tag}{}.opuir.json", contract.name));
         fs::write(&ir_path, prim_ir(contract.name, "")).unwrap();
         let run = |out: &str| -> (String, Vec<u8>) {
             let ppm = dir.join(out);
@@ -259,8 +262,8 @@ fn capability_cli_is_deterministic_across_processes() {
                 fs::read(&ppm).unwrap(),
             )
         };
-        let (s1, p1) = run(&format!("capability-{}-1.ppm", contract.name));
-        let (s2, p2) = run(&format!("capability-{}-2.ppm", contract.name));
+        let (s1, p1) = run(&format!("{tag}{}-1.ppm", contract.name));
+        let (s2, p2) = run(&format!("{tag}{}-2.ppm", contract.name));
         assert_eq!(s1, s2, "{} stdout must be deterministic", contract.name);
         assert_eq!(p1, p2, "{} PPM must be byte-identical", contract.name);
     }

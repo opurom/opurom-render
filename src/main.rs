@@ -1,4 +1,4 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
@@ -15,17 +15,26 @@
 //! effect passes off) and prints one extra `quality=` line; without it the
 //! frame is unchanged. Relative `Image.src` paths resolve against the process
 //! CWD, not the IR file's directory; missing or invalid PNGs draw a placeholder.
+//! `--auto-degrade <60|120>` wires the measured frame budget into the render:
+//! since the CLI renders one frame (there is no live loop), `--frame-ms a,b,c`
+//! supplies the measured durations and `--frame-samples <n>` repeats that
+//! pattern to fill `n` injected frames (a tier decision needs `WINDOW_FRAMES`
+//! samples). The resulting tier caps are applied to the render config; stdout
+//! stays exactly `digest=...` then `dirty=...`.
 
 use opurom_render::{
-    a11y_json_at, choose_quality, digest_hex, is_interactive, parse_ir, svg_at, Frame, IrError,
-    Node, NodeState, Renderer, StateValue, StateView, Transition, TransitionKind, ValueType,
-    SETTLED_MS,
+    a11y_json_at, apply_policy, choose_quality, digest_hex, is_interactive, parse_ir, svg_at,
+    Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, RenderConfig, Renderer, StateValue,
+    StateView, Transition, TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
 };
 use std::{env, fs, process};
 
 /// Measured frame budgets above this are not meaningful; the policy saturates
 /// at 16 ms anyway.
 const MAX_FRAME_BUDGET_MS: i64 = 1000;
+/// Bounds for an explicit `--frame-ms` sample and the simulated frame count.
+const MAX_FRAME_MS: i64 = 1000;
+const MAX_FRAME_SAMPLES: usize = 100_000;
 
 fn main() {
     if let Err(e) = run() {
@@ -38,6 +47,21 @@ fn main() {
 /// count is the base, so every field degrades proportionally.
 fn degraded_particle_count(budget_ms: i64, base: i64) -> i64 {
     choose_quality(budget_ms, base.max(0) as usize, true).particle_count as i64
+}
+
+/// Feed explicit measured frame durations into a `FrameBudget` and apply the
+/// resulting tier caps to a `RenderConfig`, returning the effective IR. The CLI
+/// renders a single frame (there is no live loop), so `--frame-ms` supplies the
+/// measured durations; cycling them over `n` injected frames simulates the loop
+/// a host would otherwise drive through `Renderer::render_auto_at`.
+fn auto_degrade_ir(ir: &Ir, rate: FrameRate, samples: &[i64], n: usize) -> Ir {
+    let mut budget = FrameBudget::new(rate);
+    for i in 0..n {
+        budget.push(samples[i % samples.len()]);
+    }
+    let mut config = RenderConfig::new(ir.clone());
+    apply_policy(budget.tier(), &mut config);
+    config.ir().clone()
 }
 
 /// Applies `choose_quality` to the parsed IR tree in place, so the render
@@ -173,6 +197,8 @@ fn run() -> Result<(), String> {
     // Opt-in incremental raster: reuse the previous frame and redraw only the
     // changed region. Without it the full reference raster is used.
     let mut incremental = false;
+    // Opt-in 4x geometric edge coverage; off by default for golden parity.
+    let mut edge_aa = false;
 
     let mut i = 4usize;
     while i < args.len() {
@@ -268,9 +294,13 @@ fn run() -> Result<(), String> {
                 incremental = true;
                 i += 1;
             }
+            "--edge-aa" => {
+                edge_aa = true;
+                i += 1;
+            }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS} or --incremental"
+                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental or --edge-aa"
                 ));
             }
         }
@@ -295,10 +325,15 @@ fn run() -> Result<(), String> {
                 .to_string(),
         );
     }
+    if edge_aa && commands_path.is_some() {
+        return Err("--edge-aa is unavailable with --commands: the display-list stream has no coverage field"
+            .to_string());
+    }
     // Opt-in only: without the flag the IR tree is untouched, so the default
     // path is byte-for-byte identical to previous releases.
     let quality_line = frame_budget_ms.map(|ms| apply_quality(&mut ir.tree, ms));
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
+    renderer.set_edge_aa(edge_aa);
     let (mut frame, incremental_line) = if incremental {
         let frame = renderer.render_incremental_at(&ir, &state, elapsed_ms);
         let (nodes, pixels) = renderer.redraw_stats();
