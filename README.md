@@ -403,9 +403,12 @@ across runs (integer formatting over a deterministic pre-order layout; no time,
 randomness, host queries or external crate). Verified by tests for
 determinism, gradient defs, text, `data-role`, and hidden nodes.
 
-The SVG path is a **second software backend**. `<text>` uses a generic `monospace`
-face and the built-in 5x7 font's metrics, so glyph widths/positions are an
-approximation of the raster rather than a pixel-exact match. Box colours come
+The SVG path is a **second software backend**. `<text>` uses the platform system
+font stack (host faces plus CJK fallbacks, the same stack as the DOM emitter) and
+pins the built-in font's integer advance with `textLength` and
+`lengthAdjust="spacingAndGlyphs"`, so glyph widths stay deterministic without font
+shaping or host font queries. Positions therefore approximate the raster's 5x7
+metrics rather than being a pixel-exact match. Box colours come
 from the layout palette; the SVG snapshot reports `Image` as a deterministic box
 and role without embedding the PNG, while the RGBA raster draws the decoded
 resource. It is a vector *snapshot* of the layout, not a replacement for the
@@ -707,7 +710,7 @@ renderer remains the reference oracle.
 
 ## 68 additional distinct primitives (the component catalog rules framework rules)
 
-The library extends from 116 named components / 32 primitives to **216 named
+The library extends from 116 named components / 32 primitives to **260 named
 components mapped onto 100 DISTINCT primitive kinds**: the 32 core kinds plus 68
 new ones. Each new kind is a real, deterministic software drawing in
 [`src/primitives.rs`](src/primitives.rs) (with its generated
@@ -886,4 +889,4 @@ stable. Planned areas of work:
   particle field.
 - **Quality feedback**: profile-driven quality budgets from the host.
 - **Platform accessibility bridge**: a native accessibility bridge over the layout-derived tree.
-- **SVG text shaping**: real shaping and font metrics in the SVG backend.
+- **SVG text shaping**: real OpenType shaping and per-glyph advance metrics instead of the pinned `textLength` approximation.

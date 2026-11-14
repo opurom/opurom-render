@@ -1,8 +1,9 @@
 //! Deterministic SVG 1.1 vector backend: a second *software* backend that
 //! snapshots the same `layout_at` boxes into vector elements. This is NOT a
-//! GPU backend (no Metal/Vulkan/ANGLE), does no font shaping and decodes no
-//! images: `<text>` uses the built-in 5x7 font metrics with a generic monospace
-//! face, and box colours come straight from the layout palette.
+//! GPU backend (no Metal/Vulkan/ANGLE) and decodes no images: `<text>` uses
+//! the platform system font stack with the built-in font metrics pinned via
+//! `textLength`, so no font shaping or host font query is needed, and box
+//! colours come straight from the layout palette.
 //!
 //! The output is byte-identical for identical IR + viewport + state + theme +
 //! animation tick: every value is integer formatting over a deterministic
@@ -15,6 +16,12 @@ use crate::particles::{alpha_byte, dot_center};
 use crate::{font, Align, Rgba};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+
+/// Platform system stack shared with the DOM emitter, XML-attribute escaped
+/// (font face names with spaces become `&quot;…&quot;`). Leading host faces plus
+/// CJK fallbacks keep text native on every platform; no bitmap or monospace
+/// fallback. `textLength` pins the rendered advance so no shaping is required.
+pub const SYSTEM_FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, &quot;PingFang SC&quot;, &quot;Hiragino Sans GB&quot;, &quot;Microsoft YaHei&quot;, &quot;Microsoft JhengHei&quot;, &quot;Segoe UI&quot;, Roboto, &quot;Noto Sans CJK SC&quot;, &quot;Source Han Sans SC&quot;, &quot;Helvetica Neue&quot;, Arial, sans-serif";
 
 fn hex(c: Rgba) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
@@ -42,8 +49,8 @@ fn esc(s: &str) -> String {
 }
 
 /// Text placement from the built-in font metrics, mirroring the raster's
-/// top-left glyph origin. Returns `(x, baseline_y, font_size_px)`.
-fn text_pos(n: &LaidOut, text: &str) -> (i64, i64, i64) {
+/// top-left glyph origin. Returns `(x, baseline_y, font_size_px, advance_px)`.
+fn text_pos(n: &LaidOut, text: &str) -> (i64, i64, i64, i64) {
     let scale = n.text_scale.clamp(1, 8);
     let tw = (text.chars().count() as i64).saturating_mul(font::advance(scale));
     let th = font::GLYPH_H * scale;
@@ -60,7 +67,7 @@ fn text_pos(n: &LaidOut, text: &str) -> (i64, i64, i64) {
             (x0, y0)
         }
     };
-    (x0, y0 + th, th)
+    (x0, y0 + th, th, tw)
 }
 
 /// Every node in pre-order, including hidden ones (for `data-hidden` markers).
@@ -136,16 +143,18 @@ pub fn svg_at(ir: &Ir, state: &StateView, width: u32, height: u32, elapsed_ms: i
         }
         if let Some(text) = &n.text {
             if !text.is_empty() {
-                let (x, y, size) = text_pos(n, text);
+                let (x, y, size, advance) = text_pos(n, text);
                 let color = hex(n.text_color.unwrap_or(Rgba::rgb(0, 0, 0)));
                 writeln!(
                     body,
-                    "  <text data-id=\"{}\" data-role=\"{}\" x=\"{}\" y=\"{}\" font-family=\"monospace\" font-size=\"{}\" fill=\"{}\">{}</text>",
+                    "  <text data-id=\"{}\" data-role=\"{}\" x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"{}\">{}</text>",
                     n.id,
                     role_s,
                     x,
                     y,
+                    SYSTEM_FONT_STACK,
                     size,
+                    advance,
                     color,
                     esc(text)
                 )
