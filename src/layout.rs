@@ -2,7 +2,7 @@
 //! no floats, no time, no randomness, no host queries.
 
 use crate::anim::{default_duration_ms, AnimSpec, AnimTable, AnimValue, Curve};
-use crate::effects::VisualEffect;
+use crate::effects::{VisualEffect, VisualEffectKind, EFFECT_UNIT};
 use crate::ir::Contrast;
 use crate::particles::Particles;
 use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateView, Theme, ThemeMode};
@@ -130,6 +130,41 @@ pub struct Effects {
     pub opacity: i64,
 }
 
+/// A `glass: true` surface is a liquid-glass lamina, not the flat frosted mix
+/// applied above. Expand it into the native effect pipeline so the software
+/// framebuffer and the GPU display-list commands both refract the backdrop and
+/// carry a specular edge, matching the DOM emitter. Explicit `effects` glass or
+/// liquid entries win, and a node painting its own text keeps its flat fill so
+/// the backdrop pass cannot overwrite those glyphs (child text is safe: it is
+/// drawn later in pre-order).
+fn glass_lamina(n: &Node, pal: &Palette, own_text: bool, out: &mut Vec<VisualEffect>) {
+    if !n.props.glass || own_text {
+        return;
+    }
+    let declared = out
+        .iter()
+        .any(|e| matches!(e.kind, VisualEffectKind::Glass | VisualEffectKind::Liquid));
+    if declared {
+        return;
+    }
+    out.push(VisualEffect {
+        kind: VisualEffectKind::Glass,
+        radius: 2,
+        dx: 0,
+        dy: 0,
+        alpha: EFFECT_UNIT * 42 / 100,
+        color: Some(pal.surface),
+    });
+    out.push(VisualEffect {
+        kind: VisualEffectKind::Liquid,
+        radius: 0,
+        dx: 0,
+        dy: 0,
+        alpha: EFFECT_UNIT * 16 / 100,
+        color: Some(Rgba::rgb(0xff, 0xff, 0xff)),
+    });
+}
+
 impl Default for Effects {
     fn default() -> Self {
         Effects {
@@ -233,6 +268,9 @@ pub struct LaidOut {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
     pub bg: Rgba,
+    /// Page backdrop actually painted on the canvas. Equals `bg` unless a
+    /// `stage` token declares a tinted backdrop for glass refraction.
+    pub stage: Rgba,
     pub fg: Rgba,
     pub surface: Rgba,
     pub border: Rgba,
@@ -262,6 +300,7 @@ impl Palette {
         // Tokens override the mode defaults; missing tokens fall back to them.
         Palette {
             bg,
+            stage: theme.tokens.stage.unwrap_or(bg),
             fg: theme.tokens.on_surface.unwrap_or(fg),
             surface: theme.tokens.surface.unwrap_or(surface),
             border,
@@ -930,6 +969,9 @@ fn place(
         None
     };
 
+    let mut visual_effects = n.props.effects.clone();
+    glass_lamina(n, pal, text.is_some(), &mut visual_effects);
+
     out.push(LaidOut {
         id: n.id,
         kind: n.kind,
@@ -945,7 +987,7 @@ fn place(
         text_scale: scale,
         text_align,
         effects,
-        visual_effects: n.props.effects.clone(),
+        visual_effects,
         particles: n.props.particles,
         control: control_of(n, state),
         clip,

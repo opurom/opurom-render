@@ -261,7 +261,7 @@ impl Renderer {
             elapsed_ms,
             &mut self.anim.borrow_mut(),
         );
-        let mut canvas = raster::Canvas::new(self.width, self.height, pal.bg);
+        let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         for n in &laid {
             raster::draw(&mut canvas, n);
         }
@@ -287,7 +287,7 @@ impl Renderer {
             elapsed_ms,
             &mut self.anim.borrow_mut(),
         );
-        let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.bg);
+        let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.stage);
         for n in &laid {
             let frame = crate::effects::EffectFrame::new(self.width, self.height, n);
             if frame.has_local {
@@ -306,7 +306,7 @@ impl Renderer {
         DisplayList {
             width: self.width,
             height: self.height,
-            background: pal.bg,
+            background: pal.stage,
             commands: canvas.into_commands(),
         }
     }
@@ -354,7 +354,7 @@ impl Renderer {
     /// Shared full raster: lay out and draw every node over a fresh canvas.
     fn raster_laid(&self, laid: &[LaidOut], theme: &Theme) -> Vec<u8> {
         let pal = Palette::from_theme(theme);
-        let mut canvas = raster::Canvas::new(self.width, self.height, pal.bg);
+        let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         for n in laid {
             raster::draw(&mut canvas, n);
         }
@@ -408,7 +408,7 @@ impl Renderer {
                 let mut canvas =
                     raster::Canvas::from_pixels(self.width, self.height, prev.to_vec());
                 canvas.clip = Some(region);
-                canvas.fill_rect(region, pal.bg);
+                canvas.fill_rect(region, pal.stage);
                 let mut redrawn = 0usize;
                 for n in &laid {
                     if rect_intersects(n.rect, region) {
