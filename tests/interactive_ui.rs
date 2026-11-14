@@ -687,14 +687,18 @@ fn the_hand_written_when_fixture_renders_two_different_digests() {
 #[test]
 fn the_cli_renders_the_when_fixture_and_honours_the_tick_clock() {
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let ir_path = dir.join("when.opuir.json");
+    // Concurrent cargo test processes share CARGO_TARGET_TMPDIR; a process-unique
+    // prefix keeps both the IR and the PPM private to this run.
+    let tag = format!("when-{}-", std::process::id());
+    let ir_path = dir.join(format!("{tag}fixture.opuir.json"));
+    let ppm_path = dir.join(format!("{tag}frame.ppm"));
     std::fs::copy("tests/fixtures/when.opuir.json", &ir_path).unwrap();
     let exe = env!("CARGO_BIN_EXE_opurom-render");
     let run = |args: &[&str]| {
         let out = Command::new(exe)
             .arg(&ir_path)
             .args(["320", "240"])
-            .arg(dir.join("when.ppm"))
+            .arg(&ppm_path)
             .args(args)
             .output()
             .unwrap();
@@ -716,13 +720,14 @@ fn the_cli_renders_the_when_fixture_and_honours_the_tick_clock() {
 #[test]
 fn the_cli_rejects_an_unknown_argument() {
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let ir_path = dir.join("when2.opuir.json");
+    let tag = format!("when2-{}-", std::process::id());
+    let ir_path = dir.join(format!("{tag}fixture.opuir.json"));
     std::fs::copy("tests/fixtures/when.opuir.json", &ir_path).unwrap();
     let exe = env!("CARGO_BIN_EXE_opurom-render");
     let out = Command::new(exe)
         .arg(&ir_path)
         .args(["320", "240"])
-        .arg(dir.join("when2.ppm"))
+        .arg(dir.join(format!("{tag}frame.ppm")))
         .arg("--nope")
         .output()
         .unwrap();
