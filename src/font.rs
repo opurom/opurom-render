@@ -636,6 +636,12 @@ pub fn text_width(text: &str, scale: i64, metrics: FontMetrics) -> i64 {
     }
 }
 
+/// Public width of a text run in output pixels under the selected metrics.
+/// Thin alias over [`text_width`] so callers can assert widths without rendering.
+pub fn measure(text: &str, scale: i64, metrics: FontMetrics) -> i64 {
+    text_width(text, scale, metrics)
+}
+
 /// Greedy word wrap measured in output pixels under proportional metrics.
 /// Each line's `text_width(.., Proportional)` fits `max_w`; overlong words are
 /// hard-broken at glyph boundaries. Fixed mode keeps its char-count wrap, so

@@ -57,7 +57,7 @@ pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
 pub use effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
-pub use font::FontMetrics;
+pub use font::{measure, FontMetrics};
 pub use gestures::{
     hit, Gesture, GestureEngine, GestureKind, DOUBLE_TAP_INTERVAL_MS, DOUBLE_TAP_MIN_MS,
     DOUBLE_TAP_SLOP, DRAG_THRESHOLD, LONG_PRESS_MS, TAP_TIMEOUT_MS,
