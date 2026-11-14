@@ -6,7 +6,7 @@ use opurom_render::{
 };
 
 /// Golden IR 0.1.0 from opurom-examples/golden/counter.opuir.json (embedded so this crate
-/// stays independent of the framework rules repository).
+/// stays independent of the framework implementation).
 const COUNTER_IR: &str = r##"{
   "ir": "0.1.0",
   "app": "Counter",

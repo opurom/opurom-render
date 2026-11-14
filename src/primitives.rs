@@ -1,6 +1,6 @@
 //! Extended primitive library: 68 additional DISTINCT drawn widget kinds.
 //!
-//! Each [`contract`] in [`CONTRACTS`] names one primitive kind, its catalog family, a
+//! Each [`Contract`] in [`CONTRACTS`] names one primitive kind, its catalog family, a
 //! documented prop schema, an a11y default role and one of 25 distinct
 //! geometric motifs. [`draw`] renders the motif plus a unique identity band
 //! derived from the kind's code. Codes are unique, so no two kinds coincide.
@@ -57,7 +57,7 @@ pub enum Motif {
 
 /// Static description of one extended kind.
 #[derive(Clone, Copy, Debug)]
-pub struct contract {
+pub struct Contract {
     pub name: &'static str,
     pub family: &'static str,
     pub role: Role,

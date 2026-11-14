@@ -464,11 +464,25 @@ fn fallback_text(n: &Node, state: &StateView) -> String {
     String::new()
 }
 
+/// Glyph drawn per bound value character when an `Input` is `secure`.
+const SECURE_MASK: char = '*';
+
 pub(crate) fn node_text(n: &Node, state: &StateView) -> String {
     match n.kind {
         Kind::Text => state.interpolate(n.props.value.as_deref().unwrap_or("")),
         Kind::Button => state.interpolate(n.props.label.as_deref().unwrap_or("")),
         Kind::Input => match n.props.bind.as_deref().and_then(|b| state.get(b)) {
+            // Secure: mask one glyph per bound character; an empty value has no
+            // masked characters, so the placeholder shows. The raw value never
+            // reaches the display string.
+            Some(v) if n.props.secure => {
+                let raw = v.as_text();
+                if raw.is_empty() {
+                    state.interpolate(n.props.placeholder.as_deref().unwrap_or(""))
+                } else {
+                    SECURE_MASK.to_string().repeat(raw.chars().count())
+                }
+            }
             Some(v) => v.as_text(),
             None => state.interpolate(n.props.placeholder.as_deref().unwrap_or("")),
         },

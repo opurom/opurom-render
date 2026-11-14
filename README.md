@@ -323,7 +323,7 @@ records a `data-hidden` marker and the accessibility tree reports `hidden: true`
 for the node and its descendants. The field is opt-in: an IR document without it
 renders byte-identically, and the three golden digests are unchanged.
 
-## Five-tier adaptive layout and fluid grid (TRANSPORT_AND_the language rules framework rules)
+## Five-tier adaptive layout and fluid grid (framework rules)
 
 The viewport width selects one of five tiers, on logical pixels:
 
@@ -369,7 +369,7 @@ viewport still yields zero dirty rects, and the list stays bounded at 64 rects.
 Emitted rects are ordered by `(y, x)`, so identical state changes produce identical
 dirty lists.
 
-## Accessibility (the framework rules framework rules)
+## Accessibility (framework rules)
 
 All accessibility keys are **additive and opt-in**; a 0.1.0 IR without them renders
 byte-identically to the core release (the three golden digests below are unchanged).
@@ -410,7 +410,7 @@ screen-reader integration, NO ARIA/AT-SPI bridge, NO focus order or hit
 testing, NO real font shaping, NO DPI scaling (`fontScale` scales logical
 pixels of the built-in bitmap font) and NO GPU backend.
 
-## SVG 1.1 vector backend (the toolchain implementation framework rules)
+## SVG 1.1 vector backend (framework rules)
 
 `opurom-render <ir> <w> <h> <out.ppm> --svg <out.svg>` (or the `svg`/`svg_at`
 library functions) writes a **byte-deterministic SVG 1.1 snapshot of the same
@@ -451,7 +451,7 @@ and role without embedding the PNG, while the RGBA raster draws the decoded
 resource. It is a vector *snapshot* of the layout, not a replacement for the
 RGBA conformance oracle.
 
-## Eight new distinct primitives (the toolchain implementation framework rules)
+## Eight new distinct primitives (framework rules)
 
 Eight **distinct, drawn** primitives (not aliases and not the Container/Text
 fallback) bring the total to **32 known node kinds**. Each has a documented prop
@@ -477,7 +477,7 @@ an unknown kind still degrades to the documented fallback. The 108-name componen
 names mapping onto these primitives (that catalog lives in the compiler repo,
 outside this crate).
 
-## Deterministic animation (the GPU implementation framework rules)
+## Deterministic animation (framework rules)
 
 All animation is additive and opt-in. The fixed-point unit is `ONE = 1024`;
 there are no floats, no `rand` crate, no wall clock and no unseeded randomness.
@@ -496,7 +496,7 @@ The caller supplies every tick, gesture delta, particle seed and frame budget.
   reproducible frame digest.
 - **Gesture-linked animation:** `GestureAnim::drag(delta_x, delta_y)` maps
   cumulative integer L1 displacement to integer progress `0..=1024`; one input
-  unit is one progress unit and the value saturates. `compose(from, to)` refines
+  unit is one progress unit and the value saturates. `compose(from, to)` clears
   the same integer slide at that progress. The same gesture sequence produces
   the same progress and digest sequence. This is an integer input API, not an
   OS gesture recognizer or real gesture hardware.
@@ -745,7 +745,7 @@ software renderer, not a self-comparison.
 The GPU path is compute-kernel only: glyphs remain CPU-decomposed rects. The CPU
 renderer remains the reference oracle.
 
-## 68 additional distinct primitives (the component catalog rules framework rules)
+## 68 additional distinct primitives (framework rules)
 
 The library extends from 116 named components / 32 primitives to **260 named
 components mapped onto 100 DISTINCT primitive kinds**: the 32 core kinds plus 68

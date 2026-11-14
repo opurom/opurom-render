@@ -51,7 +51,7 @@ impl Curve {
 pub const ONE: i64 = 1024;
 
 /// Default implicit-animation duration when the `duration` prop is absent,
-/// in milliseconds. a framework's `AnimatedContainer` defaults to 300 ms.
+/// in milliseconds.
 pub const ANIMATE_DEFAULT_MS: i64 = 300;
 
 /// Maximum accepted `duration`/`delay` prop, in milliseconds.

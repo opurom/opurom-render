@@ -1,479 +1,479 @@
 // Generated primitive table. Edit the generator, not this file.
 // One entry per additional primitive kind; order fixes the kind code.
-use super::{Motif, contract, COUNT};
+use super::{Motif, Contract, COUNT};
 use crate::ir::Role;
 
-pub const CONTRACTS: [contract; COUNT] = [
-    contract {
+pub const CONTRACTS: [Contract; COUNT] = [
+    Contract {
         name: "Gauge",
         family: "data",
         role: Role::Slider,
         props: "Gauge accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Gauge,
     },
-    contract {
+    Contract {
         name: "Sparkline",
         family: "data",
         role: Role::Image,
         props: "Sparkline accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::LineChart,
     },
-    contract {
+    Contract {
         name: "AreaChart",
         family: "data",
         role: Role::Image,
         props: "AreaChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::AreaChart,
     },
-    contract {
+    Contract {
         name: "PieChart",
         family: "data",
         role: Role::Image,
         props: "PieChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Pie,
     },
-    contract {
+    Contract {
         name: "DonutChart",
         family: "data",
         role: Role::Image,
         props: "DonutChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Donut,
     },
-    contract {
+    Contract {
         name: "ScatterPlot",
         family: "data",
         role: Role::Image,
         props: "ScatterPlot accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Scatter,
     },
-    contract {
+    Contract {
         name: "StackedBar",
         family: "data",
         role: Role::Image,
         props: "StackedBar accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Stacked,
     },
-    contract {
+    Contract {
         name: "Histogram",
         family: "data",
         role: Role::Image,
         props: "Histogram accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Bars,
     },
-    contract {
+    Contract {
         name: "Heatmap",
         family: "data",
         role: Role::Image,
         props: "Heatmap accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::GridCells,
     },
-    contract {
+    Contract {
         name: "Treemap",
         family: "data",
         role: Role::Image,
         props: "Treemap accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Blocks,
     },
-    contract {
+    Contract {
         name: "Waterfall",
         family: "data",
         role: Role::Image,
         props: "Waterfall accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Steps,
     },
-    contract {
+    Contract {
         name: "BulletChart",
         family: "data",
         role: Role::Image,
         props: "BulletChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Ruler,
     },
-    contract {
+    Contract {
         name: "FunnelChart",
         family: "data",
         role: Role::Image,
         props: "FunnelChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Chevrons,
     },
-    contract {
+    Contract {
         name: "Waveform",
         family: "data",
         role: Role::Image,
         props: "Waveform accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Wave,
     },
-    contract {
+    Contract {
         name: "Equalizer",
         family: "data",
         role: Role::Image,
         props: "Equalizer accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Spectrum,
     },
-    contract {
+    Contract {
         name: "Candlestick",
         family: "data",
         role: Role::Image,
         props: "Candlestick accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Ladder,
     },
-    contract {
+    Contract {
         name: "BubbleChart",
         family: "data",
         role: Role::Image,
         props: "BubbleChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Rings,
     },
-    contract {
+    Contract {
         name: "PolarChart",
         family: "data",
         role: Role::Image,
         props: "PolarChart accepts value:int 0..100 (magnitude); values:int[] (series); segments:int; labels:string[]; min:int; max:int; color:#RRGGBB",
         motif: Motif::Spokes,
     },
-    contract {
+    Contract {
         name: "Breadcrumbs",
         family: "navigation",
         role: Role::Button,
         props: "Breadcrumbs accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::Chevrons,
     },
-    contract {
+    Contract {
         name: "Pagination",
         family: "navigation",
         role: Role::Button,
         props: "Pagination accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::DotMatrix,
     },
-    contract {
+    Contract {
         name: "Stepper",
         family: "navigation",
         role: Role::Button,
         props: "Stepper accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::Steps,
     },
-    contract {
+    Contract {
         name: "Sidebar",
         family: "navigation",
         role: Role::None,
         props: "Sidebar accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::Brackets,
     },
-    contract {
+    Contract {
         name: "TabStrip",
         family: "navigation",
         role: Role::Button,
         props: "TabStrip accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::HBars,
     },
-    contract {
+    Contract {
         name: "NavRail",
         family: "navigation",
         role: Role::Button,
         props: "NavRail accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::Ladder,
     },
-    contract {
+    Contract {
         name: "AnchorBar",
         family: "navigation",
         role: Role::Button,
         props: "AnchorBar accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::Ruler,
     },
-    contract {
+    Contract {
         name: "ProgressSteps",
         family: "navigation",
         role: Role::None,
         props: "ProgressSteps accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::Chevrons,
     },
-    contract {
+    Contract {
         name: "MenuBar",
         family: "navigation",
         role: Role::Button,
         props: "MenuBar accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::HBars,
     },
-    contract {
+    Contract {
         name: "TocTree",
         family: "navigation",
         role: Role::None,
         props: "TocTree accepts value:int (active index); labels:string[] (items); segments:int; size:int; color:#RRGGBB",
         motif: Motif::Blocks,
     },
-    contract {
+    Contract {
         name: "Rating",
         family: "form",
         role: Role::Slider,
         props: "Rating accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::DotMatrix,
     },
-    contract {
+    Contract {
         name: "Dial",
         family: "form",
         role: Role::Slider,
         props: "Dial accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Gauge,
     },
-    contract {
+    Contract {
         name: "Knob",
         family: "form",
         role: Role::Slider,
         props: "Knob accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Donut,
     },
-    contract {
+    Contract {
         name: "ColorWell",
         family: "form",
         role: Role::Button,
         props: "ColorWell accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Checker,
     },
-    contract {
+    Contract {
         name: "DateField",
         family: "form",
         role: Role::Text,
         props: "DateField accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::GridCells,
     },
-    contract {
+    Contract {
         name: "TimeField",
         family: "form",
         role: Role::Text,
         props: "TimeField accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Rings,
     },
-    contract {
+    Contract {
         name: "SelectBox",
         family: "form",
         role: Role::Button,
         props: "SelectBox accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Brackets,
     },
-    contract {
+    Contract {
         name: "ComboBox",
         family: "form",
         role: Role::Button,
         props: "ComboBox accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Chevrons,
     },
-    contract {
+    Contract {
         name: "SearchBar",
         family: "form",
         role: Role::Text,
         props: "SearchBar accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Crosshair,
     },
-    contract {
+    Contract {
         name: "PinInput",
         family: "form",
         role: Role::Text,
         props: "PinInput accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Checker,
     },
-    contract {
+    Contract {
         name: "SegmentedInput",
         family: "form",
         role: Role::Checkbox,
         props: "SegmentedInput accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Stacked,
     },
-    contract {
+    Contract {
         name: "UploadZone",
         family: "form",
         role: Role::Button,
         props: "UploadZone accepts value:int (current value); min:int; max:int; labels:string[]; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Brackets,
     },
-    contract {
+    Contract {
         name: "WaveformPlayer",
         family: "media",
         role: Role::Button,
         props: "WaveformPlayer accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int",
         motif: Motif::Wave,
     },
-    contract {
+    Contract {
         name: "Spectrogram",
         family: "media",
         role: Role::Image,
         props: "Spectrogram accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int",
         motif: Motif::Heat,
     },
-    contract {
+    Contract {
         name: "Filmstrip",
         family: "media",
         role: Role::Image,
         props: "Filmstrip accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int",
         motif: Motif::HBars,
     },
-    contract {
+    Contract {
         name: "ThumbnailGrid",
         family: "media",
         role: Role::Image,
         props: "ThumbnailGrid accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int",
         motif: Motif::GridCells,
     },
-    contract {
+    Contract {
         name: "QrGlyph",
         family: "media",
         role: Role::Image,
         props: "QrGlyph accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int",
         motif: Motif::DotMatrix,
     },
-    contract {
+    Contract {
         name: "BarcodeGlyph",
         family: "media",
         role: Role::Image,
         props: "BarcodeGlyph accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int",
         motif: Motif::Ladder,
     },
-    contract {
+    Contract {
         name: "ColorPalette",
         family: "media",
         role: Role::Image,
         props: "ColorPalette accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int",
         motif: Motif::Stacked,
     },
-    contract {
+    Contract {
         name: "ZoomLens",
         family: "media",
         role: Role::Image,
         props: "ZoomLens accepts value:int 0..100 (playhead); values:int[] (samples); src:string (placeholder only); width:int; height:int",
         motif: Motif::Rings,
     },
-    contract {
+    Contract {
         name: "LevelMeter",
         family: "feedback",
         role: Role::Slider,
         props: "LevelMeter accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Spectrum,
     },
-    contract {
+    Contract {
         name: "SignalBars",
         family: "feedback",
         role: Role::Image,
         props: "SignalBars accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Bars,
     },
-    contract {
+    Contract {
         name: "BatteryMeter",
         family: "feedback",
         role: Role::Image,
         props: "BatteryMeter accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Stacked,
     },
-    contract {
+    Contract {
         name: "Thermometer",
         family: "feedback",
         role: Role::Slider,
         props: "Thermometer accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Pyramid,
     },
-    contract {
+    Contract {
         name: "Speedometer",
         family: "feedback",
         role: Role::Slider,
         props: "Speedometer accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Gauge,
     },
-    contract {
+    Contract {
         name: "Compass",
         family: "feedback",
         role: Role::Image,
         props: "Compass accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Spokes,
     },
-    contract {
+    Contract {
         name: "ProgressRing",
         family: "feedback",
         role: Role::Image,
         props: "ProgressRing accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Donut,
     },
-    contract {
+    Contract {
         name: "ActivityRing",
         family: "feedback",
         role: Role::Image,
         props: "ActivityRing accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Rings,
     },
-    contract {
+    Contract {
         name: "KpiTile",
         family: "feedback",
         role: Role::Text,
         props: "KpiTile accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Blocks,
     },
-    contract {
+    Contract {
         name: "StatCard",
         family: "feedback",
         role: Role::Text,
         props: "StatCard accepts value:int 0..100 (level); min:int; max:int; labels:string[]; segments:int; color:#RRGGBB",
         motif: Motif::Ruler,
     },
-    contract {
+    Contract {
         name: "CornerFrame",
         family: "layout",
         role: Role::None,
         props: "CornerFrame accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Brackets,
     },
-    contract {
+    Contract {
         name: "CrosshairMark",
         family: "layout",
         role: Role::None,
         props: "CrosshairMark accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Crosshair,
     },
-    contract {
+    Contract {
         name: "LadderDivider",
         family: "layout",
         role: Role::None,
         props: "LadderDivider accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Ladder,
     },
-    contract {
+    Contract {
         name: "ChevronDivider",
         family: "layout",
         role: Role::None,
         props: "ChevronDivider accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Chevrons,
     },
-    contract {
+    Contract {
         name: "GridOverlay",
         family: "layout",
         role: Role::None,
         props: "GridOverlay accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::GridCells,
     },
-    contract {
+    Contract {
         name: "CheckerBackdrop",
         family: "layout",
         role: Role::None,
         props: "CheckerBackdrop accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Checker,
     },
-    contract {
+    Contract {
         name: "DotPattern",
         family: "layout",
         role: Role::None,
         props: "DotPattern accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Scatter,
     },
-    contract {
+    Contract {
         name: "RingBadge",
         family: "layout",
         role: Role::None,
         props: "RingBadge accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Rings,
     },
-    contract {
+    Contract {
         name: "StairDivider",
         family: "layout",
         role: Role::None,
         props: "StairDivider accepts value:int (phase); columns:int; rows:int; segments:int; size:int; color:#RRGGBB",
         motif: Motif::Steps,
     },
-    contract {
+    Contract {
         name: "BracketPanel",
         family: "layout",
         role: Role::None,

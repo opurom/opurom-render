@@ -1,6 +1,6 @@
 //! Deterministic, headless gesture recognition.
 //!
-//! The engine is a pure integer-only state machine modelled on a framework's
+//! The engine is a pure integer-only state machine;
 //! `TapGestureRecognizer` (tap), `DoubleTapGestureRecognizer` (double tap),
 //! `MultiTapGestureRecognizer` long tap and `DragGestureRecognizer` (drag).
 //! Every timing and threshold is an integer millisecond or pixel value and no

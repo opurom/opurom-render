@@ -643,7 +643,7 @@ fn relative_paths_resolve_against_the_process_cwd() {
         cwd.join("assets/logo.png")
     );
     assert_eq!(image::resolve("a/../logo.png"), cwd.join("logo.png"));
-    let absolute = Path::new("the temporary checkout-logo.png");
+    let absolute = Path::new("/opurom/assets/logo.png");
     assert_eq!(image::resolve(absolute.to_str().unwrap()), absolute);
 }
 

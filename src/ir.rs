@@ -400,6 +400,8 @@ pub struct Props {
     pub name: Option<String>,
     pub placeholder: Option<String>,
     pub bind: Option<String>,
+    /// Mask the bound `Input` value on screen (`secure: true`); kernel keeps it.
+    pub secure: bool,
     /// PNG resource path for an `Image` node (relative paths use the process CWD).
     pub src: Option<String>,
     /// Integer aspect-ratio policy for an `Image` node (default `contain`).
@@ -1235,6 +1237,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         name: opt_string(o, "name", what)?,
         placeholder: opt_string(o, "placeholder", what)?,
         bind: opt_string(o, "bind", what)?,
+        secure: opt_bool(o, "secure", what)?,
         src: opt_string(o, "src", what)?,
         fit,
         size: opt_integer(o, "size", what)?,
