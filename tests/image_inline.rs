@@ -4,17 +4,14 @@
 
 use opurom_render::image::{self, ImageFit};
 use opurom_render::{parse_ir, Renderer, StateView};
-use std::fs;
 use std::sync::Mutex;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
 fn png_data_uri() -> String {
-    let bytes = fs::read(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../opurom-examples/assets/photo1.png"
-    ))
-    .expect("scene asset must exist");
+    // A checked-in fixture keeps the decoder test valid in a standalone
+    // checkout where the sibling example repository is absent.
+    let bytes: &[u8] = include_bytes!("fixtures/inline.png");
     // Tiny inline base64 encoder keeps this test dependency-free.
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::from("data:image/png;base64,");

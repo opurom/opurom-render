@@ -1295,7 +1295,15 @@ fn place_grid(
     } else {
         None
     };
-    let cols = fluid.map_or_else(|| n.props.columns.unwrap_or(2).max(1), |g| g.columns);
+    let authored = fluid.map_or_else(|| n.props.columns.unwrap_or(2).max(1), |g| g.columns);
+    // The compact tier stacks every Grid into one column, mirroring the DOM
+    // emitter's `@media (max-width: 599px) .grid { 1fr }`. An authored desktop
+    // column count would otherwise squeeze each cell below its text width.
+    let cols = if bp == Breakpoint::Compact {
+        1
+    } else {
+        authored
+    };
     let gutter = fluid.map_or(0, |g| g.gutter);
     let content = match fluid {
         Some(g) => inset(base, g.margin),
