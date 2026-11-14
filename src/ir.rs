@@ -1378,11 +1378,13 @@ pub fn parse_state_json(ir: &Ir, text: &str) -> Result<StateView, IrError> {
     let o = object(&v, "state")?;
     let mut view = StateView::from_ir(ir);
     for (name, value) in o {
-        let decl = ir
-            .state
-            .iter()
-            .find(|d| &d.name == name)
-            .ok_or_else(|| bad(format!("state {name:?} is not declared in IR")))?;
+        // A host may carry overrides for states the IR no longer declares
+        // (host and UI evolve on different cadences). Fault isolation keeps the
+        // frame rendering from the IR defaults instead of failing the call; a
+        // name the IR does declare with a mismatched value type still errors.
+        let Some(decl) = ir.state.iter().find(|d| &d.name == name) else {
+            continue;
+        };
         let parsed = state_value(value, Some(decl.typ), &format!("state.{name}"))?;
         view.set(name.clone(), parsed);
     }
@@ -1466,13 +1468,22 @@ mod tests {
     }
 
     #[test]
+    fn state_json_ignores_names_the_ir_no_longer_declares() {
+        // A host override for a retired state name keeps the frame rendering
+        // from the IR defaults instead of failing the call (fault isolation).
+        let ir = parse_ir(SAMPLE_IR).unwrap();
+        let view = parse_state_json(&ir, r#"{"missing":1,"count":7}"#).unwrap();
+        assert_eq!(view.get("count"), Some(&StateValue::Int(7)));
+        assert_eq!(view.get("missing"), None);
+    }
+
+    #[test]
     fn state_json_rejects_malformed_and_mismatched_values() {
         let ir = parse_ir(SAMPLE_IR).unwrap();
         for bad_json in [
             "",
             "{",
             "[]",
-            r#"{"missing":1}"#,
             r#"{"count":"seven"}"#,
             r#"{"flag":1}"#,
             r#"{"count":1.5}"#,
