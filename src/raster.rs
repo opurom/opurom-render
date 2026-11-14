@@ -52,6 +52,20 @@ impl Canvas {
         canvas
     }
 
+    /// Wrap an existing RGBA buffer so an incremental render can start from the
+    /// previous frame and only touch changed regions. The caller owns the
+    /// buffer; the canvas writes in place.
+    pub fn from_pixels(width: u32, height: u32, pixels: Vec<u8>) -> Canvas {
+        Canvas {
+            width,
+            height,
+            pixels,
+            clip: None,
+            capture: false,
+            commands: Vec::new(),
+        }
+    }
+
     pub fn into_commands(self) -> Vec<Command> {
         self.commands
     }
@@ -430,8 +444,15 @@ fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
 /// because `layout()` emits pre-order. Local effects use a frame snapshot
 /// taken before this node; whole-frame blur passes run after all nodes.
 pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
-    let prev_clip = canvas.clip;
-    canvas.clip = n.clip;
+    // An outer clip (the incremental dirty region) narrows the node's own
+    // clip. With no outer clip the intersection is the node clip, so the full
+    // reference path is unchanged.
+    let outer = canvas.clip;
+    canvas.clip = match (outer, n.clip) {
+        (Some(o), Some(p)) => Some(intersect(o, p)),
+        (Some(o), None) => Some(o),
+        (None, p) => p,
+    };
     let backdrop = if !canvas.is_capturing() && crate::effects::has_local_effects(n) {
         Some(canvas.pixels.clone())
     } else {
@@ -454,7 +475,7 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
     if let Some(backdrop) = backdrop {
         crate::effects::apply_node(canvas, n, &backdrop);
     }
-    canvas.clip = prev_clip;
+    canvas.clip = outer;
 }
 
 fn draw_box(canvas: &mut Canvas, n: &LaidOut) {

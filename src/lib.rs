@@ -157,6 +157,11 @@ pub struct Renderer {
     prev: Option<Vec<u8>>,
     /// Viewport size of the buffered frame, for the resize diff.
     prev_size: Option<(u32, u32)>,
+    /// Previous laid-out node list, used to locate the nodes that changed.
+    prev_laid: Option<Vec<LaidOut>>,
+    /// Nodes and pixels the most recent incremental render recomputed.
+    redrawn_nodes: usize,
+    redraw_pixels: u64,
 }
 
 impl Renderer {
@@ -171,6 +176,9 @@ impl Renderer {
             height,
             prev: None,
             prev_size: None,
+            prev_laid: None,
+            redrawn_nodes: 0,
+            redraw_pixels: 0,
         })
     }
 
@@ -181,6 +189,13 @@ impl Renderer {
 
     pub fn viewport(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Nodes and pixels recomputed by the most recent `render_incremental_at`
+    /// call, so callers can observe that incremental work skipped unchanged
+    /// regions. Zero after a full render.
+    pub fn redraw_stats(&self) -> (usize, u64) {
+        (self.redrawn_nodes, self.redraw_pixels)
     }
 
     /// Change the viewport size, as a window resize or a split-screen split does.
@@ -267,7 +282,8 @@ impl Renderer {
     /// Render at a given animation clock position and diff against the previous
     /// frame. The clock is the only time source; no wall clock is consulted.
     pub fn render_at(&mut self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Frame {
-        let pixels = self.pixels_at(ir, state, elapsed_ms);
+        let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
+        let pixels = self.raster_laid(&laid, &ir.theme);
         let dirty = match (self.prev.as_deref(), self.prev_size) {
             (Some(prev), Some((pw, ph))) => {
                 diff_resize_rects(prev, pw, ph, &pixels, self.width, self.height)
@@ -281,6 +297,7 @@ impl Renderer {
         };
         self.prev = Some(pixels.clone());
         self.prev_size = Some((self.width, self.height));
+        self.prev_laid = Some(laid);
         Frame {
             width: self.width,
             height: self.height,
@@ -288,6 +305,157 @@ impl Renderer {
             dirty,
         }
     }
+
+    /// Shared full raster: lay out and draw every node over a fresh canvas.
+    fn raster_laid(&self, laid: &[LaidOut], theme: &Theme) -> Vec<u8> {
+        let pal = Palette::from_theme(theme);
+        let mut canvas = raster::Canvas::new(self.width, self.height, pal.bg);
+        for n in laid {
+            raster::draw(&mut canvas, n);
+        }
+        effects::apply_frame_blurs(&mut canvas, laid);
+        canvas.pixels
+    }
+
+    /// Incremental render: reuse the previous frame as the starting buffer and
+    /// redraw only the nodes that changed. The output is byte-identical to
+    /// `render_at` for the same inputs; `redraw_stats` reports the work that
+    /// was actually recomputed.
+    ///
+    /// The redraw region is the union of the new and previous bounding boxes
+    /// of every node whose layout differs from the previous one, expanded by
+    /// the deterministic shadow margin, so moved and resized nodes clear their
+    /// old footprint too. The returned `dirty` list is the pixel diff between
+    /// the previous frame and the incremental result, which is identical to
+    /// `render_at`'s list because the pixels are identical. Frames whose layout
+    /// carries visual effects or particle fields fall back to a full raster,
+    /// because a blurred or backdrop effect reads pixels outside any one
+    /// node's box.
+    pub fn render_incremental_at(&mut self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Frame {
+        let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
+        let pal = Palette::from_theme(&ir.theme);
+        // A previous frame is reusable only when the viewport is unchanged, so
+        // a resize or the first frame still rasterizes the whole surface.
+        let reusable = self.prev.is_some()
+            && self.prev_laid.is_some()
+            && self.prev_size == Some((self.width, self.height));
+        let (pixels, redrawn_nodes, redraw_pixels) = if !reusable {
+            let pixels = self.raster_laid(&laid, &ir.theme);
+            (pixels, laid.len(), self.width as u64 * self.height as u64)
+        } else {
+            let prev = self.prev.as_ref().unwrap();
+            let prev_laid = self.prev_laid.as_ref().unwrap();
+            let region = changed_region(&laid, prev_laid, self.width, self.height);
+            if region.w <= 0 || region.h <= 0 {
+                // Nothing changed: reuse the buffer without touching it.
+                (prev.to_vec(), 0, 0)
+            } else if !layout_is_incremental_safe(&laid) {
+                let pixels = self.raster_laid(&laid, &ir.theme);
+                (pixels, laid.len(), self.width as u64 * self.height as u64)
+            } else {
+                let mut canvas =
+                    raster::Canvas::from_pixels(self.width, self.height, prev.to_vec());
+                canvas.clip = Some(region);
+                canvas.fill_rect(region, pal.bg);
+                let mut redrawn = 0usize;
+                for n in &laid {
+                    if rect_intersects(n.rect, region) {
+                        raster::draw(&mut canvas, n);
+                        redrawn += 1;
+                    }
+                }
+                let pixels = canvas.pixels;
+                let redraw_pixels = region.w as u64 * region.h as u64;
+                (pixels, redrawn, redraw_pixels)
+            }
+        };
+
+        let dirty = match (self.prev.as_deref(), self.prev_size) {
+            (Some(prev), Some((pw, ph))) => {
+                diff_resize_rects(prev, pw, ph, &pixels, self.width, self.height)
+            }
+            _ => vec![DirtyRect {
+                x: 0,
+                y: 0,
+                w: self.width,
+                h: self.height,
+            }],
+        };
+        self.redrawn_nodes = redrawn_nodes;
+        self.redraw_pixels = redraw_pixels;
+        self.prev = Some(pixels.clone());
+        self.prev_size = Some((self.width, self.height));
+        self.prev_laid = Some(laid);
+        Frame {
+            width: self.width,
+            height: self.height,
+            pixels,
+            dirty,
+        }
+    }
+}
+
+/// True when every node in the layout draws only within its own box (plus the
+/// deterministic shadow margin), so a changed region can be redrawn without
+/// reading pixels that live outside every changed node.
+fn layout_is_incremental_safe(laid: &[LaidOut]) -> bool {
+    laid.iter()
+        .all(|n| n.visual_effects.is_empty() && n.particles.is_none())
+}
+
+/// Union of the new and previous bounding boxes of every node whose layout
+/// differs, expanded by the shadow margin and clamped to the viewport. An empty
+/// rect means no node changed.
+fn changed_region(
+    laid: &[LaidOut],
+    prev_laid: &[LaidOut],
+    width: u32,
+    height: u32,
+) -> crate::layout::Rect {
+    use crate::layout::Rect;
+    const MARGIN: i64 = 16;
+    let mut x0 = i64::MAX;
+    let mut y0 = i64::MAX;
+    let mut x1 = i64::MIN;
+    let mut y1 = i64::MIN;
+    let mut grow = |r: crate::layout::Rect| {
+        x0 = x0.min(r.x - MARGIN);
+        y0 = y0.min(r.y - MARGIN);
+        x1 = x1.max(r.x + r.w + MARGIN);
+        y1 = y1.max(r.y + r.h + MARGIN);
+    };
+    for n in laid {
+        let unchanged = prev_laid.iter().any(|p| p.id == n.id && p == n);
+        if !unchanged {
+            grow(n.rect);
+        }
+    }
+    // Deleted nodes leave a hole the new layout never paints over, so their
+    // old footprint is cleared as well.
+    for p in prev_laid {
+        if !laid.iter().any(|n| n.id == p.id) {
+            grow(p.rect);
+        }
+    }
+    if x1 < x0 || y1 < y0 {
+        return Rect {
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 0,
+        };
+    }
+    Rect {
+        x: x0.max(0).min(width as i64),
+        y: y0.max(0).min(height as i64),
+        w: (x1 - x0).clamp(0, width as i64),
+        h: (y1 - y0).clamp(0, height as i64),
+    }
+}
+
+/// True when two rects overlap.
+fn rect_intersects(a: crate::layout::Rect, b: crate::layout::Rect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
 /// Diff a resized frame against the previous one.
