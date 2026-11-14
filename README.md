@@ -192,10 +192,37 @@ byte-identically to the core release — the three golden digests below are unch
 | Conditional visibility | The optional node fields `when: "<boolState>"` and `unless: "<boolState>"` hide the node **and its subtree** from layout and from the raster while the state is false for `when` or true for `unless`. A field on a non-bool or undeclared state is a parse error. |
 | Node kinds | All 24 interactive UI kinds render: the eight v0.1 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
 | Animation | `animate: spring\|ease\|inertia\|none` on a node drives an entry animation (box grows from its centre while fading in; `inertia` flings it under a constant integer braking force). The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
+| Gesture input | The optional `props.gesture` value `tap\|doubleTap\|longPress\|drag` declares an interactive node's gesture. The recognizer is a pure integer state machine in `GestureEngine`; it does not feed the raster, so a gesture prop changes no frame. |
 
 Unknown props are ignored and never fatal; an unknown kind degrades instead of
 rejecting the file. Multi-action events (`{"actions": [...]}`) and
 `valueFrom` are accepted as well, so a compiler output renders here.
+
+## Deterministic gesture input
+
+Interactive nodes accept a `gesture` prop that names the gesture they accept:
+
+```json
+{ "id": 1, "kind": "Button", "props": { "gesture": "drag" },
+  "children": [], "events": {} }
+```
+
+| Prop value | Recognition rule (integer ms / px) |
+| --- | --- |
+| `tap` | `down` then `up` on the same node within 150 ms, with the up within 18 px of the down. The first tap reports `Tap`; a second tap within 300 ms and at least 40 ms later, within 100 px, reports `DoubleTap`. |
+| `doubleTap` | Same sequence as `tap`; the caller dispatches only the `DoubleTap` result. |
+| `longPress` | A down held for 500 ms. The engine has no timer, so the threshold is checked lazily on each event while the pointer is down; it fires once and then ignores the rest of that down. |
+| `drag` | A move past 18 px from the down point reports `Drag { dx, dy }`, the delta from the down point. |
+
+The engine is `GestureEngine` in `src/gestures.rs` and is pure and deterministic:
+no wall-clock, no floats, no panics. Register nodes with `add_node(id, rect)` in
+draw order; `hit_test(x, y)` returns the top-most node whose laid-out rect
+contains the point. `hit(rect, x, y)` is the point-in-rect helper. A single
+pointer is tracked: a second `down` while a pointer is down, a `move`/`up`
+before any `down`, a `move`/`up` on another node, and events for an unregistered
+node are all ignored (`None`). Long press and drag consume the down, so their
+lift reports `None`. Because the recognizer does not draw or lay out, no golden
+digest changes.
 
 ## Inverted conditional visibility (LANGUAGE_ADDITIONS section 2)
 
@@ -756,13 +783,16 @@ equal-mass elastic velocity exchange with momentum conservation, byte-identical
 bounce-mode state and frames for identical seeds and step counts, wrap mode
 preserved as the default, quality budget tiers, CLI transition validation, CLI
 `--tick` driving the inertia curve, exact display-list serialization/clipping/draw
-order, the five software effects with determinism, pairwise distinct pixels,
+order, the deterministic gesture recognizer (tap, double-tap, long-press and
+drag recognition, drag delta math, malformed-event handling and top-most hit
+testing) with its `gesture` prop parsing, the five software effects with
+determinism, pairwise distinct pixels,
 clamping, overflow, effect-command export for all five kinds with integer
 parameters, draw order, bounds, effect-free fixture invariance, and unchanged
 golden digests; opt-in particle fields with byte-identical repeated renders,
 seed sensitivity, `count=0` and `alpha=0` no-ops, bounded parse diagnostics,
 rect clipping, effect-snapshot draw order and unchanged golden digests.
-`cargo test --offline` (185 tests) is green with fixed golden digests and zero
+`cargo test --offline` (264 tests) is green with fixed golden digests and zero
 warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 
