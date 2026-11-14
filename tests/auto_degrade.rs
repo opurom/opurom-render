@@ -61,17 +61,20 @@ fn digest(ir: &Path, ppm: &Path, args: &[&str]) -> String {
 }
 
 fn fixtures() -> (PathBuf, PathBuf) {
+    // Concurrent cargo test processes share CARGO_TARGET_TMPDIR; a
+    // process-unique prefix keeps this run's IR and PPM private.
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let ir = dir.join("auto-degrade.opuir.json");
+    let tag = format!("auto-degrade-{}-", std::process::id());
+    let ir = dir.join(format!("{tag}fixture.opuir.json"));
     fs::write(&ir, PERF_IR).unwrap();
-    (ir, dir.join("auto-degrade.ppm"))
+    (ir, dir.join(format!("{tag}frame.ppm")))
 }
 
 #[test]
 fn no_flags_keep_stdout_shape_and_the_three_canonical_goldens() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let golden = Path::new(GOLDEN_IR);
-    let ppm = dir.join("auto-degrade-golden.ppm");
+    let ppm = dir.join(format!("auto-degrade-golden-{}.ppm", std::process::id()));
     for (wh, state, expected) in [
         (["320", "240"], &[] as &[&str], "8d45f412996a99c6"),
         (["800", "600"], &[], "318beb1dd337bc4e"),
