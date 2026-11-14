@@ -1,15 +1,18 @@
 //! Dependency-free PNG decoding, integer image fitting and a bounded cache.
 //!
-//! Relative `Image.src` paths resolve against the renderer process's current
-//! working directory, not the IR file's directory. Keys are lexically
-//! normalised absolute paths; symlinks are not canonicalised. Decoding covers
-//! non-interlaced 8-bit grayscale, RGB and RGBA PNGs with filter types 0..4,
-//! CRC-32 and Adler-32 checks, and zlib stored/fixed/dynamic DEFLATE blocks.
-//! Palette, gray+alpha, other bit depths and Adam7 are rejected with an error.
-//! `fit_rect` and the raster sampler use integer arithmetic and
-//! nearest-neighbour sampling; the canvas alpha-blends the resulting RGBA.
-//! A missing, unreadable or invalid resource is cached as `None` and the raster
-//! paints a deterministic placeholder, so bad input is never a render error.
+//! An `Image.src` is either a relative/absolute file path resolved against the
+//! renderer process's current working directory, or an inlined
+//! `data:image/png;base64,<payload>` URI that carries its bytes with the IR so
+//! every target renders the same pixels without a platform asset channel.
+//! Keys are lexically normalised absolute paths (or the data URI itself);
+//! symlinks are not canonicalised. Decoding covers non-interlaced 8-bit
+//! grayscale, RGB and RGBA PNGs with filter types 0..4, CRC-32 and Adler-32
+//! checks, and zlib stored/fixed/dynamic DEFLATE blocks. Palette, gray+alpha,
+//! other bit depths and Adam7 are rejected with an error. `fit_rect` and the
+//! raster sampler use integer arithmetic and nearest-neighbour sampling; the
+//! canvas alpha-blends the resulting RGBA. A missing, unreadable or invalid
+//! resource is cached as `None` and the raster paints a deterministic
+//! placeholder, so bad input is never a render error.
 
 use crate::Rect;
 use std::collections::{HashMap, VecDeque};
@@ -115,9 +118,53 @@ pub fn cache_stats() -> CacheStats {
     }
 }
 
+/// Decode the base64 payload of an inlined PNG data URI. Standard alphabet,
+/// strict padding; malformed input yields an empty/invalid byte stream that the
+/// PNG decoder rejects, so no error path here can panic.
+fn decode_base64(input: &str) -> Option<Vec<u8>> {
+    let val = |b: u8| -> Option<u8> {
+        match b {
+            b'A'..=b'Z' => Some(b - b'A'),
+            b'a'..=b'z' => Some(b - b'a' + 26),
+            b'0'..=b'9' => Some(b - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    };
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    let mut acc = 0u32;
+    let mut bits = 0u32;
+    for &b in bytes {
+        if b == b'=' {
+            break;
+        }
+        if b.is_ascii_whitespace() {
+            continue;
+        }
+        let v = val(b)? as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+const DATA_URI_PREFIX: &str = "data:image/png;base64,";
+
 /// Load and decode a PNG on first use; cache both successes and failures.
+/// A data URI decodes its inlined bytes; a path is read from the filesystem.
 pub fn cached(path: &str) -> Option<Arc<Image>> {
-    let key = resolve(path);
+    let inlined = path.strip_prefix(DATA_URI_PREFIX);
+    let key = if inlined.is_some() {
+        PathBuf::from(path)
+    } else {
+        resolve(path)
+    };
     let mut state = cache_state();
     if let Some(entry) = state.images.get(&key) {
         let loaded = entry.clone();
@@ -125,10 +172,15 @@ pub fn cached(path: &str) -> Option<Arc<Image>> {
         return loaded;
     }
     state.misses += 1;
-    let loaded = fs::read(&key)
-        .ok()
-        .and_then(|bytes| decode(&bytes).ok())
-        .map(Arc::new);
+    let loaded = match inlined {
+        Some(payload) => decode_base64(payload)
+            .and_then(|bytes| decode(&bytes).ok())
+            .map(Arc::new),
+        None => fs::read(&key)
+            .ok()
+            .and_then(|bytes| decode(&bytes).ok())
+            .map(Arc::new),
+    };
     while state.images.len() >= CACHE_CAPACITY {
         let Some(oldest) = state.order.pop_front() else {
             break;
