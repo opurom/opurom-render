@@ -5,6 +5,7 @@
 use crate::display::Command;
 use crate::icons;
 use crate::image;
+use crate::interaction::{self, NodeState, Variant, FOCUS_RING};
 use crate::layout::Control;
 use crate::{font, Align, Kind, LaidOut, Rect, Rgba};
 
@@ -445,6 +446,10 @@ fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
 /// because `layout()` emits pre-order. Local effects use a frame snapshot
 /// taken before this node; whole-frame blur passes run after all nodes.
 pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
+    // A default-state node uses the original layout verbatim, so the frozen
+    // frames and display-list commands stay byte-identical.
+    let styled = (n.state != NodeState::Default).then(|| interaction::style_node(n));
+    let n = styled.as_ref().unwrap_or(n);
     // An outer clip (the incremental dirty region) narrows the node's own
     // clip. With no outer clip the intersection is the node clip, so the full
     // reference path is unchanged.
@@ -460,7 +465,9 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
         None
     };
     draw_shadow(canvas, n);
+    draw_focus_ring(canvas, n);
     draw_box(canvas, n);
+    draw_active_inset(canvas, n);
     if n.kind == Kind::Image {
         draw_image(canvas, n);
     }
@@ -470,6 +477,7 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
     } else {
         draw_text(canvas, n);
     }
+    draw_tone(canvas, n);
     // The particle field is part of the node's ordinary drawing, so local
     // effects see it in their silhouette snapshot.
     if let Some(particles) = n.particles {
@@ -482,34 +490,186 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
     canvas.clip = outer;
 }
 
-fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
-    let Some(fill) = n.fill else {
+/// Brand-coloured 2 px stroke confined to the two pixel bands outside the
+/// node rect. The four strips never touch the rect interior.
+fn draw_focus_ring(canvas: &mut Canvas, n: &LaidOut) {
+    if n.state != NodeState::Focus || n.rect.w <= 0 || n.rect.h <= 0 {
+        return;
+    }
+    let r = n.rect;
+    let color = with_alpha(n.accent, n.effects.opacity);
+    let width = r.w.saturating_add(FOCUS_RING * 2);
+    canvas.fill_rect(
+        Rect {
+            x: r.x.saturating_sub(FOCUS_RING),
+            y: r.y.saturating_sub(FOCUS_RING),
+            w: width,
+            h: FOCUS_RING,
+        },
+        color,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: r.x.saturating_sub(FOCUS_RING),
+            y: r.y.saturating_add(r.h),
+            w: width,
+            h: FOCUS_RING,
+        },
+        color,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: r.x.saturating_sub(FOCUS_RING),
+            y: r.y,
+            w: FOCUS_RING,
+            h: r.h,
+        },
+        color,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: r.x.saturating_add(r.w),
+            y: r.y,
+            w: FOCUS_RING,
+            h: r.h,
+        },
+        color,
+    );
+}
+
+/// Pressed appearance: a 1 px top/left inset stroke over the darkened box.
+fn draw_active_inset(canvas: &mut Canvas, n: &LaidOut) {
+    if n.state != NodeState::Active || n.rect.w <= 0 || n.rect.h <= 0 {
+        return;
+    }
+    let color = with_alpha(interaction::press_color(n.accent), n.effects.opacity);
+    canvas.fill_rect(
+        Rect {
+            x: n.rect.x,
+            y: n.rect.y,
+            w: n.rect.w,
+            h: 1,
+        },
+        color,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: n.rect.x,
+            y: n.rect.y,
+            w: 1,
+            h: n.rect.h,
+        },
+        color,
+    );
+}
+
+/// Semantic-tone dot at the upper-right inside edge of the node rect.
+fn draw_tone(canvas: &mut Canvas, n: &LaidOut) {
+    let Some(tone) = n.tone else {
         return;
     };
+    if n.rect.w < 10 || n.rect.h < 10 {
+        return;
+    }
+    let d = 4i64.min(n.rect.w.min(n.rect.h) / 2);
+    let color = with_alpha(n.state.color(tone.color()), n.effects.opacity);
+    canvas.fill_circle(
+        Rect {
+            x: n.rect.x + n.rect.w - d - 2,
+            y: n.rect.y + 2,
+            w: d,
+            h: d,
+        },
+        color,
+    );
+}
+
+/// One-pixel outline that preserves a transparent interior.
+fn draw_outline(canvas: &mut Canvas, r: Rect, width: i64, color: Rgba, round: bool) {
+    if r.w <= 0 || r.h <= 0 {
+        return;
+    }
+    if round {
+        canvas.stroke_circle(r, color, width);
+        return;
+    }
+    let w = width.max(1).min(r.w.min(r.h) / 2);
+    canvas.fill_rect(
+        Rect {
+            x: r.x,
+            y: r.y,
+            w: r.w,
+            h: w,
+        },
+        color,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: r.x,
+            y: r.y + r.h - w,
+            w: r.w,
+            h: w,
+        },
+        color,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: r.x,
+            y: r.y + w,
+            w,
+            h: r.h - w * 2,
+        },
+        color,
+    );
+    canvas.fill_rect(
+        Rect {
+            x: r.x + r.w - w,
+            y: r.y + w,
+            w,
+            h: r.h - w * 2,
+        },
+        color,
+    );
+}
+
+fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
+    if n.fill.is_none() && n.border.is_none() {
+        return;
+    }
+    let fill = n.fill.unwrap_or(Rgba {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    });
     let alpha = n.effects.opacity;
     let inner_radius = (n.radius - n.border_w).max(0);
-    // A radio button is a circle, not a rounded square.
-    let round = n.kind == Kind::Radio;
+    // A radio button and a FAB are circles, not rounded squares.
+    let round = n.kind == Kind::Radio || n.variant == Some(Variant::Fab);
     if n.border_w > 0 {
         if let Some(border) = n.border {
-            if round {
+            if fill.a == 0 {
+                draw_outline(canvas, n.rect, n.border_w, with_alpha(border, alpha), round);
+            } else if round {
                 canvas.fill_circle(n.rect, with_alpha(border, alpha));
             } else {
                 canvas.fill_rounded(n.rect, with_alpha(border, alpha), n.radius);
             }
         }
-        let inner = inset(n.rect, n.border_w);
-        match n.effects.gradient {
-            // A circle cannot hold a gradient: the stops collapse to their mean.
-            Some((a, b)) if round => {
-                let mid = crate::layout::lerp_color(a, b, UNIT / 2);
-                canvas.fill_circle(inner, with_alpha(mid, alpha))
+        if fill.a > 0 {
+            let inner = inset(n.rect, n.border_w);
+            match n.effects.gradient {
+                // A circle cannot hold a gradient: the stops collapse to their mean.
+                Some((a, b)) if round => {
+                    let mid = crate::layout::lerp_color(a, b, UNIT / 2);
+                    canvas.fill_circle(inner, with_alpha(mid, alpha))
+                }
+                Some((a, b)) => canvas.fill_rounded_gradient(inner, a, b, inner_radius, alpha),
+                None if round => canvas.fill_circle(inner, with_alpha(fill, alpha)),
+                None => canvas.fill_rounded(inner, with_alpha(fill, alpha), inner_radius),
             }
-            Some((a, b)) => canvas.fill_rounded_gradient(inner, a, b, inner_radius, alpha),
-            None if round => canvas.fill_circle(inner, with_alpha(fill, alpha)),
-            None => canvas.fill_rounded(inner, with_alpha(fill, alpha), inner_radius),
         }
-    } else {
+    } else if fill.a > 0 {
         match n.effects.gradient {
             Some((a, b)) => canvas.fill_rounded_gradient(n.rect, a, b, n.radius, alpha),
             None => canvas.fill_rounded(n.rect, with_alpha(fill, alpha), n.radius),

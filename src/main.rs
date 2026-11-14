@@ -1,10 +1,13 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
 //! `--a11y` additionally writes the deterministic accessibility tree,
 //! `--svg` a deterministic SVG 1.1 vector snapshot, and `--commands` the exact
-//! raster display list plus optional effect commands. `--transition` composes the frame at tick 0 with the
+//! raster display list plus optional effect commands. `--state` remains the
+//! state-variable override; `--interactive-state` applies one visual state to
+//! every interactive node and leaves stdout unchanged. `--transition` composes
+//! the frame at tick 0 with the
 //! settled frame; the stdout shape is unchanged. `--transition` is optional: it
 //! takes precedence over the optional top-level `transition` key of the IR, which
 //! selects the same slide/fade/scale tier when the flag is absent. The optional
@@ -14,8 +17,9 @@
 //! CWD, not the IR file's directory; missing or invalid PNGs draw a placeholder.
 
 use opurom_render::{
-    a11y_json_at, choose_quality, digest_hex, parse_ir, svg_at, Frame, IrError, Node, Renderer,
-    StateValue, StateView, Transition, TransitionKind, ValueType, SETTLED_MS,
+    a11y_json_at, choose_quality, digest_hex, is_interactive, parse_ir, svg_at, Frame, IrError,
+    Node, NodeState, Renderer, StateValue, StateView, Transition, TransitionKind, ValueType,
+    SETTLED_MS,
 };
 use std::{env, fs, process};
 
@@ -70,6 +74,17 @@ fn apply_quality(tree: &mut Node, budget_ms: i64) -> String {
         fields,
         dots
     )
+}
+
+/// Override the authored state of every interactive node for a state-matrix
+/// screenshot. An authored `disabled` prop still wins in layout.
+fn apply_interactive_state(node: &mut Node, caller: NodeState) {
+    if is_interactive(node.kind) {
+        node.props.state = NodeState::resolve(Some(caller), node.props.state, node.props.disabled);
+    }
+    for child in &mut node.children {
+        apply_interactive_state(child, caller);
+    }
 }
 
 #[cfg(test)]
@@ -133,7 +148,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental]"
                 .to_string(),
         );
     }
@@ -154,6 +169,7 @@ fn run() -> Result<(), String> {
     let mut svg_path: Option<String> = None;
     let mut commands_path: Option<String> = None;
     let mut frame_budget_ms: Option<i64> = None;
+    let mut matrix_state: Option<NodeState> = None;
     // Opt-in incremental raster: reuse the previous frame and redraw only the
     // changed region. Without it the full reference raster is used.
     let mut incremental = false;
@@ -174,6 +190,18 @@ fn run() -> Result<(), String> {
                     .find(|d| d.name == name)
                     .ok_or_else(|| format!("unknown state name {name:?}"))?;
                 state.set(name.to_string(), parse_value(decl.typ, raw)?);
+                i += 2;
+            }
+            "--interactive-state" => {
+                let contract = args.get(i + 1).ok_or_else(|| {
+                    "--interactive-state requires default, hover, active, focus or disabled"
+                        .to_string()
+                })?;
+                matrix_state = Some(NodeState::parse(contract).ok_or_else(|| {
+                    format!(
+                        "unknown interactive state {contract:?}: expected default, hover, active, focus or disabled"
+                    )
+                })?);
                 i += 2;
             }
             "--tick" => {
@@ -242,7 +270,7 @@ fn run() -> Result<(), String> {
             }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS} or --incremental"
+                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS} or --incremental"
                 ));
             }
         }
@@ -251,6 +279,9 @@ fn run() -> Result<(), String> {
     // The flag wins when present; otherwise the optional IR `transition` key
     // selects the kind.
     transition_kind = transition_kind.or(ir.transition);
+    if let Some(caller) = matrix_state {
+        apply_interactive_state(&mut ir.tree, caller);
+    }
 
     if commands_path.is_some() && transition_kind.is_some() {
         return Err(

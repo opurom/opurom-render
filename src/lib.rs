@@ -24,7 +24,9 @@
 //! for a 100-primitive library, each with a deterministic integer-only drawing, a
 //! documented prop schema and an a11y default role; none of them change an earlier
 //! frame. The media layer adds opt-in dependency-free PNG images and text line
-//! limits/alignment, also leaving earlier frames byte-identical.
+//! limits/alignment, also leaving earlier frames byte-identical. The interaction
+//! matrix adds five deterministic states, six design variants and five semantic
+//! tones; all are opt-in and leave earlier frames byte-identical.
 
 pub mod a11y;
 pub mod anim;
@@ -34,6 +36,7 @@ pub mod font;
 pub mod gestures;
 pub mod icons;
 pub mod image;
+pub mod interaction;
 pub mod ir;
 pub mod layout;
 pub mod nav;
@@ -61,6 +64,10 @@ pub use gestures::{
 pub use icons::{icon_coverage, icon_shape, IconShape, Shape, ICON_NAMES};
 pub use image::{
     CacheStats, Image, ImageFit, CACHE_CAPACITY, MAX_DECODED_BYTES, MAX_IMAGE_DIMENSION,
+};
+pub use interaction::{
+    is_interactive, NodeState, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
+    SUCCESS, WARNING,
 };
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props,

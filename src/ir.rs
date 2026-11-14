@@ -16,6 +16,7 @@ use crate::effects::{
 };
 use crate::gestures::GestureKind;
 use crate::image::ImageFit;
+use crate::interaction::{NodeState, Tone, Variant};
 use crate::particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 use crate::Rgba;
 use serde_json::{Map, Value};
@@ -385,6 +386,13 @@ pub struct Props {
     pub role: Option<Role>,
     /// Optional interactive gesture: `tap`, `doubleTap`, `longPress` or `drag`.
     pub gesture: Option<GestureKind>,
+    /// Resolved five-state matrix state; `Default` when the prop is absent.
+    pub state: NodeState,
+    /// `disabled` wins over `state` and over a caller-supplied override.
+    pub disabled: bool,
+    /// Optional design-system variant and semantic feedback tone.
+    pub variant: Option<Variant>,
+    pub tone: Option<Tone>,
     // Primitive data props.
     /// Integer series for `Chart` bar heights (also usable by other primitives).
     pub values: Vec<i64>,
@@ -1111,6 +1119,30 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         ),
         None => None,
     };
+    let state = match opt_string(o, "state", what)? {
+        Some(s) => NodeState::parse(&s).ok_or_else(|| {
+            bad(format!(
+                "{what}.state has unknown value {s:?}: expected default, hover, active, focus or disabled"
+            ))
+        })?,
+        None => NodeState::default(),
+    };
+    let variant = match opt_string(o, "variant", what)? {
+        Some(s) => Some(Variant::parse(&s).ok_or_else(|| {
+            bad(format!(
+                "{what}.variant has unknown value {s:?}: expected primary, secondary, text, danger, ghost or fab"
+            ))
+        })?),
+        None => None,
+    };
+    let tone = match opt_string(o, "tone", what)? {
+        Some(s) => Some(Tone::parse(&s).ok_or_else(|| {
+            bad(format!(
+                "{what}.tone has unknown value {s:?}: expected success, warning, error, info or neutral"
+            ))
+        })?),
+        None => None,
+    };
     let max_lines =
         opt_integer(o, "maxLines", what)?.map(|n| usize::try_from(n).unwrap_or(usize::MAX));
     Ok(Props {
@@ -1152,6 +1184,10 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         high_contrast: opt_bool(o, "highContrast", what)?,
         role,
         gesture,
+        state,
+        disabled: opt_bool(o, "disabled", what)?,
+        variant,
+        tone,
         values: values_prop(o, "values", what)?,
         rows: opt_integer(o, "rows", what)?,
         effects: effects_prop(o, what)?,

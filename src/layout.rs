@@ -4,6 +4,7 @@
 use crate::anim::{default_duration_ms, AnimSpec, AnimTable, AnimValue, Curve};
 use crate::effects::{VisualEffect, VisualEffectKind, EFFECT_UNIT};
 use crate::image::ImageFit;
+use crate::interaction::{NodeState, Tone, Variant};
 use crate::ir::Contrast;
 use crate::particles::Particles;
 use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateView, Theme, ThemeMode};
@@ -269,6 +270,10 @@ pub struct LaidOut {
     pub phase: i64,
     pub accent: Rgba,
     pub on_accent: Rgba,
+    /// Resolved interaction state, design-system variant and semantic tone.
+    pub state: NodeState,
+    pub variant: Option<Variant>,
+    pub tone: Option<Tone>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -779,15 +784,19 @@ fn place(
     // animated radius is measured against it so a settled frame is exact.
     let target_rect = rect;
 
-    let target_radius = match n.kind {
-        Kind::Icon | Kind::Avatar => target_rect.w.min(target_rect.h) / 2,
-        Kind::Badge => target_rect.h / 2,
-        _ => n.props.radius.unwrap_or(pal.radius),
+    let target_radius = if n.props.variant == Some(Variant::Fab) {
+        target_rect.w.min(target_rect.h).max(0) / 2
+    } else {
+        match n.kind {
+            Kind::Icon | Kind::Avatar => target_rect.w.min(target_rect.h) / 2,
+            Kind::Badge => target_rect.h / 2,
+            _ => n.props.radius.unwrap_or(pal.radius),
+        }
     }
     .max(0)
     .min(target_rect.w.min(target_rect.h).max(0) / 2);
 
-    let (fill, mut border, mut border_w) = match n.kind {
+    let (mut fill, mut border, mut border_w) = match n.kind {
         Kind::Column
         | Kind::Row
         | Kind::Container
@@ -857,6 +866,22 @@ fn place(
             }
         }
     };
+    // Variant defaults override kind defaults but never an explicit colour or
+    // border prop. A tone always wins on the border and adds its status dot in
+    // the central raster path.
+    if let Some(variant) = n.props.variant {
+        if n.props.color.is_none() {
+            fill = variant.fill();
+        }
+        if n.props.border.is_none() {
+            border = variant.border();
+        }
+        border_w = variant.border_w();
+    }
+    if let Some(tone) = n.props.tone {
+        border = Some(tone.color());
+        border_w = border_w.max(1);
+    }
     // Interpolate the animated props from the previous targets to the current
     // ones over the node's schedule. A node with `animate: none` keeps its
     // declared values; a settled animation is exactly the target, so the laid
@@ -915,7 +940,7 @@ fn place(
         border_w = 2;
     }
 
-    let (text, text_color, text_align) = match n.kind {
+    let (text, mut text_color, text_align) = match n.kind {
         Kind::Text => (
             Some(node_text(n, state)),
             Some(n.props.color.unwrap_or(pal.fg)),
@@ -954,6 +979,9 @@ fn place(
         ),
         _ => (None, None, Align::Start),
     };
+    if let Some(variant) = n.props.variant {
+        text_color = Some(variant.text_color());
+    }
     let text_color = if contrast {
         Some(contrast_text(fill.unwrap_or(pal.bg)))
     } else {
@@ -977,6 +1005,7 @@ fn place(
 
     let mut visual_effects = n.props.effects.clone();
     glass_lamina(n, pal, text.is_some(), &mut visual_effects);
+    let node_state = NodeState::resolve(None, n.props.state, n.props.disabled);
 
     out.push(LaidOut {
         id: n.id,
@@ -1012,6 +1041,9 @@ fn place(
         phase: elapsed_ms,
         accent: pal.accent,
         on_accent: pal.on_accent,
+        state: node_state,
+        variant: n.props.variant,
+        tone: n.props.tone,
     });
 
     if n.children.is_empty() || rect.w <= 0 || rect.h <= 0 {
