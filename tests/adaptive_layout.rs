@@ -175,21 +175,32 @@ fn the_fluid_grid_reaches_the_layout_of_a_real_grid_node() {
             "cells advance to the right"
         );
     }
-    // At 320 px the formula gives two columns, so six cells wrap into three rows.
+    // The compact tier stacks every Grid into one column, matching the DOM
+    // emitter's `@media (max-width: 599px) .grid { 1fr }`; the raw fluid
+    // formula only takes over from the expanded tier upward.
     let narrow = layout(&ir, &state, 320, 900);
     let a = node(&narrow, 1).rect;
     let b = node(&narrow, 2).rect;
     let c = node(&narrow, 3).rect;
-    assert_eq!(a.y, b.y, "the first two cells share a row");
-    assert!(c.y > a.y, "the third cell wraps to the next row");
+    assert!(b.y > a.y, "the second cell stacks below the first");
+    assert!(c.y > b.y, "the third cell stacks below the second");
+    let medium = layout(&ir, &state, 800, 900);
+    let m1 = node(&medium, 1).rect;
+    let m2 = node(&medium, 2).rect;
+    assert_eq!(m1.y, m2.y, "a medium viewport keeps cells side by side");
 }
 
 #[test]
-fn an_explicit_column_count_keeps_the_fixed_grid_at_every_tier() {
+fn an_explicit_column_count_keeps_the_fixed_grid_above_compact() {
     let ir = parse_ir(&FLUID_GRID_IR.replace("\"props\": {}", "\"props\": { \"columns\": 3 }"))
         .expect("the grid IR must parse");
     let state = StateView::from_ir(&ir);
-    for width in [320u32, 800, 1280, 1920] {
+    // The compact tier overrides the authored count to one column so a phone
+    // never clips a cell's text; this mirrors the DOM emitter's compact rule.
+    let compact = layout(&ir, &state, 320, 900);
+    assert!(node(&compact, 2).rect.y > node(&compact, 1).rect.y,
+        "compact stacks the cells");
+    for width in [800u32, 1280, 1920] {
         let laid = layout(&ir, &state, width, 900);
         // Three columns: cells 1..3 share the first row.
         assert_eq!(node(&laid, 1).rect.y, node(&laid, 2).rect.y);

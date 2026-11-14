@@ -1267,9 +1267,11 @@ fn place_children(
 
 /// Fluid grid: `columns` columns, row-major, each row as tall as its tallest cell.
 ///
-/// An explicit `columns` prop keeps the fixed grid at every tier. Without it,
-/// the expanded tiers and above size themselves from the container width with
-/// the integer fluid grid: column count, gutter and margin.
+/// The compact tier stacks every Grid into one column, matching the DOM
+/// emitter's compact rule; an authored desktop column count would otherwise
+/// clip each cell's text on a phone. From the medium tier up an explicit
+/// `columns` prop keeps the fixed grid, and without it the expanded tiers and
+/// above derive the column count, gutter and margin from the container width.
 #[allow(clippy::too_many_arguments)]
 fn place_grid(
     n: &Node,

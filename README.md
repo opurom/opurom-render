@@ -312,9 +312,12 @@ gutter  = clamp(width /  60, 8, 24)
 ```
 
 A `Grid` node without an explicit `columns` prop uses the fluid grid from the
-expanded tier upwards; the compact and medium tiers keep the fixed two-column
-grid, and an explicit `columns` always wins at every tier. The remainder pixels
-of a row go to the leftmost columns, so the cells always fill the container.
+expanded tier upwards. The compact tier stacks every Grid into a single column,
+matching the DOM emitter's compact rule, so an authored desktop column count
+cannot clip a cell's text on a phone; the medium tier keeps the fixed two-column
+grid, and from that tier up an explicit `columns` prop wins. The remainder
+pixels of a row go to the leftmost columns, so the cells always fill the
+container.
 
 ### Resize diffing
 
