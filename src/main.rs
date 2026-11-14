@@ -1,13 +1,16 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
 //! `--a11y` additionally writes the deterministic accessibility tree,
 //! `--svg` a deterministic SVG 1.1 vector snapshot, and `--commands` the exact
 //! raster display list plus optional effect commands. `--transition` composes the frame at tick 0 with the
-//! settled frame; the stdout shape is unchanged. The optional `--frame-budget`
-//! applies the caller-supplied quality policy (fewer particles, effect passes
-//! off) and prints one extra `quality=` line; without it the frame is unchanged.
+//! settled frame; the stdout shape is unchanged. `--transition` is optional: it
+//! takes precedence over the optional top-level `transition` key of the IR, which
+//! selects the same slide/fade/scale tier when the flag is absent. The optional
+//! `--frame-budget` applies the caller-supplied quality policy (fewer particles,
+//! effect passes off) and prints one extra `quality=` line; without it the
+//! frame is unchanged.
 
 use opurom_render::{
     a11y_json_at, choose_quality, digest_hex, parse_ir, svg_at, Frame, IrError, Node, Renderer,
@@ -127,7 +130,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]"
                 .to_string(),
         );
     }
@@ -229,11 +232,15 @@ fn run() -> Result<(), String> {
             }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --tick 0..={SETTLED_MS}, --transition slide|fade|scale, --a11y out.json, --svg out.svg, --commands out.json or --frame-budget 0..={MAX_FRAME_BUDGET_MS}"
+                    "unexpected argument {other:?}: expected --state name=value, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json or --frame-budget 0..={MAX_FRAME_BUDGET_MS}"
                 ));
             }
         }
     }
+
+    // The flag wins when present; otherwise the optional IR `transition` key
+    // selects the kind.
+    transition_kind = transition_kind.or(ir.transition);
 
     if commands_path.is_some() && transition_kind.is_some() {
         return Err(
