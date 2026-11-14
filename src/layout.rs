@@ -276,6 +276,9 @@ pub struct LaidOut {
     pub state: NodeState,
     pub variant: Option<Variant>,
     pub tone: Option<Tone>,
+    /// Resolved tone colour (theme token or measured constant) for the status
+    /// dot; `None` when the node has no tone.
+    pub tone_color: Option<Rgba>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -291,6 +294,14 @@ pub struct Palette {
     pub on_accent: Rgba,
     pub radius: i64,
     pub high_contrast: bool,
+    /// Theme token overrides for semantic tones; `None` keeps the measured
+    /// `interaction` constant for that tone.
+    pub success: Option<Rgba>,
+    pub warning: Option<Rgba>,
+    pub error: Option<Rgba>,
+    pub info: Option<Rgba>,
+    pub primary: Option<Rgba>,
+    pub secondary: Option<Rgba>,
 }
 
 impl Palette {
@@ -321,6 +332,24 @@ impl Palette {
             on_accent: Rgba::rgb(0xff, 0xff, 0xff),
             radius: theme.radius,
             high_contrast: theme.tokens.contrast == Contrast::High,
+            success: theme.tokens.success,
+            warning: theme.tokens.warning,
+            error: theme.tokens.error,
+            info: theme.tokens.info,
+            primary: theme.tokens.primary,
+            secondary: theme.tokens.secondary,
+        }
+    }
+
+    /// Resolved colour for a semantic tone: the theme token when present, else
+    /// the measured interaction constant.
+    pub fn tone_color(&self, tone: Tone) -> Rgba {
+        match tone {
+            Tone::Success => self.success.unwrap_or(crate::interaction::SUCCESS),
+            Tone::Warning => self.warning.unwrap_or(crate::interaction::WARNING),
+            Tone::Error => self.error.unwrap_or(crate::interaction::ERROR),
+            Tone::Info => self.info.unwrap_or(crate::interaction::INFO),
+            Tone::Neutral => crate::interaction::DEEP_INK,
         }
     }
 }
@@ -903,7 +932,7 @@ fn place(
         border_w = variant.border_w();
     }
     if let Some(tone) = n.props.tone {
-        border = Some(tone.color());
+        border = Some(pal.tone_color(tone));
         border_w = border_w.max(1);
     }
     // Interpolate the animated props from the previous targets to the current
@@ -1069,6 +1098,7 @@ fn place(
         state: node_state,
         variant: n.props.variant,
         tone: n.props.tone,
+        tone_color: n.props.tone.map(|t| pal.tone_color(t)),
     });
 
     if n.children.is_empty() || rect.w <= 0 || rect.h <= 0 {

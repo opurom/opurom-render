@@ -653,14 +653,17 @@ fn draw_active_inset(canvas: &mut Canvas, n: &LaidOut) {
 
 /// Semantic-tone dot at the upper-right inside edge of the node rect.
 fn draw_tone(canvas: &mut Canvas, n: &LaidOut) {
-    let Some(tone) = n.tone else {
+    if n.tone.is_none() {
+        return;
+    }
+    let Some(base) = n.tone_color else {
         return;
     };
     if n.rect.w < 10 || n.rect.h < 10 {
         return;
     }
     let d = 4i64.min(n.rect.w.min(n.rect.h) / 2);
-    let color = with_alpha(n.state.color(tone.color()), n.effects.opacity);
+    let color = with_alpha(n.state.color(base), n.effects.opacity);
     canvas.fill_circle(
         Rect {
             x: n.rect.x + n.rect.w - d - 2,

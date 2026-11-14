@@ -290,6 +290,7 @@ pub fn style_node(n: &LaidOut) -> LaidOut {
     out.text_color = out.text_color.map(paint);
     out.accent = paint(out.accent);
     out.on_accent = paint(out.on_accent);
+    out.tone_color = out.tone_color.map(paint);
     out.effects.gradient = out.effects.gradient.map(|(a, b)| (paint(a), paint(b)));
     out.effects.opacity = n.state.opacity(out.effects.opacity);
     for effect in &mut out.visual_effects {

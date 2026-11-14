@@ -531,6 +531,15 @@ pub struct ThemeTokens {
     /// Flat tinted page backdrop a glass lamina refracts. Distinct from
     /// `surface`, which remains the contrast reference for on-surface ink.
     pub stage: Option<Rgba>,
+    /// Semantic tone colours consumed by `Palette::tone_color`; missing tokens
+    /// fall back to the measured interaction constants.
+    pub success: Option<Rgba>,
+    pub warning: Option<Rgba>,
+    pub error: Option<Rgba>,
+    pub info: Option<Rgba>,
+    /// Optional brand tokens; reserved for callers that paint from them.
+    pub primary: Option<Rgba>,
+    pub secondary: Option<Rgba>,
     pub font: Option<String>,
     pub contrast: Contrast,
 }
@@ -1496,6 +1505,12 @@ fn tokens(v: &Value) -> Result<ThemeTokens, IrError> {
         surface: color_prop(o, "surface", "theme.tokens")?,
         on_surface: color_prop(o, "onSurface", "theme.tokens")?,
         stage: color_prop(o, "stage", "theme.tokens")?,
+        success: color_prop(o, "success", "theme.tokens")?,
+        warning: color_prop(o, "warning", "theme.tokens")?,
+        error: color_prop(o, "error", "theme.tokens")?,
+        info: color_prop(o, "info", "theme.tokens")?,
+        primary: color_prop(o, "primary", "theme.tokens")?,
+        secondary: color_prop(o, "secondary", "theme.tokens")?,
         font: opt_string(o, "font", "theme.tokens")?,
         contrast,
     })
