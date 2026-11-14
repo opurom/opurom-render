@@ -40,9 +40,9 @@ fn command_kinds(glass: bool) -> Vec<&'static str> {
             Command::EffectBackdrop => Some("effect_backdrop"),
             Command::EffectGlass { .. } => Some("effect_glass"),
             Command::EffectLiquid { .. } => Some("effect_liquid"),
-            Command::EffectShadow { .. } | Command::EffectGlow { .. } | Command::EffectBlur { .. } => {
-                Some("other_effect")
-            }
+            Command::EffectShadow { .. }
+            | Command::EffectGlow { .. }
+            | Command::EffectBlur { .. } => Some("other_effect"),
             _ => None,
         })
         .collect()
@@ -86,5 +86,9 @@ fn stage_token_is_painted_as_the_page_backdrop() {
     assert_eq!(ir.theme.mode, ThemeMode::Light);
     assert_eq!(ir.theme.tokens.stage, Some(Rgba::rgb(0xed, 0xf0, 0xf7)));
     let px = frame(false);
-    assert_eq!(&px[0..3], &[0xed, 0xf0, 0xf7], "corner pixel is the stage tint");
+    assert_eq!(
+        &px[0..3],
+        &[0xed, 0xf0, 0xf7],
+        "corner pixel is the stage tint"
+    );
 }
