@@ -361,8 +361,9 @@ fn new_kinds_resolve_their_bound_state() {
 fn grid_uses_the_column_count_and_scroll_clips_to_its_height() {
     let ir = ir_of(KINDS_IR);
     let state = StateView::from_ir(&ir);
-    let laid = layout(&ir, &state, 400, 800);
-    // Grid: three cells in two columns -> two rows.
+    // Grid: three cells in two columns -> two rows. Use a medium viewport so
+    // the compact single-column rule does not override the authored count.
+    let laid = layout(&ir, &state, 600, 800);
     let a = node(&laid, 17).rect;
     let b = node(&laid, 18).rect;
     let c = node(&laid, 19).rect;
