@@ -198,8 +198,10 @@ fn an_explicit_column_count_keeps_the_fixed_grid_above_compact() {
     // The compact tier overrides the authored count to one column so a phone
     // never clips a cell's text; this mirrors the DOM emitter's compact rule.
     let compact = layout(&ir, &state, 320, 900);
-    assert!(node(&compact, 2).rect.y > node(&compact, 1).rect.y,
-        "compact stacks the cells");
+    assert!(
+        node(&compact, 2).rect.y > node(&compact, 1).rect.y,
+        "compact stacks the cells"
+    );
     for width in [800u32, 1280, 1920] {
         let laid = layout(&ir, &state, width, 900);
         // Three columns: cells 1..3 share the first row.
