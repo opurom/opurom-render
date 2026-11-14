@@ -24,8 +24,8 @@
 
 use opurom_render::{
     a11y_json_at, apply_policy, choose_quality, digest_hex, is_interactive, parse_ir, svg_at,
-    Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, RenderConfig, Renderer, StateValue,
-    StateView, Transition, TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
+    Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, RenderConfig, Renderer,
+    StateValue, StateView, Transition, TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
 };
 use std::{env, fs, process};
 
@@ -114,8 +114,12 @@ fn apply_interactive_state(node: &mut Node, caller: NodeState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opurom_render::{perf_report, QualityTier};
 
     const IR: &str = r##"{"ir":"0.1.0","app":"Q","state":[],"tree":{"id":0,"kind":"Column","props":{"padding":4},"children":[{"id":1,"kind":"Container","props":{"width":48,"height":32,"color":"#223344","radius":4,"particles":{"count":64,"seed":7},"effects":[{"kind":"blur","radius":2}]},"children":[],"events":{}}],"events":{}},"theme":{"mode":"dark","accent":"#097FEB","radius":4}}"##;
+
+    /// Values above every tier cap, so each tier visibly clamps them.
+    const CAP_IR: &str = r##"{"ir":"0.1.0","app":"C","state":[],"tree":{"id":0,"kind":"Column","props":{"padding":4},"children":[{"id":1,"kind":"Container","props":{"width":48,"height":32,"color":"#223344","radius":4,"particles":{"count":512,"seed":7},"effects":[{"kind":"blur","radius":32}]},"children":[],"events":{}}],"events":{}},"theme":{"mode":"dark","accent":"#097FEB","radius":4}}"##;
 
     #[test]
     fn degraded_particle_count_is_deterministic_and_monotonic() {
@@ -149,6 +153,56 @@ mod tests {
         assert_eq!(ir.tree.children[0].props.effects.len(), 1);
         assert_eq!(line, "quality=budget=16ms effects=on fields=1 particles=64");
     }
+
+    /// One window of injected samples; a tier decision needs `WINDOW_FRAMES`.
+    fn window(budget: &mut FrameBudget, ms: i64) -> QualityTier {
+        let mut tier = budget.tier();
+        for _ in 0..WINDOW_FRAMES {
+            tier = budget.push(ms);
+        }
+        tier
+    }
+
+    #[test]
+    fn fast_measured_samples_keep_the_full_tier() {
+        for (rate, fast) in [(FrameRate::Hz60, 16i64), (FrameRate::Hz120, 8)] {
+            let mut budget = FrameBudget::new(rate);
+            assert_eq!(window(&mut budget, fast), QualityTier::Full);
+            let report = perf_report(&budget.window());
+            assert_eq!(report.tier, QualityTier::Full);
+            assert_eq!(report.p95_ms, fast);
+        }
+    }
+
+    #[test]
+    fn slow_measured_samples_degrade_deterministically() {
+        let mut budget = FrameBudget::new(FrameRate::Hz60);
+        assert_eq!(window(&mut budget, 30), QualityTier::Reduced);
+        assert_eq!(window(&mut budget, 30), QualityTier::Minimal);
+        // The 120 fps budget degrades on the same samples: its target is 8 ms.
+        let mut tight = FrameBudget::new(FrameRate::Hz120);
+        assert_eq!(window(&mut tight, 10), QualityTier::Reduced);
+    }
+
+    #[test]
+    fn auto_degrade_ir_applies_tier_caps_to_the_render_config() {
+        // Values above every tier cap, so each tier visibly clamps them.
+        let base = parse_ir(CAP_IR).unwrap();
+        let count = |ir: &Ir| ir.tree.children[0].props.particles.unwrap().count;
+        let radius = |ir: &Ir| ir.tree.children[0].props.effects[0].radius;
+        // Fast samples keep the Full tier, which is a no-op for valid IR.
+        let full = auto_degrade_ir(&base, FrameRate::Hz60, &[16], WINDOW_FRAMES);
+        assert_eq!(count(&full), 512);
+        assert_eq!(radius(&full), 32);
+        // One slow window degrades one tier and halves the particle field.
+        let reduced = auto_degrade_ir(&base, FrameRate::Hz60, &[30], WINDOW_FRAMES);
+        assert_eq!(count(&reduced), 256);
+        assert_eq!(radius(&reduced), 8);
+        // A second slow window saturates at Minimal.
+        let minimal = auto_degrade_ir(&base, FrameRate::Hz60, &[30], 2 * WINDOW_FRAMES);
+        assert_eq!(count(&minimal), 64);
+        assert_eq!(radius(&minimal), 2);
+    }
 }
 
 fn parse_value(typ: ValueType, raw: &str) -> Result<StateValue, String> {
@@ -172,7 +226,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
                 .to_string(),
         );
     }
@@ -199,6 +253,11 @@ fn run() -> Result<(), String> {
     let mut incremental = false;
     // Opt-in 4x geometric edge coverage; off by default for golden parity.
     let mut edge_aa = false;
+    // Opt-in measured-frame budget: inject explicit samples (the CLI has no
+    // live render loop) and apply the resulting tier caps to the render config.
+    let mut auto_rate: Option<FrameRate> = None;
+    let mut frame_ms: Vec<i64> = Vec::new();
+    let mut frame_samples: Option<usize> = None;
 
     let mut i = 4usize;
     while i < args.len() {
@@ -298,12 +357,68 @@ fn run() -> Result<(), String> {
                 edge_aa = true;
                 i += 1;
             }
+            "--auto-degrade" => {
+                let contract = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--auto-degrade requires 60 or 120".to_string())?;
+                auto_rate =
+                    Some(FrameRate::parse(contract).ok_or_else(|| {
+                        format!("invalid auto-degrade {contract:?}: expected 60 or 120")
+                    })?);
+                i += 2;
+            }
+            "--frame-ms" => {
+                let contract = args.get(i + 1).ok_or_else(|| {
+                    "--frame-ms requires comma-separated millisecond samples".to_string()
+                })?;
+                let parsed: Vec<i64> = contract
+                    .split(',')
+                    .map(|p| {
+                        p.trim().parse::<i64>().map_err(|_| {
+                            format!("invalid frame sample {p:?}: expected 0..={MAX_FRAME_MS}")
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
+                if parsed.is_empty() || parsed.iter().any(|&v| !(0..=MAX_FRAME_MS).contains(&v)) {
+                    return Err(format!(
+                        "invalid --frame-ms {contract:?}: expected comma-separated 0..={MAX_FRAME_MS} values"
+                    ));
+                }
+                frame_ms = parsed;
+                i += 2;
+            }
+            "--frame-samples" => {
+                let contract = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--frame-samples requires a positive integer".to_string())?;
+                let value: usize = contract.parse().map_err(|_| {
+                    format!("invalid frame samples {contract:?}: expected 1..={MAX_FRAME_SAMPLES}")
+                })?;
+                if !(1..=MAX_FRAME_SAMPLES).contains(&value) {
+                    return Err(format!(
+                        "invalid frame samples {contract:?}: expected 1..={MAX_FRAME_SAMPLES}"
+                    ));
+                }
+                frame_samples = Some(value);
+                i += 2;
+            }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental or --edge-aa"
+                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental, --edge-aa, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
                 ));
             }
         }
+    }
+
+    // Cross-validate the measured-frame flags so no sample is silently ignored.
+    if auto_rate.is_some() && frame_ms.is_empty() {
+        return Err(
+            "--auto-degrade requires --frame-ms a,b,c samples (the CLI has no render loop)"
+                .to_string(),
+        );
+    }
+    if auto_rate.is_none() && (!frame_ms.is_empty() || frame_samples.is_some()) {
+        return Err("--frame-ms and --frame-samples require --auto-degrade 60|120".to_string());
     }
 
     // The flag wins when present; otherwise the optional IR `transition` key
@@ -332,6 +447,12 @@ fn run() -> Result<(), String> {
     // Opt-in only: without the flag the IR tree is untouched, so the default
     // path is byte-for-byte identical to previous releases.
     let quality_line = frame_budget_ms.map(|ms| apply_quality(&mut ir.tree, ms));
+    // Opt-in measured-frame budget: apply the decided tier caps to the render
+    // config. Without it the IR is untouched, so the default path is identical.
+    if let Some(rate) = auto_rate {
+        let n = frame_samples.unwrap_or(WINDOW_FRAMES);
+        ir = auto_degrade_ir(&ir, rate, &frame_ms, n);
+    }
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
     renderer.set_edge_aa(edge_aa);
     let (mut frame, incremental_line) = if incremental {

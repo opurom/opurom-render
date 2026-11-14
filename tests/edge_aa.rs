@@ -58,7 +58,11 @@ fn default_path_is_byte_identical_with_or_without_the_setter() {
     );
     // The CLI with no flag emits no extra stdout line.
     let out = cli(&[]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(!String::from_utf8_lossy(&out.stdout).contains("edge-aa"));
 }
 
@@ -92,8 +96,16 @@ fn edge_coverage_is_deterministic_across_processes_and_library_calls() {
     assert_eq!(library(true), library(true));
     let first = cli(&["--edge-aa"]);
     let second = cli(&["--edge-aa"]);
-    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
-    assert!(second.status.success(), "{}", String::from_utf8_lossy(&second.stderr));
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
     assert_eq!(first.stdout, second.stdout);
     let (_, ppm) = fixture();
     let bytes = fs::read(&ppm).unwrap();
@@ -111,7 +123,9 @@ fn edge_coverage_is_rejected_with_display_list_capture() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("--edge-aa is unavailable with --commands"));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--edge-aa is unavailable with --commands")
+    );
 }
 
 #[test]
@@ -124,10 +138,18 @@ fn capture_mode_ignores_the_flag() {
     renderer.set_edge_aa(true);
     let list = hex_of(renderer.display_list_at(&ir, &state, 0).to_json().unwrap());
     let plain = Renderer::new(80, 80);
-    assert_eq!(list, hex_of(plain.display_list_at(&ir, &state, 0).to_json().unwrap()));
+    assert_eq!(
+        list,
+        hex_of(plain.display_list_at(&ir, &state, 0).to_json().unwrap())
+    );
 }
 
 fn hex_of(s: String) -> String {
     // Cheap deterministic fingerprint of the JSON string.
-    format!("{}:{}", s.len(), s.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)))
+    format!(
+        "{}:{}",
+        s.len(),
+        s.bytes()
+            .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64))
+    )
 }

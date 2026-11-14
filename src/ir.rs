@@ -14,6 +14,7 @@ use crate::anim::{Curve, TransitionKind};
 use crate::effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
+use crate::font::FontMetrics;
 use crate::gestures::GestureKind;
 use crate::image::ImageFit;
 use crate::interaction::{NodeState, Tone, Variant};
@@ -382,6 +383,8 @@ pub struct Props {
     // Accessibility props.
     /// Fixed-point font multiplier: 1024 == 1.0.
     pub font_scale: Option<i64>,
+    /// Per-node text metrics override; `None` inherits `theme.fontMetrics`.
+    pub font_metrics: Option<FontMetrics>,
     pub high_contrast: bool,
     pub role: Option<Role>,
     /// Optional interactive gesture: `tap`, `doubleTap`, `longPress` or `drag`.
@@ -493,6 +496,9 @@ pub struct Theme {
     /// Global text scale (fixed point, 1024 == 1.0); nodes without their own
     /// `fontScale` prop inherit this value.
     pub font_scale: Option<i64>,
+    /// Global text metrics; nodes without their own `fontMetrics` prop inherit
+    /// it. `Fixed` keeps committed frames byte-identical.
+    pub font_metrics: FontMetrics,
 }
 
 /// Flat, ordered state map consumed by text interpolation and by the CLI.
@@ -1143,6 +1149,14 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         })?),
         None => None,
     };
+    let font_metrics = match opt_string(o, "fontMetrics", what)? {
+        Some(s) => Some(FontMetrics::parse(&s).ok_or_else(|| {
+            bad(format!(
+                "{what}.fontMetrics has unknown value {s:?}: expected fixed or proportional"
+            ))
+        })?),
+        None => None,
+    };
     let max_lines =
         opt_integer(o, "maxLines", what)?.map(|n| usize::try_from(n).unwrap_or(usize::MAX));
     Ok(Props {
@@ -1181,6 +1195,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         min: opt_signed_integer(o, "min", what)?,
         max: opt_signed_integer(o, "max", what)?,
         font_scale: font_scale_prop(o, "fontScale", what)?,
+        font_metrics,
         high_contrast: opt_bool(o, "highContrast", what)?,
         role,
         gesture,
@@ -1414,12 +1429,21 @@ fn theme(v: &Value) -> Result<Theme, IrError> {
         None => ThemeTokens::default(),
     };
     let font_scale = font_scale_prop(o, "fontScale", "theme")?;
+    let font_metrics = match opt_string(o, "fontMetrics", "theme")? {
+        Some(s) => FontMetrics::parse(&s).ok_or_else(|| {
+            bad(format!(
+                "theme.fontMetrics has unknown value {s:?}: expected fixed or proportional"
+            ))
+        })?,
+        None => FontMetrics::Fixed,
+    };
     Ok(Theme {
         mode,
         accent,
         radius,
         tokens: tk,
         font_scale,
+        font_metrics,
     })
 }
 

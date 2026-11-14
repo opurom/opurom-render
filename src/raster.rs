@@ -1637,7 +1637,15 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
                 Align::End => n.rect.x + (n.rect.w - lw - pad).max(pad),
             },
         };
-        draw_glyphs(canvas, line, x, y_base + (i as i64) * line_h, scale, color, metrics);
+        draw_glyphs(
+            canvas,
+            line,
+            x,
+            y_base + (i as i64) * line_h,
+            scale,
+            color,
+            metrics,
+        );
     }
     canvas.clip = prev_clip;
 }
@@ -1836,7 +1844,8 @@ fn draw_glyphs_smooth(
                         for py in 0..band_h {
                             for px in 0..font::GLYPH_W * scale {
                                 let cov = glyph_coverage(&rows, scale, px, py);
-                                let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+                                let a =
+                                    ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
                                 if a != 0 {
                                     canvas.set(pen + px, y0 + py, Rgba { a, ..color });
                                 }

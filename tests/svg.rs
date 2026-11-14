@@ -61,10 +61,17 @@ fn svg_emits_gradient_defs_text_and_data_roles() {
     // Text keeps the built-in advance metrics but paints with the platform
     // system stack; textLength pins the width so no font shaping is needed.
     assert!(doc.contains("<text "));
-    assert!(doc.contains("font-family=\"-apple-system, BlinkMacSystemFont, &quot;PingFang SC&quot;"));
-    assert!(doc.contains("sans-serif\""), "the platform stack must end in a generic sans-serif");
-    assert!(!doc.contains("monospace") && !doc.contains("Courier") && !doc.contains("bitmap"),
-        "bitmap or monospace faces are not allowed in vector snapshots");
+    assert!(
+        doc.contains("font-family=\"-apple-system, BlinkMacSystemFont, &quot;PingFang SC&quot;")
+    );
+    assert!(
+        doc.contains("sans-serif\""),
+        "the platform stack must end in a generic sans-serif"
+    );
+    assert!(
+        !doc.contains("monospace") && !doc.contains("Courier") && !doc.contains("bitmap"),
+        "bitmap or monospace faces are not allowed in vector snapshots"
+    );
     assert!(doc.contains("textLength=\"") && doc.contains("lengthAdjust=\"spacingAndGlyphs\""));
     assert!(doc.contains("font-size=\"21\"") || doc.contains("font-size=\"14\""));
     assert!(doc.contains(">N=5</text>"));

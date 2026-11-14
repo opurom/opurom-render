@@ -3,6 +3,10 @@
 //!
 //! Each glyph is 7 rows of 5 pixels. `glyph()` returns per-row bitmasks where
 //! bit `4 - column` is set for a lit pixel; all arithmetic is integer.
+//!
+//! `FontMetrics::Fixed` (the default) uses one advance for every glyph, so
+//! committed frames stay byte-identical. `FontMetrics::Proportional` derives a
+//! compact per-glyph advance from the 12x14 coverage atlas; it is opt-in.
 
 /// Width of one glyph in font pixels.
 pub const GLYPH_W: i64 = 5;
@@ -537,6 +541,190 @@ pub fn smooth_glyph(ch: char) -> Option<[u64; SMOOTH_H as usize]> {
         .map(|(_, rows)| *rows)
 }
 
+/// Selects how a glyph's horizontal advance is measured. `Fixed` keeps the
+/// historical monospaced advance so committed frames never drift;
+/// `Proportional` derives a compact advance from each glyph's coverage bitmap.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FontMetrics {
+    #[default]
+    Fixed,
+    Proportional,
+}
+
+impl FontMetrics {
+    /// Parse the `fontMetrics` IR value.
+    pub fn parse(s: &str) -> Option<FontMetrics> {
+        match s {
+            "fixed" => Some(FontMetrics::Fixed),
+            "proportional" => Some(FontMetrics::Proportional),
+            _ => None,
+        }
+    }
+}
+
+/// Bounds on a proportional advance, in 12-wide source cells. Twelve cells
+/// span exactly the fixed advance `6 * scale`, so no glyph is ever wider than
+/// the historical monospace cell. The bearing is the trailing gap in cells.
+pub const PROP_MIN_CELLS: i64 = 3;
+pub const PROP_MAX_CELLS: i64 = SMOOTH_W;
+pub const PROP_BEARING_CELLS: i64 = 2;
+/// Advance of blank / unsupported glyphs, in source cells.
+pub const PROP_BLANK_CELLS: i64 = 6;
+
+/// Coverage window for one glyph: the first inked source column and the number
+/// of source columns mapped into its advance. Inking glyphs are clamped to
+/// `[PROP_MIN_CELLS, PROP_MAX_CELLS]`; blank / unsupported glyphs get a fixed
+/// blank window. Two source cells map to one `scale` pixel, so cropping the
+/// left bearing never distorts the ink.
+fn proportional_window(ch: char) -> (i64, i64) {
+    let rows = match smooth_glyph(ch) {
+        Some(r) => r,
+        None => return (0, PROP_BLANK_CELLS),
+    };
+    let mut first = SMOOTH_W;
+    let mut last = -1i64;
+    for r in 0..SMOOTH_H {
+        for c in 0..SMOOTH_W {
+            let cov = (rows[r as usize] >> ((SMOOTH_W - 1 - c) * 4)) & 0xF;
+            if cov != 0 {
+                first = first.min(c);
+                last = last.max(c);
+            }
+        }
+    }
+    if last < 0 {
+        return (0, PROP_BLANK_CELLS);
+    }
+    let span = last - first + 1;
+    let cells = (span + PROP_BEARING_CELLS).clamp(PROP_MIN_CELLS, PROP_MAX_CELLS);
+    (first, cells)
+}
+
+/// Pen advance for one glyph under proportional metrics, in output pixels.
+/// Integer-only: `cells * scale / 2`, with a one-pixel floor.
+pub fn proportional_advance(ch: char, scale: i64) -> i64 {
+    let (_, cells) = proportional_window(ch);
+    ((cells * scale) / 2).max(1)
+}
+
+/// Per-glyph pen advance in output pixels for the selected metrics.
+pub fn glyph_advance(ch: char, scale: i64, metrics: FontMetrics) -> i64 {
+    match metrics {
+        FontMetrics::Fixed => advance(scale),
+        FontMetrics::Proportional => proportional_advance(ch, scale),
+    }
+}
+
+/// Coverage window `(first_source_column, column_count)` used by the raster.
+/// Fixed maps the whole 12-wide cell; proportional maps only the ink plus a
+/// trailing bearing, so glyph shapes are never distorted.
+pub fn coverage_window(ch: char, metrics: FontMetrics) -> (i64, i64) {
+    match metrics {
+        FontMetrics::Fixed => (0, SMOOTH_W),
+        FontMetrics::Proportional => proportional_window(ch),
+    }
+}
+
+/// Total measured width of a text run under the selected metrics.
+pub fn text_width(text: &str, scale: i64, metrics: FontMetrics) -> i64 {
+    match metrics {
+        FontMetrics::Fixed => (text.chars().count() as i64).saturating_mul(advance(scale)),
+        FontMetrics::Proportional => text
+            .chars()
+            .map(|c| proportional_advance(c, scale))
+            .fold(0i64, i64::saturating_add),
+    }
+}
+
+/// Greedy word wrap measured in output pixels under proportional metrics.
+/// Each line's `text_width(.., Proportional)` fits `max_w`; overlong words are
+/// hard-broken at glyph boundaries. Fixed mode keeps its char-count wrap, so
+/// this is used only by the opt-in proportional path.
+pub fn wrap_width(text: &str, max_w: i64, scale: i64) -> Vec<String> {
+    let width = |s: &str| text_width(s, scale, FontMetrics::Proportional);
+    let max_w = max_w.max(1);
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        let mut rest = word.to_string();
+        while width(&rest) > max_w {
+            let mut chunk = String::new();
+            let mut taken = 0usize;
+            for ch in rest.chars() {
+                let mut probe = chunk.clone();
+                probe.push(ch);
+                if !chunk.is_empty() && width(&probe) > max_w {
+                    break;
+                }
+                chunk.push(ch);
+                taken += 1;
+            }
+            if taken == 0 {
+                break; // one glyph already exceeds the line; keep the remainder
+            }
+            if !cur.is_empty() {
+                lines.push(std::mem::take(&mut cur));
+            }
+            lines.push(chunk);
+            rest = rest.chars().skip(taken).collect();
+        }
+        if rest.is_empty() {
+            continue;
+        }
+        if cur.is_empty() {
+            cur = rest;
+        } else {
+            let mut probe = cur.clone();
+            probe.push(' ');
+            probe.push_str(&rest);
+            if width(&probe) <= max_w {
+                cur = probe;
+            } else {
+                lines.push(std::mem::take(&mut cur));
+                cur = rest;
+            }
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// `wrap_width` with an optional `maxLines` cap: the last retained line is
+/// trimmed to fit `max_w` and ends in ASCII dots.
+pub fn wrap_width_limited(
+    text: &str,
+    max_w: i64,
+    scale: i64,
+    max_lines: Option<usize>,
+) -> Vec<String> {
+    let mut lines = wrap_width(text, max_w, scale);
+    let Some(limit) = max_lines else {
+        return lines;
+    };
+    if lines.len() <= limit {
+        return lines;
+    }
+    lines.truncate(limit);
+    if let Some(last) = lines.last_mut() {
+        let dots = "...";
+        let budget = (max_w - text_width(dots, scale, FontMetrics::Proportional)).max(0);
+        let mut shortened = String::new();
+        for ch in last.trim_end().chars() {
+            let mut probe = shortened.clone();
+            probe.push(ch);
+            if text_width(&probe, scale, FontMetrics::Proportional) > budget {
+                break;
+            }
+            shortened.push(ch);
+        }
+        shortened.push_str(dots);
+        *last = shortened;
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -614,5 +802,51 @@ mod tests {
             }
         }
         assert!(smooth_glyph('\u{4e2d}').is_none());
+    }
+
+    #[test]
+    fn every_printable_ascii_has_a_smooth_glyph() {
+        for code in 0x20u8..=0x7e {
+            assert!(
+                smooth_glyph(code as char).is_some(),
+                "missing smooth glyph {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn proportional_advances_are_bounded_and_distinct() {
+        let scale = 3;
+        assert!(proportional_advance('i', scale) < proportional_advance('W', scale));
+        assert!(proportional_advance('l', scale) < proportional_advance('m', scale));
+        for code in 0x20u8..=0x7e {
+            let a = proportional_advance(code as char, scale);
+            assert!(a >= 1, "proportional advance collapsed for {code}");
+            assert!(
+                a <= advance(scale),
+                "proportional advance exceeds fixed for {code}"
+            );
+        }
+        assert_eq!(
+            text_width("Width", scale, FontMetrics::Fixed),
+            5 * advance(scale)
+        );
+        assert!(
+            text_width("Width", scale, FontMetrics::Proportional) < 5 * advance(scale),
+            "mixed-case line must be shorter than the fixed baseline"
+        );
+    }
+
+    #[test]
+    fn proportional_wrap_and_ellipsis_use_the_same_width_metric() {
+        let (scale, max_w) = (3, 60);
+        let lines = wrap_width("alpha beta gamma delta", max_w, scale);
+        assert!(lines.len() > 2, "expected several wrapped lines: {lines:?}");
+        assert!(lines
+            .iter()
+            .all(|l| text_width(l, scale, FontMetrics::Proportional) <= max_w));
+        let capped = wrap_width_limited("alpha beta gamma delta", max_w, scale, Some(2));
+        assert_eq!(capped.len(), 2, "ellipsis stays inside maxLines");
+        assert!(capped[1].ends_with("..."));
     }
 }

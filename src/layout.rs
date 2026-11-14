@@ -251,6 +251,8 @@ pub struct LaidOut {
     pub text_color: Option<Rgba>,
     pub text_scale: i64,
     pub text_align: Align,
+    /// Resolved text metrics mode; `Fixed` keeps committed frames byte-identical.
+    pub font_metrics: font::FontMetrics,
     /// Optional wrapped line limit for Text nodes; `None` keeps legacy clipping.
     pub max_lines: Option<usize>,
     /// PNG path for an Image node; absent means the historical placeholder box.
@@ -378,12 +380,31 @@ pub(crate) fn with_theme_font_scale(root: &Node, global: Option<i64>) -> Node {
     n
 }
 
+/// Resolve `theme.fontMetrics` into every node that has no explicit
+/// `fontMetrics` prop, so text measurement, glyph sizing, layout and the
+/// accessibility tree all agree on one metrics mode.
+fn fill_font_metrics(n: &mut Node, global: font::FontMetrics) {
+    if n.props.font_metrics.is_none() {
+        n.props.font_metrics = Some(global);
+    }
+    for c in &mut n.children {
+        fill_font_metrics(c, global);
+    }
+}
+
 fn font_scale(p: &Props, default_size: i64) -> i64 {
     (text_size(p, default_size).saturating_add(3) / 7).clamp(1, 8)
 }
 
-fn text_width(text: &str, scale: i64) -> i64 {
-    (text.chars().count() as i64).saturating_mul(font::advance(scale))
+fn text_width(text: &str, scale: i64, metrics: font::FontMetrics) -> i64 {
+    font::text_width(text, scale, metrics)
+}
+
+/// Effective text metrics for a node. A node built outside the theme-aware
+/// layout (e.g. a hand-made test tree) falls back to `Fixed`, so committed
+/// frames stay byte-identical.
+fn node_metrics(n: &Node) -> font::FontMetrics {
+    n.props.font_metrics.unwrap_or(font::FontMetrics::Fixed)
 }
 
 /// A node is visible only while every condition it declares holds.
@@ -503,7 +524,8 @@ fn container_extent(n: &Node, bp: Breakpoint, state: &StateView, want_w: bool) -
 }
 
 fn tabs_width(n: &Node, scale: i64) -> i64 {
-    let labels: i64 = n.props.labels.iter().map(|l| text_width(l, scale)).sum();
+    let m = node_metrics(n);
+    let labels: i64 = n.props.labels.iter().map(|l| text_width(l, scale, m)).sum();
     let gaps = 8i64.saturating_mul(n.props.labels.len().saturating_sub(1) as i64);
     labels.saturating_add(gaps)
 }
@@ -513,15 +535,16 @@ fn natural_w(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
         return w;
     }
     let scale = font_scale(&n.props, 16);
+    let m = node_metrics(n);
     match n.kind {
-        Kind::Text => text_width(&node_text(n, state), scale),
-        Kind::Button => text_width(&node_text(n, state), scale).saturating_add(24),
+        Kind::Text => text_width(&node_text(n, state), scale, m),
+        Kind::Button => text_width(&node_text(n, state), scale, m).saturating_add(24),
         Kind::Input => 120,
         Kind::Image => 64,
         Kind::Spacer => 8,
         Kind::Divider => 0, // spans the parent width
         Kind::Icon => 16,
-        Kind::Badge => text_width(&node_text(n, state), scale).saturating_add(12),
+        Kind::Badge => text_width(&node_text(n, state), scale, m).saturating_add(12),
         Kind::Progress => 120,
         Kind::Switch => 36,
         Kind::Slider => 120,
@@ -537,7 +560,7 @@ fn natural_w(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
         Kind::Extended(_) => 160,
         Kind::Other => {
             if leaf_like(n) {
-                text_width(&node_text(n, state), scale)
+                text_width(&node_text(n, state), scale, m)
             } else {
                 container_extent(n, bp, state, true)
             }
@@ -627,7 +650,8 @@ pub fn layout_animated_at(
 ) -> Vec<LaidOut> {
     let bp = Breakpoint::from_width(width);
     let pal = Palette::from_theme(&ir.theme);
-    let tree = with_theme_font_scale(&ir.tree, ir.theme.font_scale);
+    let mut tree = with_theme_font_scale(&ir.tree, ir.theme.font_scale);
+    fill_font_metrics(&mut tree, ir.theme.font_metrics);
     let mut out = Vec::new();
     let mut root = Rect {
         x: 0,
@@ -1021,6 +1045,7 @@ fn place(
         text_color,
         text_scale: scale,
         text_align,
+        font_metrics: node_metrics(n),
         max_lines: if n.kind == Kind::Text {
             n.props.max_lines
         } else {

@@ -52,7 +52,7 @@ fn esc(s: &str) -> String {
 /// top-left glyph origin. Returns `(x, baseline_y, font_size_px, advance_px)`.
 fn text_pos(n: &LaidOut, text: &str) -> (i64, i64, i64, i64) {
     let scale = n.text_scale.clamp(1, 8);
-    let tw = (text.chars().count() as i64).saturating_mul(font::advance(scale));
+    let tw = font::text_width(text, scale, n.font_metrics);
     let th = font::GLYPH_H * scale;
     let pad = n.border_w.max(0) + 2;
     let (x0, y0) = match n.text_origin {

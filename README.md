@@ -44,7 +44,7 @@ cargo build --offline
 # deterministic transition digest (stdout still exactly digest=... and dirty=...)
 ```
 
-Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa]`.
+Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]`.
 Relative `Image.src` paths resolve against the renderer process's current working directory, not the
 IR file's directory; absolute paths are accepted unchanged. PNG bytes are an explicit resource input,
 and a missing or invalid PNG paints a deterministic placeholder instead of failing the render.
@@ -69,7 +69,7 @@ passes (blur/glow/glass/liquid from the `effects` prop); static
 shadow/gradient/opacity props are untouched. The budget accepts `0..=1000` and
 is validated like `--tick`. It adds one deterministic third stdout line
 `quality=budget=<ms>ms effects=on|off fields=<n> particles=<n>`; the no-flag
-path is byte-for-byte identical, so every pinned digest is unchanged. Malformed
+path is byte-for-byte identical, so every pinned digest is unchanged.
 `--edge-aa` is opt-in 4x4 integer coverage on geometric edges (rounded boxes,
 filled discs and rings). Text and icons already carry coverage; the default path
 leaves box, circle and line edges binary so every pinned digest stays unchanged.
@@ -78,8 +78,21 @@ existing integer alpha blend and the frame stays opaque. Display-list capture
 mode ignores the flag, so `--edge-aa` is rejected together with `--commands` to
 keep the GPU command stream's fixed-shape contract intact. The flag adds no
 stdout line.
-IR or a bad viewport is a
-readable stderr diagnostic with exit code 1, never a panic. A fresh process
+`--auto-degrade <60|120>` wires the measured frame budget into the render: the
+library `FrameBudget`, `QualityTier` and `RenderConfig` policy decides a tier
+from injected frame durations and its caps are applied to the render config.
+The CLI renders a single frame, so there is no live loop to sample:
+`--frame-ms a,b,c` supplies the measured durations and `--frame-samples <n>`
+repeats that pattern over `n` injected frames (default 20, one full rolling
+window, so a tier decision is always reachable). Fast samples stay on budget and
+keep the frame byte-identical to the no-flag render; slow samples degrade the
+particle fields, clamp effect radii and drop glass/liquid passes exactly as
+`apply_policy` does in the library. The flags are validated like the other
+numeric flags and add no stdout line, so stdout stays exactly `digest=...` then
+`dirty=...` for every invocation, and the three pinned golden digests are
+unchanged without the flag.
+Malformed IR or a bad viewport is a readable stderr diagnostic with exit code 1,
+never a panic. A fresh process
 always reports `dirty=1` (first frame = whole surface); unchanged state within
 one `Renderer` yields zero dirty rects. `--a11y <out.json>` writes a separate
 deterministic JSON accessibility tree (see below), and `--svg <out.svg>` a
@@ -204,6 +217,22 @@ caps the wrapped line count and hard-truncates the final retained line to the
 same integer glyph width with an ASCII `...` suffix; `0` draws no lines. Both
 props are opt-in: the canonical counter program without them keeps all three
 pinned golden digests.
+
+Text advance metrics are opt-in through `theme.fontMetrics` or a per-node
+`fontMetrics` prop. `"fixed"` (the default) keeps one advance for every glyph,
+so committed frames stay byte-identical. `"proportional"` derives a compact
+per-glyph advance from the built-in 12x14 coverage atlas: a glyph advances
+`clamp(inkSpan + 2, 3, 12) * scale / 2` output pixels, where `inkSpan` is the
+span of non-zero coverage columns in the glyph cell. Two source cells map to one
+`scale` pixel, so cropping the left bearing never distorts the ink; blank and
+unsupported glyphs advance by 6 cells; and no glyph ever exceeds the historical
+monospaced cell, so `advance('i') < advance('W')` and a mixed-case line
+measurably shrinks (roughly 60-75% of the fixed baseline). Natural node sizing,
+word wrap, `maxLines` ellipsis, `align`, selection geometry such as the Tabs
+underline and the SVG `textLength` all read the same measured width, and
+`--auto-degrade` is unaffected. An unknown `fontMetrics` value is rejected by
+name, and the canonical counter program without the key keeps all three pinned
+golden digests.
 
 ## Built-in icons
 
