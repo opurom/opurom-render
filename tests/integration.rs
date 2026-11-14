@@ -347,3 +347,35 @@ fn cli_writes_ppm_and_prints_stable_digest() {
     assert!(String::from_utf8_lossy(&bad.stderr).contains("error:"));
     assert!(!String::from_utf8_lossy(&bad.stderr).contains("panicked"));
 }
+
+#[test]
+fn ir_events_form_a_closed_name_set() {
+    // the IR format fixes the author-declarable event names. An undeclared name
+    // must fail parsing instead of becoming a binding that dispatch ignores;
+    // the web, lang and core consumers apply the same rule.
+    // Inject the binding into the root node's existing `"events": {}`.
+    let bad = COUNTER_IR.replacen(
+        r#""events": {}"#,
+        r#""events": { "hover": { "op": "add", "target": "count", "value": 1 } }"#,
+        1,
+    );
+    let err = parse_ir(&bad).expect_err("an undeclared event name must be rejected");
+    let msg = err.to_string();
+    assert!(msg.contains("unknown event name"), "{msg}");
+    assert!(msg.contains("tap|input|doubleTap|longPress|drag"), "{msg}");
+
+    // Every declared name still parses, including the three gesture bindings.
+    for name in ["tap", "input", "doubleTap", "longPress", "drag"] {
+        let action = if name == "input" {
+            r#"{ "op": "set", "target": "count" }"#
+        } else {
+            r#"{ "op": "add", "target": "count", "value": 1 }"#
+        };
+        let doc = COUNTER_IR.replacen(
+            r#""events": {}"#,
+            &format!(r#""events": {{ "{name}": {action} }}"#),
+            1,
+        );
+        assert!(parse_ir(&doc).is_ok(), "declared event {name} must parse");
+    }
+}

@@ -1292,6 +1292,15 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
 fn events(o: &Map<String, Value>, decls: &[StateDecl]) -> Result<Vec<Event>, IrError> {
     let mut keys: Vec<&String> = o.keys().collect();
     keys.sort(); // deterministic ordering regardless of JSON object order
+                 // the IR format declares a closed event-name set; reject a typo here rather
+                 // than storing a binding that interaction dispatch would silently ignore.
+    const EVENT_NAMES: &[&str] = &["tap", "input", "doubleTap", "longPress", "drag"];
+    if let Some(unknown) = keys.iter().find(|k| !EVENT_NAMES.contains(&k.as_str())) {
+        return Err(bad(format!(
+            "events.{unknown}: unknown event name (expected {})",
+            EVENT_NAMES.join("|")
+        )));
+    }
     let mut out = Vec::with_capacity(keys.len());
     for name in keys {
         let what = format!("events.{name}");
