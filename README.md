@@ -77,9 +77,11 @@ one `Renderer` yields zero dirty rects. `--a11y <out.json>` writes a separate
 deterministic JSON accessibility tree (see below), and `--svg <out.svg>` a
 deterministic SVG 1.1 snapshot; neither adds stdout lines and neither is
 composited by `--transition`. `--commands <out.json>` records the exact raster
-display list as deterministic JSON: solid rects, rounded rects, two-stop
-vertical gradients and particle fields with integer bounds/colours in draw order, plus the viewport
-and opaque background. Bitmap glyph runs are decomposed on the CPU into solid
+display list as deterministic JSON, replaying to the same pixels as the PPM
+written by the same invocation at every `--tick`; the export is a pure query
+that never advances the renderer's animation state. The list covers solid
+rects, rounded rects, two-stop vertical gradients and particle fields with
+integer bounds/colours in draw order, plus the viewport and opaque background. Bitmap glyph runs are decomposed on the CPU into solid
 rect commands; there is no GPU glyph atlas or GPU text shaping. CPU-only page
 transitions cannot be represented as this display list, so `--commands` and
 `--transition` together fail with a readable diagnostic. The display list adds

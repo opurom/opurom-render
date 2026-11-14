@@ -75,3 +75,38 @@ fn display_lists_are_non_empty_at_every_tick() {
         assert!(commands.contains("\"kind\":\"solid\""));
     }
 }
+
+#[test]
+fn display_list_queries_are_pure_and_match_the_frame_tick() {
+    // The command stream is a pure query: layout_animated_at writes schedules
+    // into the animation table, so reusing the renderer's persistent table
+    // made a second call describe a different frame than pixels_at rendered.
+    // A GPU replaying those commands then diverged from the software frame.
+    let text = fixture();
+    let ir = parse_ir(&text).unwrap();
+    let state = StateView::from_ir(&ir);
+    let renderer = Renderer::new(200, 150);
+    for &tick in &TICKS {
+        let first = renderer
+            .display_list_at(&ir, &state, tick)
+            .to_json()
+            .unwrap();
+        let _ = renderer.pixels_at(&ir, &state, tick);
+        let after_pixels = renderer
+            .display_list_at(&ir, &state, tick)
+            .to_json()
+            .unwrap();
+        assert_eq!(
+            first, after_pixels,
+            "display list must not depend on call order"
+        );
+        assert_eq!(
+            first,
+            renderer
+                .display_list_at(&ir, &state, tick)
+                .to_json()
+                .unwrap(),
+            "repeated display list queries must be byte-identical"
+        );
+    }
+}

@@ -284,13 +284,16 @@ impl Renderer {
     /// them. The software frame and the incremental renderer state are unchanged.
     pub fn display_list_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> DisplayList {
         let pal = Palette::from_theme(&ir.theme);
+        // A fresh animation table keeps this query pure: layout_animated_at
+        // writes schedules into the table, so reusing the renderer's persistent
+        // one would advance it and produce commands for a different frame.
         let laid = crate::layout::layout_animated_at(
             ir,
             state,
             self.width,
             self.height,
             elapsed_ms,
-            &mut self.anim.borrow_mut(),
+            &mut AnimTable::new(),
         );
         let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.stage);
         for n in &laid {
