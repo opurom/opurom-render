@@ -459,6 +459,9 @@ impl Default for Contrast {
 pub struct ThemeTokens {
     pub surface: Option<Rgba>,
     pub on_surface: Option<Rgba>,
+    /// Flat tinted page backdrop a glass lamina refracts. Distinct from
+    /// `surface`, which remains the contrast reference for on-surface ink.
+    pub stage: Option<Rgba>,
     pub font: Option<String>,
     pub contrast: Contrast,
 }
@@ -1324,6 +1327,7 @@ fn tokens(v: &Value) -> Result<ThemeTokens, IrError> {
     Ok(ThemeTokens {
         surface: color_prop(o, "surface", "theme.tokens")?,
         on_surface: color_prop(o, "onSurface", "theme.tokens")?,
+        stage: color_prop(o, "stage", "theme.tokens")?,
         font: opt_string(o, "font", "theme.tokens")?,
         contrast,
     })
