@@ -550,10 +550,10 @@ fn v0_1_golden_digests_are_unchanged_by_r4() {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).to_string()
     };
-    assert!(run("320", "240", "r4-golden-320.ppm", &[]).contains("digest=16b69e96b1534324"));
-    assert!(run("800", "600", "r4-golden-800.ppm", &[]).contains("digest=aaf572509f15d60c"));
+    assert!(run("320", "240", "r4-golden-320.ppm", &[]).contains("digest=8d45f412996a99c6"));
+    assert!(run("800", "600", "r4-golden-800.ppm", &[]).contains("digest=318beb1dd337bc4e"));
     assert!(
         run("800", "600", "r4-golden-7.ppm", &["--state", "count=7"])
-            .contains("digest=e5d71acb7602eab2")
+            .contains("digest=40073cb95c912d80")
     );
 }

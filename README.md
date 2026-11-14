@@ -28,12 +28,12 @@ CLI (integration surface for `opurom-cli` and the e2e suite):
 ```sh
 cargo build --offline
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm
-# digest=c8403ba57da5ee61
+# digest=318beb1dd337bc4e
 # dirty=1
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --state count=7
-# digest=48a56056bd32a07e
+# digest=40073cb95c912d80
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --a11y tree.json
-# digest=c8403ba57da5ee61, dirty=1 (stdout unchanged)
+# digest=318beb1dd337bc4e, dirty=1 (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 800 600 out.ppm --svg out.svg
 # writes a deterministic SVG 1.1 snapshot (stdout unchanged)
 ./target/debug/opurom-render ../opurom-spec/counter.opuir.json 320 240 out.ppm --commands commands.json
@@ -456,9 +456,9 @@ Golden digests (current text rasterization; additive layers preserve these value
 
 | Fixture | Viewport | Digest |
 | --- | --- | --- |
-| `counter.opuir.json` | 320x240 | `900abf4bd93d1e51` |
-| `counter.opuir.json` | 800x600 | `c8403ba57da5ee61` |
-| `counter.opuir.json`, `--state count=7` | 800x600 | `48a56056bd32a07e` |
+| `counter.opuir.json` | 320x240 | `8d45f412996a99c6` |
+| `counter.opuir.json` | 800x600 | `318beb1dd337bc4e` |
+| `counter.opuir.json`, `--state count=7` | 800x600 | `40073cb95c912d80` |
 
 `FrameView<'a> { width: u32, height: u32, pixels: &'a [u8] }` has the exact field
 layout of `ADAPTER_CONTRACT.md`. It is a local struct: adapters do not gain a

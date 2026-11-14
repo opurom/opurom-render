@@ -740,12 +740,12 @@ fn v0_1_golden_digest_is_unchanged_by_r2_features() {
     let mut renderer = Renderer::new(800, 600);
     assert_eq!(
         digest_hex(&renderer.render(&ir, &state).pixels),
-        "aaf572509f15d60c"
+        "318beb1dd337bc4e"
     );
     let mut renderer = Renderer::new(320, 240);
     assert_eq!(
         digest_hex(&renderer.render(&ir, &state).pixels),
-        "16b69e96b1534324"
+        "8d45f412996a99c6"
     );
 }
 

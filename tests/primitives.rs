@@ -275,10 +275,10 @@ fn r10_spec_catalog_is_byte_identical_to_the_vendored_copy() {
     let b = fs::read(&vendored).unwrap();
     assert_eq!(a, b, "spec and vendored catalog must be byte-identical");
     let doc: serde_json::Value = serde_json::from_slice(&a).unwrap();
-    assert_eq!(doc["count"], 216);
+    assert_eq!(doc["count"], 240);
     assert_eq!(doc["primitives"], 100);
     let list = doc["components"].as_array().unwrap();
-    assert_eq!(list.len(), 216);
+    assert_eq!(list.len(), 240);
     let prims: HashSet<&str> = list.iter().map(|c| c[1].as_str().unwrap()).collect();
     assert_eq!(prims.len(), 100);
     for s in SPECS.iter() {
@@ -306,10 +306,10 @@ fn r10_v0_1_golden_digests_are_unchanged() {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).to_string()
     };
-    assert!(run("320", "240", "r10-golden-320.ppm", &[]).contains("digest=16b69e96b1534324"));
-    assert!(run("800", "600", "r10-golden-800.ppm", &[]).contains("digest=aaf572509f15d60c"));
+    assert!(run("320", "240", "r10-golden-320.ppm", &[]).contains("digest=8d45f412996a99c6"));
+    assert!(run("800", "600", "r10-golden-800.ppm", &[]).contains("digest=318beb1dd337bc4e"));
     assert!(
         run("800", "600", "r10-golden-7.ppm", &["--state", "count=7"])
-            .contains("digest=e5d71acb7602eab2")
+            .contains("digest=40073cb95c912d80")
     );
 }

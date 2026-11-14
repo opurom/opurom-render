@@ -126,33 +126,33 @@ fn pinned_golden_frames_are_stable() {
     state.set("count", StateValue::Int(0));
     assert_eq!(
         digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
-        "16b69e96b1534324"
+        "8d45f412996a99c6"
     );
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
-        "aaf572509f15d60c"
+        "318beb1dd337bc4e"
     );
     state.set("count", StateValue::Int(7));
     assert_eq!(
         digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
-        "e5d71acb7602eab2"
+        "40073cb95c912d80"
     );
 }
 
 #[test]
-fn same_text_uses_block_font_below_threshold_and_vector_above() {
-    // The switch is a pure function of the integer text scale: size 10 lands
-    // on scale 1 (below the smooth threshold) and size 11 lands on scale 2
-    // (at the threshold, so it uses the high-resolution path).
-    let small = parse_ir(&text_ir("Vector", 10)).unwrap(); // scale 1
-    let big = parse_ir(&text_ir("Vector", 11)).unwrap(); // scale 2
+fn every_scale_uses_the_high_resolution_glyphs() {
+    // The high-resolution atlas covers every printable ASCII glyph and every
+    // integer scale renders through it; the block font is only a fallback for
+    // codepoints the atlas does not define.
+    let small = parse_ir(&text_ir("Vector", 10)).unwrap();
+    let big = parse_ir(&text_ir("Vector", 11)).unwrap();
     let small_state = StateView::from_ir(&small);
     let big_state = StateView::from_ir(&big);
-    assert!(scale_of(&small, &small_state, 400, 80) < font::SMOOTH_MIN_SCALE);
+    assert!(scale_of(&small, &small_state, 400, 80) >= font::SMOOTH_MIN_SCALE);
     assert!(scale_of(&big, &big_state, 400, 80) >= font::SMOOTH_MIN_SCALE);
 
-    // Each glyph the vector path draws fills the shared mono advance, so the
-    // laid-out text width is identical whether block or smooth glyphs paint it.
+    // Each glyph fills the shared mono advance, so the laid-out text width is
+    // identical at every scale.
     let adv = font::advance(scale_of(&big, &big_state, 400, 80));
     let tw = layout(&big, &big_state, 400, 80)
         .into_iter()
