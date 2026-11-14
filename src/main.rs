@@ -10,7 +10,8 @@
 //! selects the same slide/fade/scale tier when the flag is absent. The optional
 //! `--frame-budget` applies the caller-supplied quality policy (fewer particles,
 //! effect passes off) and prints one extra `quality=` line; without it the
-//! frame is unchanged.
+//! frame is unchanged. Relative `Image.src` paths resolve against the process
+//! CWD, not the IR file's directory; missing or invalid PNGs draw a placeholder.
 
 use opurom_render::{
     a11y_json_at, choose_quality, digest_hex, parse_ir, svg_at, Frame, IrError, Node, Renderer,

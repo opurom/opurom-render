@@ -2,8 +2,8 @@
 
 Independent Rust crate: IR v0.1 → adaptive layout → deterministic RGBA8 software
 raster → incremental dirty rects, plus a deterministic SVG 1.1 **vector software
-backend**, deterministic animation primitives, an exact display-list export and
-five deterministic framebuffer effects, plus optional effect commands that
+backend**, deterministic animation primitives, dependency-free PNG image decoding,
+an exact display-list export and five deterministic framebuffer effects, plus optional effect commands that
 reproduce them on the cross-repo Metal compute backend. This folder is its own
 git repository; it has no source dependency on
 any other OPUROM layer, only on the frozen IR/ABI contracts
@@ -45,6 +45,9 @@ cargo build --offline
 ```
 
 Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]`.
+Relative `Image.src` paths resolve against the renderer process's current working directory, not the
+IR file's directory; absolute paths are accepted unchanged. PNG bytes are an explicit resource input,
+and a missing or invalid PNG paints a deterministic placeholder instead of failing the render.
 `--state` repeats; values are parsed against the declared state type. `--tick`
 sets the animation clock position in milliseconds, accepts `0..=4000`, and
 rejects non-numeric or out-of-range values with a readable diagnostic; the
@@ -97,7 +100,7 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
                                                │
                       layout(Ir, StateView, viewport) ──▶ Vec<LaidOut>  (pre-order)
                                                │
-                               ├──▶ raster::Canvas (rounded fills/borders + 5x7 glyphs + local effects) ──▶ final frame blurs ──▶ Vec<u8> RGBA8
+                               ├──▶ raster::Canvas (rounded fills/borders + 5x7 glyphs + PNG images + local effects) ──▶ final frame blurs ──▶ Vec<u8> RGBA8
                                │                       │
                                │                       ├──▶ Vec<Command> ──▶ DisplayList JSON
                                 │                       │
@@ -126,9 +129,13 @@ serde_json::Value ── parse_ir (validate) ──▶ Ir { state, tree: Node, t
   vector set renders each glyph from an embedded 12x14 coverage grid, bilinearly
   sampled in integer fixed point, so curves and descenders read as a smooth UI
   face at every common label size while layout widths stay identical.
+- `src/image.rs` — dependency-free 8-bit grayscale/RGB/RGBA PNG decoder with all
+  five scanline filters, CRC-32/Adler-32 checks, stored/fixed/dynamic DEFLATE,
+  size caps, an integer `fit_rect` and a 16-entry per-process image cache keyed
+  by the normalised absolute path. Failures are cached and never panic.
 - `src/raster.rs` — filled rounded rectangles (integer quarter-circle test), 1 px
   borders, gradients, shadows, glass fills, supersampled anti-aliased glyphs,
-  opaque RGBA with integer alpha blending, the eight data primitive drawings and
+  opaque RGBA with integer alpha blending, nearest-neighbour PNG sampling, the eight data primitive drawings and
   exact command recording. Text coverage is 4x4 bilinear supersampling of the
   5x7 pattern with a ~1 px feather; advance metrics and SVG metrics are
   unchanged. The rasterizer operates on the built-in bitmap pattern with
@@ -159,6 +166,34 @@ not painted. This reuses the renderer's existing canvas clip, so an overflowing
 line is clipped and a node too short for its wrapped lines clips the excess
 rather than overlapping the next node. Text that already fits keeps its
 historical single-line placement, so the pinned golden frames remain byte-identical.
+
+## PNG images and opt-in typography
+
+An `Image` node with `props.src` loads a PNG lazily on its first draw. Relative
+paths resolve against the renderer process's current working directory; the
+normalised absolute path is the key of a bounded 16-entry FIFO cache. The
+dependency-free decoder accepts non-interlaced 8-bit grayscale, RGB and RGBA
+PNGs, filter types 0..4 (None/Sub/Up/Average/Paeth), and zlib stored, fixed
+Huffman and dynamic Huffman DEFLATE blocks. It verifies chunk CRC-32 and zlib
+Adler-32, rejects palette, gray+alpha, other bit depths, Adam7 and malformed
+input with readable errors, and caps dimensions at 4096x4096 / 64 MiB decoded
+RGBA. No new crate dependency is added. A missing, unreadable or invalid file
+is cached as a failure and paints the same neutral rounded rectangle with a
+diagonal cross; it never turns into a render error.
+
+`fit` defaults to `contain`, which preserves the whole source aspect ratio.
+`cover` preserves the aspect ratio while cropping to fill, and `fill` stretches
+both axes independently. All three use integer-only nearest-neighbour sampling;
+RGBA source pixels are alpha-blended over the node's inner rounded box. In
+captured display lists, image pixels are decomposed into exact per-pixel solid
+commands. An `Image` without `src` keeps its historical hash-coloured box.
+
+On `Text` nodes, `align: "left"|"center"|"right"` overrides the inherited layout
+alignment for both single-line and wrapped glyph placement. `maxLines: <non-negative int>`
+caps the wrapped line count and hard-truncates the final retained line to the
+same integer glyph width with an ASCII `...` suffix; `0` draws no lines. Both
+props are opt-in: the canonical counter program without them keeps all three
+pinned golden digests.
 
 ## Built-in icons
 
@@ -365,9 +400,10 @@ determinism, gradient defs, text, `data-role`, and hidden nodes.
 The SVG path is a **second software backend**. `<text>` uses a generic `monospace`
 face and the built-in 5x7 font's metrics, so glyph widths/positions are an
 approximation of the raster rather than a pixel-exact match. Box colours come
-from the layout palette; `Image` stays a deterministic placeholder. It is a
-vector *snapshot* of the layout, not a replacement for the RGBA conformance
-oracle.
+from the layout palette; the SVG snapshot reports `Image` as a deterministic box
+and role without embedding the PNG, while the RGBA raster draws the decoded
+resource. It is a vector *snapshot* of the layout, not a replacement for the
+RGBA conformance oracle.
 
 ## Eight new distinct primitives (TOOLCHAIN_AND_PACKAGES §4)
 
@@ -487,18 +523,20 @@ profiling. The renderer does not sample `Instant`, system time or GPU counters.
 
 ## Determinism guarantee
 
-Same IR + same viewport + same state + same animation tick ⇒ byte-identical RGBA
-pixels on every host (and, for `--svg`, byte-identical SVG). The animation APIs
-add their own explicit inputs: transition ticks, gesture deltas, particle seeds/step
-sequences and caller-supplied budgets. Mechanisms: all layout, raster and
-animation arithmetic is integer (`i64`/`i128`, no float ordering, no `f32`
-rounding); state lives in a `BTreeMap`; events are visited in sorted key
-order; `theme.mode == "system"` resolves to light instead of querying the host;
-no wall-clock time, unseeded randomness, threads, environment variables or
-resource I/O affect the frame (`Image` uses a stable hash of `src` as a
-placeholder colour); the animation clock only moves when the caller ticks it,
-so two identical tick sequences produce identical digest sequences. The SVG
-backend applies the same rules to its element/attribute ordering.
+Same IR + same viewport + same state + same animation tick + same resolved PNG
+bytes ⇒ byte-identical RGBA pixels on every host (and, for `--svg`,
+byte-identical SVG). The animation APIs add their own explicit inputs:
+transition ticks, gesture deltas, particle seeds/step sequences and
+caller-supplied budgets. Mechanisms: all layout, raster and animation arithmetic
+is integer (`i64`/`i128`, no float ordering, no `f32` rounding); state lives in
+a `BTreeMap`; events are visited in sorted key order; `theme.mode == "system"`
+resolves to light instead of querying the host; no wall-clock time, unseeded
+randomness, threads or environment variables affect the frame. An `Image.src`
+resource is an explicit input resolved from the process CWD; cache hits and
+misses never change pixels, and missing or invalid resources paint the same
+placeholder. The animation clock only moves when the caller ticks it, so two
+identical tick sequences produce identical digest sequences. The SVG backend
+applies the same rules to its element/attribute ordering.
 
 Golden digests (current text rasterization; additive layers preserve these values):
 
@@ -773,8 +811,9 @@ Full per-kind documentation (prop schema, motif, a11y role):
 Common prop schema keys (all optional): `value` (int magnitude, positional),
 `values` (int series, JSON array or comma-separated string), `segments`,
 `columns`, `rows`, `min`, `max`, `size`, `width`, `height`, `labels`, `src`,
-`type`, `color`, plus the generic and accessibility props. `src` is a placeholder
-only: no image is decoded.
+`type`, `color`, plus the generic and accessibility props. For `Kind::Image`,
+`src` is a real PNG resource and `fit` selects `contain` (default), `cover` or
+`fill`; extended primitives still use `src` as a placeholder data key only.
 
 Each kind has exactly one deterministic software drawing. The SVG and a11y
 backends report the box and role for a new kind; they do not vectorise its motif
@@ -812,9 +851,15 @@ clamping, overflow, effect-command export for all five kinds with integer
 parameters, draw order, bounds, effect-free fixture invariance, and unchanged
 golden digests; opt-in particle fields with byte-identical repeated renders,
 seed sensitivity, `count=0` and `alpha=0` no-ops, bounded parse diagnostics,
-rect clipping, effect-snapshot draw order and unchanged golden digests.
-`cargo test --offline` (264 tests) is green with fixed golden digests and zero
-warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
+rect clipping, effect-snapshot draw order and unchanged golden digests;
+dependency-free PNG decoding with all five scanline filters, grayscale/RGB/RGBA,
+stored/fixed/dynamic DEFLATE, malformed/truncated/oversized rejection, bounded
+cache hit/miss/eviction counts, `contain`/`cover`/`fill` scaling math,
+nearest-neighbour draws, deterministic missing/invalid resource placeholders,
+`maxLines` ellipsis, `align` offsets, the default `contain` policy and a
+canonical no-new-props proof of all three golden digests.
+`cargo test` (303 tests) and `cargo fmt --check` are green with fixed golden
+digests and zero warnings. The cross-repo Metal byte-equality proof lives in `opurom-gpu`.
 
 
 
@@ -825,8 +870,7 @@ stable. Planned areas of work:
 
 - **Shaped text**: a font atlas with hinting, kerning and shaping, integrated with a GPU glyph
   path.
-- **Image resources**: resource-backed image decoding in place of the deterministic colour
-  placeholder.
+- **Other image formats**: palette/16-bit/interlaced PNG and compressed web formats.
 - **Dirty-region refinement**: a tile quadtree for large framebuffers.
 - **Gradient and compositor layers**: angled multi-stop gradients, compositor-backed glass and
   per-property keyframe animation.
