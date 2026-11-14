@@ -1182,17 +1182,12 @@ fn place_children(
                 natural_w(c, bp, state)
             };
             natural.min(content_main).max(0)
-        } else if bp == Breakpoint::Compact
-            && vertical
-            && main_override.is_none()
-            && leaf_like(c)
-            && text_bearing(c.kind)
-        {
-            // A compact vertical stack must not clip a text child below one
-            // glyph line: the raster paints the full glyph band regardless of
-            // the rect height, so a squeezed rect overlaps the next sibling.
-            // Exceeding the parent's main extent is preferable to overprinting.
-            // Wider tiers use height as the cross axis and never enter here.
+        } else if vertical && main_override.is_none() && leaf_like(c) && text_bearing(c.kind) {
+            // A vertical stack must not clip a text child below one glyph line:
+            // the raster paints the full glyph band regardless of the rect
+            // height, so a squeezed rect overprints the next sibling. Exceeding
+            // the parent's main extent is preferable to overprinting. Horizontal
+            // rows use height as the cross axis and never take this path.
             natural_h(c, bp, state).max(sizes[i]).max(0)
         } else {
             main_override.unwrap_or(sizes[i]).min(content_main).max(0)
