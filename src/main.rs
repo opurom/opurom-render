@@ -1,4 +1,4 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
@@ -130,7 +130,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental]"
                 .to_string(),
         );
     }
@@ -151,6 +151,9 @@ fn run() -> Result<(), String> {
     let mut svg_path: Option<String> = None;
     let mut commands_path: Option<String> = None;
     let mut frame_budget_ms: Option<i64> = None;
+    // Opt-in incremental raster: reuse the previous frame and redraw only the
+    // changed region. Without it the full reference raster is used.
+    let mut incremental = false;
 
     let mut i = 4usize;
     while i < args.len() {
@@ -230,9 +233,13 @@ fn run() -> Result<(), String> {
                 frame_budget_ms = Some(value);
                 i += 2;
             }
+            "--incremental" => {
+                incremental = true;
+                i += 1;
+            }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json or --frame-budget 0..={MAX_FRAME_BUDGET_MS}"
+                    "unexpected argument {other:?}: expected --state name=value, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS} or --incremental"
                 ));
             }
         }
@@ -248,11 +255,26 @@ fn run() -> Result<(), String> {
                 .to_string(),
         );
     }
+    if incremental && transition_kind.is_some() {
+        return Err(
+            "--incremental is unavailable with --transition: transitions composite whole CPU frames"
+                .to_string(),
+        );
+    }
     // Opt-in only: without the flag the IR tree is untouched, so the default
     // path is byte-for-byte identical to previous releases.
     let quality_line = frame_budget_ms.map(|ms| apply_quality(&mut ir.tree, ms));
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
-    let mut frame = renderer.render_at(&ir, &state, elapsed_ms);
+    let (mut frame, incremental_line) = if incremental {
+        let frame = renderer.render_incremental_at(&ir, &state, elapsed_ms);
+        let (nodes, pixels) = renderer.redraw_stats();
+        (
+            frame,
+            Some(format!("incremental=nodes={nodes} pixels={pixels}")),
+        )
+    } else {
+        (renderer.render_at(&ir, &state, elapsed_ms), None)
+    };
     if let Some(kind) = transition_kind {
         let mut transition = Transition::new(kind);
         transition.tick(elapsed_ms);
@@ -295,6 +317,9 @@ fn run() -> Result<(), String> {
 
     println!("digest={}", digest_hex(&frame.pixels));
     println!("dirty={}", frame.dirty.len());
+    if let Some(line) = incremental_line {
+        println!("{line}");
+    }
     if let Some(line) = quality_line {
         println!("{line}");
     }
