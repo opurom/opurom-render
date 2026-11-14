@@ -44,7 +44,7 @@ cargo build --offline
 # deterministic transition digest (stdout still exactly digest=... and dirty=...)
 ```
 
-Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json]`.
+Usage: `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000]`.
 `--state` repeats; values are parsed against the declared state type. `--tick`
 sets the animation clock position in milliseconds, accepts `0..=4000`, and
 rejects non-numeric or out-of-range values with a readable diagnostic; the
@@ -53,9 +53,19 @@ default is the settled end state, so a v0.1 IR renders exactly as the core relea
 and the settled frame as the incoming page, then uses `--tick` as the elapsed
 time of the 320 ms transition. Unknown transition kinds are rejected with exit
 code 1.
-Output stays a P6 PPM (RGB; the opaque alpha byte is dropped). Stdout has
-exactly two lines: `digest=<16 lowercase hex>` (FNV-1a 64 over the **RGBA**
-frame bytes) and `dirty=<rect count>`. Malformed IR or a bad viewport is a
+Output stays a P6 PPM (RGB; the opaque alpha byte is dropped). Without
+`--frame-budget`, stdout has exactly two lines: `digest=<16 lowercase hex>`
+(FNV-1a 64 over the **RGBA** frame bytes) and `dirty=<rect count>`.
+`--frame-budget <ms>` is opt-in and applies the caller-supplied
+`choose_quality` policy to the parsed IR before rendering: each particle field
+degrades proportionally from its own count (>=16 ms full, >=8 ms three quarters,
+>=4 ms half, else one quarter) and tiers below 16 ms drop the software effect
+passes (blur/glow/glass/liquid from the `effects` prop); static
+shadow/gradient/opacity props are untouched. The budget accepts `0..=1000` and
+is validated like `--tick`. It adds one deterministic third stdout line
+`quality=budget=<ms>ms effects=on|off fields=<n> particles=<n>`; the no-flag
+path is byte-for-byte identical, so every pinned digest is unchanged. Malformed
+IR or a bad viewport is a
 readable stderr diagnostic with exit code 1, never a panic. A fresh process
 always reports `dirty=1` (first frame = whole surface); unchanged state within
 one `Renderer` yields zero dirty rects. `--a11y <out.json>` writes a separate
