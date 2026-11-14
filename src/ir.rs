@@ -10,7 +10,7 @@
 //! Unknown props are ignored and an unknown kind falls back to Container/Text,
 //! so a file from a newer compiler still renders instead of failing.
 
-use crate::anim::Curve;
+use crate::anim::{Curve, TransitionKind};
 use crate::effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
@@ -40,6 +40,9 @@ pub struct Ir {
     pub state: Vec<StateDecl>,
     pub tree: Node,
     pub theme: Theme,
+    /// Optional page-transition kind read from the optional top-level `transition`
+    /// key. `None` means the IR declares no transition.
+    pub transition: Option<TransitionKind>,
 }
 
 impl Ir {
@@ -1350,12 +1353,27 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
     let mut tree = node(required(o, "tree", "IR root")?, &mut next_id, &state)?;
     inherit_high_contrast(&mut tree, false);
     let theme = theme(required(o, "theme", "IR root")?)?;
+    // Optional page-transition key; unparsable values are rejected by name.
+    let transition = match o.get("transition") {
+        Some(v) => {
+            let s = string_field(o, "transition", "IR root")?;
+            Some(
+                TransitionKind::parse(&s).ok_or_else(|| {
+                    bad(format!(
+                        "IR root.transition {v:?} is invalid: expected \"slide\", \"fade\" or \"scale\""
+                    ))
+                })?,
+            )
+        }
+        None => None,
+    };
     Ok(Ir {
         version,
         app,
         state,
         tree,
         theme,
+        transition,
     })
 }
 

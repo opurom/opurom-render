@@ -52,7 +52,9 @@ default is the settled end state, so a v0.1 IR renders exactly as the core relea
 `--transition` is opt-in: the CLI uses the frame at tick 0 as the outgoing page
 and the settled frame as the incoming page, then uses `--tick` as the elapsed
 time of the 320 ms transition. Unknown transition kinds are rejected with exit
-code 1.
+code 1. The optional top-level IR key `"transition": "slide"|"fade"|"scale"`
+selects the same transition when `--transition` is absent; the flag always wins
+when both are present, and an invalid IR value is rejected by name.
 Output stays a P6 PPM (RGB; the opaque alpha byte is dropped). Without
 `--frame-budget`, stdout has exactly two lines: `digest=<16 lowercase hex>`
 (FNV-1a 64 over the **RGBA** frame bytes) and `dirty=<rect count>`.
