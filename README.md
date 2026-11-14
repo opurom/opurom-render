@@ -191,7 +191,7 @@ byte-identically to the core release — the three golden digests below are unch
 | Style effects | `gradient` (two-stop vertical linear gradient, integer lerp), `glass` (surface blended with the accent), `shadow` (0..8, offset darkening), `opacity` (0..1, exact fixed point 0..1024), `border` (1 px colour), `radius` (rounded corners), `margin`. Effects apply to every kind that owns a box (Container, Card, Button, …). |
 | Conditional visibility | The optional node fields `when: "<boolState>"` and `unless: "<boolState>"` hide the node **and its subtree** from layout and from the raster while the state is false for `when` or true for `unless`. A field on a non-bool or undeclared state is a parse error. |
 | Node kinds | All 24 interactive UI kinds render: the eight v0.1 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
-| Animation | `animate: spring\|ease\|inertia\|collision\|none` on a node drives an entry animation (box grows from its centre while fading in; `inertia` flings it under a constant integer braking force). The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
+| Animation | `animate: spring\|ease\|inertia\|collision\|none` on a node selects the curve for its implicit animation, with optional `duration` (ms) and `delay` (ms) props. On a node with a curve, `radius`, `padding`, `shadow`, `color` and `opacity` interpolate from their previous targets to the new ones over `duration`, starting at `delay`; the entry box grows from its centre and fades in on first layout. The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
 | Gesture input | The optional `props.gesture` value `tap\|doubleTap\|longPress\|drag` declares an interactive node's gesture. The recognizer is a pure integer state machine in `GestureEngine`; it does not feed the raster, so a gesture prop changes no frame. |
 
 Unknown props are ignored and never fatal; an unknown kind degrades instead of
@@ -440,6 +440,19 @@ V0.1 IR output without these APIs is byte-identical to the core release.
   integer arithmetic, so the frame at the settle time equals the settled frame;
   the tests prove the peak stays within `ONE`, the rebound dips below it, and the
   frame is byte-stable once settled.
+- **Implicit prop animation:** `animate` on a node plus optional `duration`
+  (ms) and `delay` (ms) drives `AnimatedContainer`/`AnimatedOpacity` semantics.
+  Each animated node keeps an `AnimTable` entry of its previous and current
+  targets for `radius`, `padding`, `shadow`, `color` and `opacity`; when a
+  target changes the renderer restarts the schedule at the current tick from
+  the previous target and interpolates `from + (to - from) * p / 1024` with
+  half-up rounding, colour channels included (`lerp` / `lerp_rgba`). Progress
+  is zero before `delay`, runs the curve for `duration`, and is exactly `ONE`
+  at `duration + delay`. The default duration is the curve's own settle time,
+  so a prop without `duration` keeps the historical entry timing. The entry
+  box grows from its centre only on first layout; later prop changes keep the
+  full rect. A settled frame is field-identical to a non-animated render, so no
+  resting layout metric or golden digest changes.
 - **Bounce collision mode:** `step_mode(StepMode::Bounce)` is opt-in and keeps
   the wrap behaviour of `step()` untouched. A particle crossing the 1024-unit
   field boundary mirrors back with fixed-point restitution `e = 3/4`

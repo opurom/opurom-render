@@ -42,8 +42,10 @@ pub mod svg;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use anim::{
-    choose_quality, Animator, Curve, FrameRate, GestureAnim, Particle, ParticleSystem, Quality,
-    StepMode, Transition, TransitionKind, ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, TRANSITION_MS,
+    animate_progress, choose_quality, default_duration_ms, lerp, lerp_rgba, AnimSpec, AnimTable,
+    AnimValue, Animator, Curve, FrameRate, GestureAnim, Particle, ParticleSystem, Quality,
+    StepMode, Transition, TransitionKind, ANIMATE_DEFAULT_MS, ANIMATE_MAX_MS, INERTIA_SETTLE_MS,
+    ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, SPRING_SETTLE_MS, TRANSITION_MS,
 };
 pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
 pub use effects::{
@@ -59,8 +61,8 @@ pub use ir::{
     Role, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
 };
 pub use layout::{
-    fluid_grid, layout, layout_at, Breakpoint, Control, Direction, Effects, FluidGrid, LaidOut,
-    Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH, SETTLED_MS,
+    fluid_grid, layout, layout_animated_at, layout_at, Breakpoint, Control, Direction, Effects,
+    FluidGrid, LaidOut, Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH, SETTLED_MS,
 };
 pub use nav::{NavError, Navigation, Navigator, MAX_STACK_DEPTH};
 pub use particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
@@ -157,6 +159,8 @@ impl Frame {
 const MAX_PIXELS: u64 = 16_777_216; // 4096x4096 RGBA = 64 MiB
 const MAX_DIRTY: usize = 64;
 
+use std::cell::RefCell;
+
 /// Keeps the previous RGBA buffer so successive renders can be diffed.
 pub struct Renderer {
     width: u32,
@@ -169,6 +173,10 @@ pub struct Renderer {
     /// Nodes and pixels the most recent incremental render recomputed.
     redrawn_nodes: usize,
     redraw_pixels: u64,
+    /// Cross-tick implicit-animation state: each animated node's previous and
+    /// current prop targets. A `RefCell` lets the `&self` snapshot methods
+    /// advance the animation without changing their signatures.
+    anim: RefCell<AnimTable>,
 }
 
 impl Renderer {
@@ -186,6 +194,7 @@ impl Renderer {
             prev_laid: None,
             redrawn_nodes: 0,
             redraw_pixels: 0,
+            anim: RefCell::new(AnimTable::new()),
         })
     }
 
@@ -223,9 +232,17 @@ impl Renderer {
         crate::layout::layout(ir, state, self.width, self.height)
     }
 
-    /// Layout at a given animation clock position (milliseconds).
+    /// Layout at a given animation clock position (milliseconds). Advances the
+    /// renderer's implicit-animation table, so a prop change animates.
     pub fn compute_layout_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Vec<LaidOut> {
-        crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms)
+        crate::layout::layout_animated_at(
+            ir,
+            state,
+            self.width,
+            self.height,
+            elapsed_ms,
+            &mut self.anim.borrow_mut(),
+        )
     }
 
     /// Pure raster: no mutation, no hidden state.
@@ -236,7 +253,14 @@ impl Renderer {
     /// Pure raster at a given animation clock position.
     pub fn pixels_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Vec<u8> {
         let pal = Palette::from_theme(&ir.theme);
-        let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
+        let laid = crate::layout::layout_animated_at(
+            ir,
+            state,
+            self.width,
+            self.height,
+            elapsed_ms,
+            &mut self.anim.borrow_mut(),
+        );
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.bg);
         for n in &laid {
             raster::draw(&mut canvas, n);
@@ -255,7 +279,14 @@ impl Renderer {
     /// them. The software frame and the incremental renderer state are unchanged.
     pub fn display_list_at(&self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> DisplayList {
         let pal = Palette::from_theme(&ir.theme);
-        let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
+        let laid = crate::layout::layout_animated_at(
+            ir,
+            state,
+            self.width,
+            self.height,
+            elapsed_ms,
+            &mut self.anim.borrow_mut(),
+        );
         let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.bg);
         for n in &laid {
             let frame = crate::effects::EffectFrame::new(self.width, self.height, n);
@@ -289,7 +320,14 @@ impl Renderer {
     /// Render at a given animation clock position and diff against the previous
     /// frame. The clock is the only time source; no wall clock is consulted.
     pub fn render_at(&mut self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Frame {
-        let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
+        let laid = crate::layout::layout_animated_at(
+            ir,
+            state,
+            self.width,
+            self.height,
+            elapsed_ms,
+            &mut self.anim.borrow_mut(),
+        );
         let pixels = self.raster_laid(&laid, &ir.theme);
         let dirty = match (self.prev.as_deref(), self.prev_size) {
             (Some(prev), Some((pw, ph))) => {
@@ -339,7 +377,14 @@ impl Renderer {
     /// because a blurred or backdrop effect reads pixels outside any one
     /// node's box.
     pub fn render_incremental_at(&mut self, ir: &Ir, state: &StateView, elapsed_ms: i64) -> Frame {
-        let laid = crate::layout::layout_at(ir, state, self.width, self.height, elapsed_ms);
+        let laid = crate::layout::layout_animated_at(
+            ir,
+            state,
+            self.width,
+            self.height,
+            elapsed_ms,
+            &mut self.anim.borrow_mut(),
+        );
         let pal = Palette::from_theme(&ir.theme);
         // A previous frame is reusable only when the viewport is unchanged, so
         // a resize or the first frame still rasterizes the whole surface.

@@ -1,7 +1,7 @@
 //! Pure, deterministic adaptive layout. All arithmetic is integer i64/i128:
 //! no floats, no time, no randomness, no host queries.
 
-use crate::anim::{self, Curve};
+use crate::anim::{default_duration_ms, AnimSpec, AnimTable, AnimValue, Curve};
 use crate::effects::VisualEffect;
 use crate::ir::Contrast;
 use crate::particles::Particles;
@@ -12,6 +12,35 @@ pub const SETTLED_MS: i64 = 4000;
 
 /// Fixed-point unit: 1024 == fully opaque, 0 == fully transparent.
 pub const UNIT: i64 = 1024;
+
+/// Fixed positions of the animated props inside an `AnimTable` entry vector.
+const ANIMATED_RADIUS: usize = 0;
+const ANIMATED_PADDING: usize = 1;
+const ANIMATED_SHADOW: usize = 2;
+const ANIMATED_COLOR: usize = 3;
+const ANIMATED_OPACITY: usize = 4;
+const ANIMATED_COUNT: usize = 5;
+
+/// The animated prop values of one node, in the fixed order above. The colour
+/// slot is a fully transparent `AnimValue::Color` when the node has no fill,
+/// so a missing fill never draws a box and a first-layout colour fades in from
+/// transparent.
+type AnimProps = [AnimValue; ANIMATED_COUNT];
+
+fn anim_props_default() -> AnimProps {
+    [
+        AnimValue::scalar(0),
+        AnimValue::scalar(0),
+        AnimValue::scalar(0),
+        AnimValue::color(Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }),
+        AnimValue::scalar(0),
+    ]
+}
 
 /// Viewport width tiers, in logical pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -520,13 +549,31 @@ pub fn layout(ir: &Ir, state: &StateView, width: u32, height: u32) -> Vec<LaidOu
     layout_at(ir, state, width, height, SETTLED_MS)
 }
 
-/// Layout at a given animation clock position.
+/// Layout at a given animation clock position with a fresh animation table.
+///
+/// This is the pure, stateless path: a node animates only its entry appearance
+/// (the first layout installs the zeroed `from` values). Renderers that track
+/// prop changes across ticks use [`layout_animated_at`] with a persistent table.
 pub fn layout_at(
     ir: &Ir,
     state: &StateView,
     width: u32,
     height: u32,
     elapsed_ms: i64,
+) -> Vec<LaidOut> {
+    layout_animated_at(ir, state, width, height, elapsed_ms, &mut AnimTable::new())
+}
+
+/// Layout at a given animation clock position, updating `anim` with each
+/// node's animated targets. The table is the renderer's cross-tick animation
+/// state: a changed target restarts the interpolation from the previous target.
+pub fn layout_animated_at(
+    ir: &Ir,
+    state: &StateView,
+    width: u32,
+    height: u32,
+    elapsed_ms: i64,
+    anim: &mut AnimTable,
 ) -> Vec<LaidOut> {
     let bp = Breakpoint::from_width(width);
     let pal = Palette::from_theme(&ir.theme);
@@ -553,28 +600,25 @@ pub fn layout_at(
         Align::Start,
         elapsed_ms,
         None,
+        anim,
         &mut out,
     );
     out
 }
 
-/// Entry animation: the box grows from its centre and fades in, both in fixed point.
-fn entry_transform(n: &Node, rect: Rect, elapsed_ms: i64) -> (Rect, i64) {
-    if n.props.animate == Curve::None {
-        return (rect, UNIT);
-    }
-    let p = anim::progress(n.props.animate, elapsed_ms).clamp(0, UNIT);
+/// Entry animation: the box grows from its centre over the given fixed-point
+/// progress. The opacity fade is handled by the animation table, so this only
+/// scales the rect.
+fn entry_transform(rect: Rect, p: i64) -> Rect {
+    let p = p.clamp(0, UNIT);
     let w = rect.w.saturating_mul(p) / UNIT;
     let h = rect.h.saturating_mul(p) / UNIT;
-    (
-        Rect {
-            x: rect.x + (rect.w - w) / 2,
-            y: rect.y + (rect.h - h) / 2,
-            w,
-            h,
-        },
-        p,
-    )
+    Rect {
+        x: rect.x + (rect.w - w) / 2,
+        y: rect.y + (rect.h - h) / 2,
+        w,
+        h,
+    }
 }
 
 fn control_of(n: &Node, state: &StateView) -> Option<Control> {
@@ -678,6 +722,7 @@ fn place(
     inherited_align: Align,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
     if !visible(n, state) {
@@ -685,17 +730,19 @@ fn place(
     }
     let dir = direction(n.kind, bp);
     let scale = font_scale(&n.props, 16);
-    let (rect, anim_p) = entry_transform(n, rect, elapsed_ms);
+    // The target rect is the laid-out rect before the entry box grows; the
+    // animated radius is measured against it so a settled frame is exact.
+    let target_rect = rect;
 
-    let radius = match n.kind {
-        Kind::Icon | Kind::Avatar => rect.w.min(rect.h) / 2,
-        Kind::Badge => rect.h / 2,
+    let target_radius = match n.kind {
+        Kind::Icon | Kind::Avatar => target_rect.w.min(target_rect.h) / 2,
+        Kind::Badge => target_rect.h / 2,
         _ => n.props.radius.unwrap_or(pal.radius),
     }
     .max(0)
-    .min(rect.w.min(rect.h).max(0) / 2);
+    .min(target_rect.w.min(target_rect.h).max(0) / 2);
 
-    let (mut fill, mut border, mut border_w) = match n.kind {
+    let (fill, mut border, mut border_w) = match n.kind {
         Kind::Column
         | Kind::Row
         | Kind::Container
@@ -765,6 +812,53 @@ fn place(
             }
         }
     };
+    // Interpolate the animated props from the previous targets to the current
+    // ones over the node's schedule. A node with `animate: none` keeps its
+    // declared values; a settled animation is exactly the target, so the laid
+    // out node at rest is byte-identical to a non-animated render.
+    let base_fill = fill;
+    let target_props: AnimProps = [
+        AnimValue::scalar(target_radius),
+        AnimValue::scalar(n.props.padding),
+        AnimValue::scalar(n.props.shadow.unwrap_or(0).clamp(0, 8)),
+        match base_fill {
+            Some(c) => AnimValue::color(c),
+            None => AnimValue::color(Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0,
+            }),
+        },
+        AnimValue::scalar(n.props.opacity.unwrap_or(UNIT)),
+    ];
+    let (interp, entry_p) = anim_interpolate(n, anim, elapsed_ms, target_props);
+    // The entry box grows only on the first layout; a later prop change keeps
+    // the full target rect and animates the prop values in place.
+    let rect = match entry_p {
+        Some(p) => entry_transform(target_rect, p),
+        None => target_rect,
+    };
+    let radius = interp[ANIMATED_RADIUS]
+        .as_scalar()
+        .unwrap_or(target_radius)
+        .max(0)
+        .min(rect.w.min(rect.h).max(0) / 2);
+    let padding = interp[ANIMATED_PADDING]
+        .as_scalar()
+        .unwrap_or(n.props.padding);
+    let shadow = interp[ANIMATED_SHADOW].as_scalar().unwrap_or(0);
+    // A node without a base fill never gains one: the colour slot animates
+    // but is dropped unless the node had a fill to begin with.
+    let mut fill = if base_fill.is_none() {
+        None
+    } else {
+        match interp[ANIMATED_COLOR] {
+            AnimValue::Color(c) => Some(c),
+            AnimValue::Scalar(_) => None,
+        }
+    };
+    let opacity = interp[ANIMATED_OPACITY].as_scalar().unwrap_or(UNIT);
     // Glass is a frosted fill: the base colour blended with the accent.
     fill = match (fill, n.props.glass) {
         (Some(c), true) => Some(lerp_color(c, pal.accent, UNIT / 4)),
@@ -824,8 +918,8 @@ fn place(
     let effects = Effects {
         gradient: n.props.gradient,
         glass: n.props.glass,
-        shadow: n.props.shadow.unwrap_or(0).clamp(0, 8),
-        opacity: (n.props.opacity.unwrap_or(UNIT) * anim_p) / UNIT,
+        shadow,
+        opacity,
     };
 
     // The icon glyph is drawn from the declared name; the fallback glyph is
@@ -866,11 +960,77 @@ fn place(
     }
 
     match n.kind {
-        Kind::Grid => place_grid(n, rect, bp, pal, state, elapsed_ms, clip, out),
-        Kind::Scroll => place_scroll(n, rect, bp, pal, state, elapsed_ms, out),
-        Kind::Dialog => place_dialog(n, rect, bp, pal, state, elapsed_ms, clip, out),
-        _ => place_children(n, rect, bp, pal, state, elapsed_ms, clip, out),
+        Kind::Grid => place_grid(
+            n, rect, bp, pal, state, elapsed_ms, clip, padding, anim, out,
+        ),
+        Kind::Scroll => place_scroll(n, rect, bp, pal, state, elapsed_ms, padding, anim, out),
+        Kind::Dialog => place_dialog(
+            n, rect, bp, pal, state, elapsed_ms, clip, padding, anim, out,
+        ),
+        _ => place_children(
+            n, rect, bp, pal, state, elapsed_ms, clip, padding, anim, out,
+        ),
     }
+}
+
+/// Resolve one node's animated props at `elapsed_ms`.
+///
+/// The table stores the previous targets (`from`) and the current targets
+/// (`to`) plus the tick the current animation started. A first layout installs
+/// `from` as the zeroed defaults so the node appears with the entry animation;
+/// a changed target restarts the animation at the current tick from the
+/// previous target. An unchanged target keeps the running schedule, so an
+/// animation that has already settled stays settled. `animate: none` returns
+/// the targets unchanged.
+///
+/// The returned `Option` is `Some(progress)` only for the entry animation, so
+/// the caller can grow the box from its centre on the first layout and leave
+/// the rect alone for later prop changes.
+fn anim_interpolate(
+    n: &Node,
+    anim: &mut AnimTable,
+    elapsed_ms: i64,
+    target: AnimProps,
+) -> (Vec<AnimValue>, Option<i64>) {
+    if n.props.animate == Curve::None {
+        return (target.to_vec(), None);
+    }
+    let spec = AnimSpec::new(
+        n.props.animate,
+        n.props
+            .duration
+            .unwrap_or_else(|| default_duration_ms(n.props.animate)),
+        n.props.delay.unwrap_or(0),
+    );
+    let target_vec = target.to_vec();
+    let existing = anim.entries.get(&n.id);
+    let is_entry = existing.is_none();
+    let (from, to, spec, start_ms) = match existing {
+        // An unchanged target keeps the running schedule, so an animation that
+        // has already settled stays settled and a running one continues.
+        Some(e) if e.to == target_vec => (e.from.clone(), e.to.clone(), e.spec, e.start_ms),
+        // A first layout has no previous target: it is the entry animation,
+        // driven by the absolute tick from zero. A changed target restarts at
+        // the current tick from the previous target.
+        _ => {
+            let from = existing
+                .map(|e| e.to.clone())
+                .unwrap_or_else(|| anim_props_default().to_vec());
+            let start_ms = if existing.is_some() { elapsed_ms } else { 0 };
+            (from, target_vec, spec, start_ms)
+        }
+    };
+    anim.set_targets(n.id, from.clone(), to.clone(), spec, start_ms);
+    let p = anim
+        .entries
+        .get(&n.id)
+        .map_or(UNIT, |e| e.progress_at(elapsed_ms));
+    let values = from
+        .iter()
+        .zip(&to)
+        .map(|(&f, &t)| AnimValue::lerp(f, t, p))
+        .collect();
+    (values, if is_entry { Some(p) } else { None })
 }
 
 /// Generic container layout: children share the main axis in proportion to
@@ -884,10 +1044,12 @@ fn place_children(
     state: &StateView,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    padding: i64,
+    anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
     let dir = direction(n.kind, bp);
-    let content = inset(rect, n.props.padding);
+    let content = inset(rect, padding);
     let vertical = dir == Direction::Vertical;
     let content_main = if vertical { content.h } else { content.w };
     let cross_avail = if vertical { content.w } else { content.h };
@@ -1021,6 +1183,7 @@ fn place_children(
             n.props.align,
             elapsed_ms,
             clip,
+            anim,
             out,
         );
         cursor = cursor.saturating_add(main.saturating_add(gap));
@@ -1041,13 +1204,15 @@ fn place_grid(
     state: &StateView,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    padding: i64,
+    anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
     let kids: Vec<&Node> = n.children.iter().filter(|c| visible(c, state)).collect();
     if kids.is_empty() {
         return;
     }
-    let base = inset(rect, n.props.padding);
+    let base = inset(rect, padding);
     // The compact and medium tiers keep the fixed grid; the expanded tiers and
     // above derive the column count, gutter and margin from the width.
     let fluid = if bp >= Breakpoint::Expanded && n.props.columns.is_none() {
@@ -1106,6 +1271,7 @@ fn place_grid(
                 n.props.align,
                 elapsed_ms,
                 clip,
+                anim,
                 out,
             );
             x += w;
@@ -1127,9 +1293,11 @@ fn place_scroll(
     pal: &Palette,
     state: &StateView,
     elapsed_ms: i64,
+    padding: i64,
+    anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
-    let content = inset(rect, n.props.padding);
+    let content = inset(rect, padding);
     let clip = Some(rect);
     let gap = n.props.gap.max(0);
     let mut y = content.y;
@@ -1157,6 +1325,7 @@ fn place_scroll(
             n.props.align,
             elapsed_ms,
             clip,
+            anim,
             out,
         );
         y = y.saturating_add(h.saturating_add(gap));
@@ -1173,9 +1342,11 @@ fn place_dialog(
     state: &StateView,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    padding: i64,
+    anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
-    let content = inset(rect, n.props.padding);
+    let content = inset(rect, padding);
     let title_h = font::GLYPH_H.saturating_mul(font_scale(&n.props, 16));
     // The title band belongs to the dialog box itself.
     if let Some(last) = out.last_mut() {
@@ -1210,6 +1381,7 @@ fn place_dialog(
             n.props.align,
             elapsed_ms,
             clip,
+            anim,
             out,
         );
         y = y.saturating_add(h.saturating_add(gap));
