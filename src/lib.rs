@@ -38,6 +38,7 @@ pub mod ir;
 pub mod layout;
 pub mod nav;
 pub mod particles;
+pub mod perf;
 pub mod primitives;
 pub mod raster;
 pub mod svg;
@@ -71,6 +72,10 @@ pub use layout::{
 };
 pub use nav::{NavError, Navigation, Navigator, MAX_STACK_DEPTH};
 pub use particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
+pub use perf::{
+    apply_policy, perf_report, FrameBudget, PerfReport, PerfWindow, QualityTier, RenderConfig,
+    TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
+};
 pub use svg::{svg, svg_at};
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).
