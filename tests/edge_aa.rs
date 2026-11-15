@@ -21,22 +21,30 @@ const IR: &str = r##"{
 }"##;
 
 fn fixture() -> (PathBuf, PathBuf) {
-    // Concurrent test binaries share CARGO_TARGET_TMPDIR.
+    // Concurrent tests within this binary share CARGO_TARGET_TMPDIR, so each
+    // call gets a unique name instead of colliding on process::id().
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let ir = dir.join(format!("edgeaa-{}.opuir.json", std::process::id()));
+    let ir = dir.join(format!("edgeaa-{}-{}.opuir.json", std::process::id(), seq));
     fs::write(&ir, IR).unwrap();
-    (ir, dir.join(format!("edgeaa-{}.ppm", std::process::id())))
+    (
+        ir,
+        dir.join(format!("edgeaa-{}-{}.ppm", std::process::id(), seq)),
+    )
 }
 
-fn cli(args: &[&str]) -> std::process::Output {
+fn cli(args: &[&str]) -> (std::process::Output, PathBuf) {
     let (ir, ppm) = fixture();
-    Command::new(env!("CARGO_BIN_EXE_opurom-render"))
+    let out = Command::new(env!("CARGO_BIN_EXE_opurom-render"))
         .arg(&ir)
         .args(["80", "80"])
         .arg(&ppm)
         .args(args)
         .output()
-        .unwrap()
+        .unwrap();
+    (out, ppm)
 }
 
 fn library(on: bool) -> Vec<u8> {
@@ -57,7 +65,7 @@ fn default_path_is_byte_identical_with_or_without_the_setter() {
         digest_hex(&plain)
     );
     // The CLI with no flag emits no extra stdout line.
-    let out = cli(&[]);
+    let (out, _) = cli(&[]);
     assert!(
         out.status.success(),
         "{}",
@@ -94,8 +102,8 @@ fn edge_coverage_changes_only_corner_pixels() {
 #[test]
 fn edge_coverage_is_deterministic_across_processes_and_library_calls() {
     assert_eq!(library(true), library(true));
-    let first = cli(&["--edge-aa"]);
-    let second = cli(&["--edge-aa"]);
+    let (first, first_ppm) = cli(&["--edge-aa"]);
+    let (second, _) = cli(&["--edge-aa"]);
     assert!(
         first.status.success(),
         "{}",
@@ -107,8 +115,7 @@ fn edge_coverage_is_deterministic_across_processes_and_library_calls() {
         String::from_utf8_lossy(&second.stderr)
     );
     assert_eq!(first.stdout, second.stdout);
-    let (_, ppm) = fixture();
-    let bytes = fs::read(&ppm).unwrap();
+    let bytes = fs::read(&first_ppm).unwrap();
     assert!(bytes.starts_with(b"P6\n80 80\n255\n"));
 }
 
