@@ -564,8 +564,11 @@ fn v0_1_golden_digests_are_unchanged_by_pipeline() {
     };
     assert!(run("320", "240", "capability-golden-320.ppm", &[]).contains("digest=8d45f412996a99c6"));
     assert!(run("800", "600", "capability-golden-800.ppm", &[]).contains("digest=318beb1dd337bc4e"));
-    assert!(
-        run("800", "600", "capability-golden-7.ppm", &["--state", "count=7"])
-            .contains("digest=40073cb95c912d80")
-    );
+    assert!(run(
+        "800",
+        "600",
+        "capability-golden-7.ppm",
+        &["--state", "count=7"]
+    )
+    .contains("digest=40073cb95c912d80"));
 }

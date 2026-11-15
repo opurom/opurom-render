@@ -111,7 +111,8 @@ fn the_three_pinned_golden_frames_are_unchanged() {
         env!("CARGO_MANIFEST_DIR"),
         "/../opurom-examples/golden/counter.opuir.json"
     );
-    let ir = parse_ir(&std::fs::read_to_string(contract).expect("golden counter IR")).expect("parse");
+    let ir =
+        parse_ir(&std::fs::read_to_string(contract).expect("golden counter IR")).expect("parse");
     let mut state = StateView::from_ir(&ir);
     state.set("count", opurom_render::StateValue::Int(0));
     assert_eq!(

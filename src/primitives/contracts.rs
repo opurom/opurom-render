@@ -1,6 +1,6 @@
 // Generated primitive table. Edit the generator, not this file.
 // One entry per additional primitive kind; order fixes the kind code.
-use super::{Motif, Contract, COUNT};
+use super::{Contract, Motif, COUNT};
 use crate::ir::Role;
 
 pub const CONTRACTS: [Contract; COUNT] = [

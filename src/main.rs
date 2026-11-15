@@ -361,10 +361,9 @@ fn run() -> Result<(), String> {
                 let contract = args
                     .get(i + 1)
                     .ok_or_else(|| "--auto-degrade requires 60 or 120".to_string())?;
-                auto_rate =
-                    Some(FrameRate::parse(contract).ok_or_else(|| {
-                        format!("invalid auto-degrade {contract:?}: expected 60 or 120")
-                    })?);
+                auto_rate = Some(FrameRate::parse(contract).ok_or_else(|| {
+                    format!("invalid auto-degrade {contract:?}: expected 60 or 120")
+                })?);
                 i += 2;
             }
             "--frame-ms" => {

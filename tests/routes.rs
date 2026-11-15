@@ -1,7 +1,9 @@
 //! Multi-page routes: parsing, per-route rendering, navigation stack wiring,
 //! and the single-page backward-compatibility guard.
 
-use opurom_render::{digest_hex, parse_ir, Navigator, Op, Renderer, StateView, TransitionKind, ONE, TRANSITION_MS};
+use opurom_render::{
+    digest_hex, parse_ir, Navigator, Op, Renderer, StateView, TransitionKind, ONE, TRANSITION_MS,
+};
 
 // Home pushes Detail through a Button tap; Detail pops with `pop`. Detail
 // numbers its nodes from its own root id (2) to prove per-route id seeding.
@@ -82,7 +84,10 @@ fn push_renders_the_new_route_and_pop_returns_home() {
 
     let mut nav = Navigator::with_root(ir.initial_route.clone().unwrap(), TransitionKind::Slide);
     ir.check_push_target("Detail").unwrap();
-    let started = nav.apply_nav("Detail").unwrap().expect("push starts a transition");
+    let started = nav
+        .apply_nav("Detail")
+        .unwrap()
+        .expect("push starts a transition");
     assert_eq!(started.duration_ms, TRANSITION_MS);
     assert_eq!(nav.stack(), ["Home", "Detail"]);
     assert_eq!(nav.top(), Some("Detail"));
@@ -121,7 +126,10 @@ fn push_targets_are_validated_against_the_declared_routes() {
     assert!(err.to_string().contains("Detail"), "{err}");
 
     // A push to an undeclared route is a parse error too.
-    let bad = ROUTES_IR.replace(r#"{"op": "push", "target": "Detail"}"#, r#"{"op": "push", "target": "Missing"}"#);
+    let bad = ROUTES_IR.replace(
+        r#"{"op": "push", "target": "Detail"}"#,
+        r#"{"op": "push", "target": "Missing"}"#,
+    );
     let err = parse_ir(&bad).unwrap_err();
     assert!(err.to_string().contains("Missing"), "{err}");
 

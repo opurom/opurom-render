@@ -67,8 +67,7 @@ pub struct Route {
 impl Ir {
     /// True when any node, visible or hidden, carries an effect prop.
     pub fn has_visual_effects(&self) -> bool {
-        self.tree.has_visual_effects()
-            || self.routes.values().any(|r| r.tree.has_visual_effects())
+        self.tree.has_visual_effects() || self.routes.values().any(|r| r.tree.has_visual_effects())
     }
 
     /// The declared route named `name`, with its tree and optional title.

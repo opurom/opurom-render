@@ -386,10 +386,12 @@ fn v0_1_golden_digests_are_unchanged_by_pipeline() {
         String::from_utf8_lossy(&output.stdout).to_string()
     };
     assert!(
-        run("320", "240", &dir.join("capability-golden-320.ppm"), &[]).contains("digest=8d45f412996a99c6")
+        run("320", "240", &dir.join("capability-golden-320.ppm"), &[])
+            .contains("digest=8d45f412996a99c6")
     );
     assert!(
-        run("800", "600", &dir.join("capability-golden-800.ppm"), &[]).contains("digest=318beb1dd337bc4e")
+        run("800", "600", &dir.join("capability-golden-800.ppm"), &[])
+            .contains("digest=318beb1dd337bc4e")
     );
     assert!(run(
         "800",

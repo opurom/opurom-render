@@ -70,7 +70,10 @@ pub use contracts::CONTRACTS;
 
 /// Resolve a kind name to its code. [`crate::ir::Kind::parse`] uses this.
 pub fn parse(name: &str) -> Option<u16> {
-    CONTRACTS.iter().position(|s| s.name == name).map(|i| i as u16)
+    CONTRACTS
+        .iter()
+        .position(|s| s.name == name)
+        .map(|i| i as u16)
 }
 
 pub fn name_of(code: u16) -> &'static str {
@@ -559,13 +562,23 @@ fn draw_motif(p: &mut Paint, m: Motif) {
                     let cut = capability.2 * ratio / 100;
                     (
                         (capability.0, capability.1, cut, capability.3),
-                        (capability.0 + cut, capability.1, capability.2 - cut, capability.3),
+                        (
+                            capability.0 + cut,
+                            capability.1,
+                            capability.2 - cut,
+                            capability.3,
+                        ),
                     )
                 } else {
                     let cut = capability.3 * ratio / 100;
                     (
                         (capability.0, capability.1, capability.2, cut),
-                        (capability.0, capability.1 + cut, capability.2, capability.3 - cut),
+                        (
+                            capability.0,
+                            capability.1 + cut,
+                            capability.2,
+                            capability.3 - cut,
+                        ),
                     )
                 };
                 p.fill(

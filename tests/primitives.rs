@@ -6,7 +6,7 @@
 //! data-role backend and the three 0.1.0 golden digests are covered too.
 
 use opurom_render::a11y::{a11y_tree, role_of};
-use opurom_render::primitives::{self, COUNT, CONTRACTS};
+use opurom_render::primitives::{self, CONTRACTS, COUNT};
 use opurom_render::{digest_hex, parse_ir, svg, Kind, Renderer, Role, StateView};
 use std::collections::HashSet;
 use std::{fs, path::PathBuf, process::Command};
@@ -88,7 +88,11 @@ fn capability_has_68_new_kinds_on_top_of_32() {
             "{} needs a documented prop schema",
             contract.name
         );
-        assert!(!contract.family.is_empty(), "{} needs a family", contract.name);
+        assert!(
+            !contract.family.is_empty(),
+            "{} needs a family",
+            contract.name
+        );
     }
 }
 
@@ -103,7 +107,11 @@ fn capability_kinds_parse_to_extended_and_round_trip_their_names() {
             contract.name
         );
         assert_eq!(kind.name(), contract.name, "name() must round-trip");
-        assert!(kind.is_leaf(), "{} is a self-contained drawing", contract.name);
+        assert!(
+            kind.is_leaf(),
+            "{} is a self-contained drawing",
+            contract.name
+        );
         assert_eq!(primitives::name_of(code as u16), contract.name);
         assert_eq!(primitives::role_of(code as u16), contract.role);
         assert_eq!(primitives::prop_schema(code as u16), contract.props);
@@ -210,7 +218,11 @@ fn capability_kinds_have_defined_a11y_roles_in_tree_and_svg() {
             contract.name
         );
         let tree = a11y_tree(&ir, &state, 200, 140);
-        assert_eq!(tree[0].role, contract.role, "a11y tree role of {}", contract.name);
+        assert_eq!(
+            tree[0].role, contract.role,
+            "a11y tree role of {}",
+            contract.name
+        );
         let doc = svg(&ir, &state, 200, 140);
         assert!(
             doc.contains(&format!("data-role=\"{}\"", contract.role.name())),
@@ -311,8 +323,11 @@ fn capability_v0_1_golden_digests_are_unchanged() {
     };
     assert!(run("320", "240", "capability-golden-320.ppm", &[]).contains("digest=8d45f412996a99c6"));
     assert!(run("800", "600", "capability-golden-800.ppm", &[]).contains("digest=318beb1dd337bc4e"));
-    assert!(
-        run("800", "600", "capability-golden-7.ppm", &["--state", "count=7"])
-            .contains("digest=40073cb95c912d80")
-    );
+    assert!(run(
+        "800",
+        "600",
+        "capability-golden-7.ppm",
+        &["--state", "count=7"]
+    )
+    .contains("digest=40073cb95c912d80"));
 }
