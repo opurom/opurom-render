@@ -24,8 +24,9 @@
 
 use opurom_render::{
     a11y_json_at, apply_policy, choose_quality, digest_hex, is_interactive, parse_ir, svg_at,
-    Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, RenderConfig, Renderer,
-    StateValue, StateView, Transition, TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
+    Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityTier, RenderConfig,
+    Renderer, StateValue, StateView, Transition, TransitionKind, ValueType, SETTLED_MS,
+    WINDOW_FRAMES,
 };
 use std::{env, fs, process};
 
@@ -62,6 +63,31 @@ fn auto_degrade_ir(ir: &Ir, rate: FrameRate, samples: &[i64], n: usize) -> Ir {
     let mut config = RenderConfig::new(ir.clone());
     apply_policy(budget.tier(), &mut config);
     config.ir().clone()
+}
+
+/// Deterministic one-line tier verdict for `--auto-degrade`, mirroring the
+/// same `FrameBudget` sequence the render applies. The decision rules live in
+/// `perf.rs` alone; this line exposes the numbers (p50/p95, target, promote
+/// threshold) so an external mirror can re-derive the same verdict.
+fn auto_degrade_tier_line(rate: FrameRate, samples: &[i64], n: usize) -> String {
+    let mut budget = FrameBudget::new(rate);
+    for i in 0..n {
+        budget.push(samples[i % samples.len()]);
+    }
+    let report = budget.report();
+    let tier = match budget.tier() {
+        QualityTier::Full => "full",
+        QualityTier::Reduced => "reduced",
+        QualityTier::Minimal => "minimal",
+    };
+    format!(
+        "tier={tier} rate={} frames={n} p50={}ms p95={}ms target={}ms promote={}ms",
+        rate.name(),
+        report.p50_ms,
+        report.p95_ms,
+        budget.target_ms(),
+        budget.promote_ms()
+    )
 }
 
 /// Applies `choose_quality` to the parsed IR tree in place, so the render
@@ -202,6 +228,23 @@ mod tests {
         let minimal = auto_degrade_ir(&base, FrameRate::Hz60, &[30], 2 * WINDOW_FRAMES);
         assert_eq!(count(&minimal), 64);
         assert_eq!(radius(&minimal), 2);
+    }
+
+    #[test]
+    fn tier_line_matches_the_budget_verdict() {
+        // One slow window over the 16 ms target: p95=30 > 16 -> reduced.
+        let slow = auto_degrade_tier_line(FrameRate::Hz60, &[30], WINDOW_FRAMES);
+        assert_eq!(
+            slow,
+            "tier=reduced rate=60 frames=20 p50=30ms p95=30ms target=16ms promote=12ms"
+        );
+        // Fast samples stay at Full: p95=16 is neither above target nor below
+        // the promote threshold.
+        let fast = auto_degrade_tier_line(FrameRate::Hz60, &[16], WINDOW_FRAMES);
+        assert!(fast.starts_with("tier=full rate=60 frames=20 p50=16ms p95=16ms"));
+        // The 120 fps budget degrades on samples its 8 ms target rejects.
+        let tight = auto_degrade_tier_line(FrameRate::Hz120, &[10], WINDOW_FRAMES);
+        assert!(tight.starts_with("tier=reduced rate=120 frames=20 p50=10ms p95=10ms target=8ms"));
     }
 }
 
@@ -446,11 +489,13 @@ fn run() -> Result<(), String> {
     // Opt-in only: without the flag the IR tree is untouched, so the default
     // path is byte-for-byte identical to previous releases.
     let quality_line = frame_budget_ms.map(|ms| apply_quality(&mut ir.tree, ms));
+    let mut tier_line: Option<String> = None;
     // Opt-in measured-frame budget: apply the decided tier caps to the render
     // config. Without it the IR is untouched, so the default path is identical.
     if let Some(rate) = auto_rate {
         let n = frame_samples.unwrap_or(WINDOW_FRAMES);
         ir = auto_degrade_ir(&ir, rate, &frame_ms, n);
+        tier_line = Some(auto_degrade_tier_line(rate, &frame_ms, n));
     }
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
     renderer.set_edge_aa(edge_aa);
@@ -510,6 +555,9 @@ fn run() -> Result<(), String> {
         println!("{line}");
     }
     if let Some(line) = quality_line {
+        println!("{line}");
+    }
+    if let Some(line) = tier_line {
         println!("{line}");
     }
     Ok(())

@@ -149,12 +149,25 @@ fn fast_samples_keep_the_baseline_frame_and_stdout_shape() {
     // At the 60 fps target every 16 ms sample is exactly on budget, so the
     // Full tier is a no-op and the frame is byte-identical to the default.
     let fast = stdout(&ir, &ppm, &["--auto-degrade", "60", "--frame-ms", "16"]);
-    assert_eq!(fast, baseline, "fast samples must not change the frame");
-    assert_eq!(fast.lines().count(), 2, "stdout stays digest then dirty");
+    assert_eq!(
+        fast.lines().take(2).collect::<Vec<_>>().join("\n") + "\n",
+        baseline,
+        "fast samples must not change the frame"
+    );
+    assert_eq!(fast.lines().count(), 3, "digest, dirty, then the tier line");
     assert!(
         fast.starts_with("digest=") && fast.contains("\ndirty="),
         "{fast}"
     );
+    // The tier verdict is one stable machine-parsable line.
+    let line = fast.lines().nth(2).unwrap();
+    assert!(
+        line.starts_with("tier=full rate=60 frames=20 p50=16ms p95=16ms target=16ms promote=12ms"),
+        "{line}"
+    );
+    // Without --auto-degrade the stdout stays digest then dirty, byte-identical
+    // to previous releases.
+    assert_eq!(stdout(&ir, &ppm, &[]).lines().count(), 2);
 }
 
 #[test]
@@ -162,7 +175,24 @@ fn slow_samples_degrade_once_per_full_window() {
     let (ir, ppm) = fixtures();
     let baseline = digest(&ir, &ppm, &[]);
     // 19 injected frames never complete a rolling window, so no tier decision
-    // is taken and the frame stays on the baseline.
+    // is taken and the frame stays on the baseline. The tier line still prints
+    // and names the not-yet-decided Full tier.
+    let pre = stdout(
+        &ir,
+        &ppm,
+        &[
+            "--auto-degrade",
+            "60",
+            "--frame-ms",
+            "30",
+            "--frame-samples",
+            "19",
+        ],
+    );
+    assert!(
+        pre.lines().nth(2).unwrap().starts_with("tier=full "),
+        "{pre}"
+    );
     assert_eq!(
         digest(
             &ir,
@@ -192,6 +222,24 @@ fn slow_samples_degrade_once_per_full_window() {
         ],
     );
     assert_ne!(reduced, baseline, "one full slow window must degrade");
+    let reduced_out = stdout(
+        &ir,
+        &ppm,
+        &[
+            "--auto-degrade",
+            "60",
+            "--frame-ms",
+            "30",
+            "--frame-samples",
+            "20",
+        ],
+    );
+    assert!(
+        reduced_out.lines().nth(2).unwrap().starts_with(
+            "tier=reduced rate=60 frames=20 p50=30ms p95=30ms target=16ms promote=12ms"
+        ),
+        "{reduced_out}"
+    );
     let minimal = digest(
         &ir,
         &ppm,
