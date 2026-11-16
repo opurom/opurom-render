@@ -454,6 +454,23 @@ fn font_scale(p: &Props, default_size: i64) -> i64 {
     (text_size(p, default_size).saturating_add(3) / 7).clamp(1, 8)
 }
 
+/// Quantized scale derived from an explicit `fontPx` (SYSTEM_FONT_DISPLAY.md).
+/// `ceil(fontPx/7)` with a floor of 1, i128 integer-only. `None` keeps the
+/// legacy quantized scale, so default paths are byte-identical.
+fn font_scale_from_px(p: &Props) -> Option<i64> {
+    p.font_px.map(|px| {
+        let ceil = (px as i128 + 6) / 7;
+        ceil.max(1) as i64
+    })
+}
+
+/// Natural text height from an explicit `fontPx`: a 1.5 line-height box
+/// (`ceil(3*fontPx/2)`) that leaves room for glyph descenders. i128 integer
+/// ceiling, no floats.
+fn font_height_from_px(px: i64) -> i64 {
+    ((3 * px as i128 + 1) / 2) as i64
+}
+
 fn text_width(text: &str, scale: i64, metrics: font::FontMetrics) -> i64 {
     font::text_width(text, scale, metrics)
 }
@@ -606,7 +623,7 @@ fn natural_w(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
     if let Some(w) = n.props.width {
         return w;
     }
-    let scale = font_scale(&n.props, 16);
+    let scale = font_scale_from_px(&n.props).unwrap_or_else(|| font_scale(&n.props, 16));
     let m = node_metrics(n);
     match n.kind {
         Kind::Text => text_width(&node_text(n, state), scale, m),
@@ -659,7 +676,11 @@ fn natural_h(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
                 body.saturating_mul(len).saturating_add(gaps)
             }
         }
-        Kind::Text => font::GLYPH_H.saturating_mul(scale),
+        Kind::Text => n
+            .props
+            .font_px
+            .map(font_height_from_px)
+            .unwrap_or_else(|| font::GLYPH_H.saturating_mul(scale)),
         Kind::Button => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
         Kind::Input => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
         Kind::Image => 64,
