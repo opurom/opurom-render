@@ -5,7 +5,7 @@ use crate::anim::{default_duration_ms, AnimSpec, AnimTable, AnimValue, Curve};
 use crate::effects::{VisualEffect, VisualEffectKind, EFFECT_UNIT};
 use crate::image::ImageFit;
 use crate::interaction::{NodeState, Tone, Variant};
-use crate::ir::Contrast;
+use crate::ir::{Contrast, Directionality};
 use crate::particles::Particles;
 use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateValue, StateView, Theme, ThemeMode};
 
@@ -390,6 +390,20 @@ fn direction(kind: Kind, bp: Breakpoint) -> Direction {
     }
 }
 
+/// Logical `start`/`end` swap under RTL (IR_ADDITIONS §15.2). `Center` and every
+/// non-alignment value pass through unchanged; this is axis-independent, like
+/// the web painter's `opuMirrorAlign`.
+fn mirror_align(a: Align, rtl: bool) -> Align {
+    if !rtl {
+        return a;
+    }
+    match a {
+        Align::Start => Align::End,
+        Align::End => Align::Start,
+        Align::Center => Align::Center,
+    }
+}
+
 /// Effective font size in integer logical pixels after `fontScale` (fixed point).
 pub(crate) fn text_size(p: &Props, default_size: i64) -> i64 {
     let base = p.size.unwrap_or(default_size);
@@ -762,6 +776,7 @@ pub fn layout_animated_at(
     anim: &mut AnimTable,
 ) -> Vec<LaidOut> {
     let bp = Breakpoint::from_width(width);
+    let rtl = ir.directionality == Directionality::Rtl;
     let pal = Palette::from_theme(&ir.theme);
     let mut tree = with_theme_font_scale(&ir.tree, ir.theme.font_scale);
     fill_font_metrics(&mut tree, ir.theme.font_metrics);
@@ -784,6 +799,7 @@ pub fn layout_animated_at(
         bp,
         &pal,
         state,
+        rtl,
         Align::Start,
         elapsed_ms,
         None,
@@ -907,6 +923,7 @@ fn place(
     bp: Breakpoint,
     pal: &Palette,
     state: &StateView,
+    rtl: bool,
     inherited_align: Align,
     elapsed_ms: i64,
     clip: Option<Rect>,
@@ -1118,6 +1135,8 @@ fn place(
         ),
         _ => (None, None, Align::Start),
     };
+    // Logical text alignment mirrors under RTL; the glyph run itself does not.
+    let text_align = mirror_align(text_align, rtl);
     if let Some(variant) = n.props.variant {
         text_color = Some(variant.text_color());
     }
@@ -1199,19 +1218,19 @@ fn place(
 
     match n.kind {
         Kind::Grid => place_grid(
-            n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
+            n, rect, bp, pal, state, rtl, elapsed_ms, clip, padding, icons, anim, out,
         ),
         Kind::Scroll => place_scroll(
-            n, rect, bp, pal, state, elapsed_ms, padding, icons, anim, out,
+            n, rect, bp, pal, state, rtl, elapsed_ms, padding, icons, anim, out,
         ),
         Kind::For => place_for(
-            n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
+            n, rect, bp, pal, state, rtl, elapsed_ms, clip, padding, icons, anim, out,
         ),
         Kind::Dialog => place_dialog(
-            n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
+            n, rect, bp, pal, state, rtl, elapsed_ms, clip, padding, icons, anim, out,
         ),
         _ => place_children(
-            n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
+            n, rect, bp, pal, state, rtl, elapsed_ms, clip, padding, icons, anim, out,
         ),
     }
 }
@@ -1308,6 +1327,7 @@ fn place_children(
     bp: Breakpoint,
     pal: &Palette,
     state: &StateView,
+    rtl: bool,
     elapsed_ms: i64,
     clip: Option<Rect>,
     padding: i64,
@@ -1331,7 +1351,13 @@ fn place_children(
     let vertical = dir == Direction::Vertical;
     let content_main = if vertical { content.h } else { content.w };
     let cross_avail = if vertical { content.w } else { content.h };
-    let kids: Vec<&Node> = n.children.iter().filter(|c| visible(c, state)).collect();
+    let mut kids: Vec<&Node> = n.children.iter().filter(|c| visible(c, state)).collect();
+    // Horizontal rows reverse child order under RTL: visual slot i holds source
+    // child n-1-i, with each child's computed size and the gap unchanged.
+    // Vertical stacks (Column and compact Row) keep their order.
+    if rtl && dir == Direction::Horizontal {
+        kids.reverse();
+    }
     let count = kids.len() as i64;
     let gap = n.props.gap.max(0);
     let gaps = gap.saturating_mul(count.saturating_sub(1));
@@ -1411,7 +1437,7 @@ fn place_children(
         .iter()
         .fold(0i64, |a, &s| a.saturating_add(s))
         .saturating_add(gaps);
-    let main_offset = match n.props.align {
+    let main_offset = match mirror_align(n.props.align, rtl) {
         Align::Start => 0,
         Align::Center => (content_main - used) / 2,
         Align::End => content_main - used,
@@ -1497,7 +1523,7 @@ fn place_children(
         } else {
             main_override.unwrap_or(sizes[i]).min(content_main).max(0)
         };
-        let cross_offset = match n.props.align {
+        let cross_offset = match mirror_align(n.props.align, rtl) {
             Align::Start => 0,
             Align::Center => (cross_avail - cross) / 2,
             Align::End => cross_avail - cross,
@@ -1525,6 +1551,7 @@ fn place_children(
             bp,
             pal,
             state,
+            rtl,
             n.props.align,
             elapsed_ms,
             child_clip,
@@ -1550,6 +1577,7 @@ fn place_grid(
     bp: Breakpoint,
     pal: &Palette,
     state: &StateView,
+    rtl: bool,
     elapsed_ms: i64,
     clip: Option<Rect>,
     padding: i64,
@@ -1609,7 +1637,10 @@ fn place_grid(
         let h = row_h[row];
         let mut x = content.x;
         for col in 0..cols {
-            let idx = row * cols as usize + col as usize;
+            // RTL reverses column order within each row; row order and column
+            // widths are unchanged. With one column this is a no-op.
+            let src_col = if rtl { cols - 1 - col } else { col };
+            let idx = row * cols as usize + src_col as usize;
             if idx >= kids.len() {
                 break;
             }
@@ -1630,6 +1661,7 @@ fn place_grid(
                 bp,
                 pal,
                 state,
+                rtl,
                 n.props.align,
                 elapsed_ms,
                 clip,
@@ -1655,6 +1687,7 @@ fn place_scroll(
     bp: Breakpoint,
     pal: &Palette,
     state: &StateView,
+    rtl: bool,
     elapsed_ms: i64,
     padding: i64,
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
@@ -1686,6 +1719,7 @@ fn place_scroll(
             bp,
             pal,
             state,
+            rtl,
             n.props.align,
             elapsed_ms,
             clip,
@@ -1710,6 +1744,7 @@ fn place_for(
     bp: Breakpoint,
     pal: &Palette,
     state: &StateView,
+    rtl: bool,
     elapsed_ms: i64,
     clip: Option<Rect>,
     padding: i64,
@@ -1751,6 +1786,7 @@ fn place_for(
                 bp,
                 pal,
                 &scoped,
+                rtl,
                 n.props.align,
                 elapsed_ms,
                 clip,
@@ -1781,6 +1817,7 @@ fn place_dialog(
     bp: Breakpoint,
     pal: &Palette,
     state: &StateView,
+    rtl: bool,
     elapsed_ms: i64,
     clip: Option<Rect>,
     padding: i64,
@@ -1820,6 +1857,7 @@ fn place_dialog(
             bp,
             pal,
             state,
+            rtl,
             n.props.align,
             elapsed_ms,
             clip,
