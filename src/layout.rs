@@ -15,6 +15,9 @@ pub const SETTLED_MS: i64 = 4000;
 /// Fixed-point unit: 1024 == fully opaque, 0 == fully transparent.
 pub const UNIT: i64 = 1024;
 
+/// Rows placed beyond each side of the scroll clip for a lazy `For` list.
+const SLIVER_OVERSCAN: usize = 2;
+
 /// Fixed positions of the animated props inside an `AnimTable` entry vector.
 const ANIMATED_RADIUS: usize = 0;
 const ANIMATED_PADDING: usize = 1;
@@ -1755,50 +1758,98 @@ fn place_for(
     let content = inset(rect, padding);
     let gap = n.props.gap.max(0);
     let elements = list_elements(n, state);
+
+    // Lazy sliver window (DYNAMIC_LISTS.md): with a clip, only rows intersecting
+    // the viewport plus a fixed overscan are materialized. The pre-pass computes
+    // each row's y/h with integer arithmetic and a scoped view -- no place(), no
+    // LaidOut, no glyph work -- while advancing y for every row, so visible rows
+    // keep their exact scroll offset. `clip == None` places every row, keeping
+    // the no-Scroll path and all dynamic-list goldens byte-identical.
+    let mut spans: Vec<(i64, i64)> = Vec::with_capacity(elements.len());
     let mut y = content.y;
     for element in &elements {
-        // Item scope: the element binds only inside this row's template, and the
-        // scoped view is dropped once the row is laid out.
         let mut scoped = state.clone();
         if let Some(name) = n.props.item.as_deref() {
             scoped.set(name, StateValue::Str(element.clone()));
         }
         for c in n.children.iter().filter(|c| visible(c, &scoped)) {
             let h = c.props.height.unwrap_or_else(|| natural_h(c, bp, &scoped));
-            let w = c
-                .props
-                .width
-                .unwrap_or_else(|| natural_w(c, bp, &scoped))
-                .min(content.w)
-                .max(0);
-            let child_rect = inset(
-                Rect {
-                    x: content.x,
-                    y,
-                    w,
-                    h,
-                },
-                c.props.margin,
-            );
-            place(
-                c,
-                child_rect,
-                bp,
-                pal,
-                &scoped,
-                rtl,
-                n.props.align,
-                elapsed_ms,
-                clip,
-                icons,
-                anim,
-                out,
-            );
+            spans.push((y, h));
             y = y.saturating_add(h.saturating_add(gap));
         }
     }
-}
 
+    // Select the row-index range: first..last intersecting the clip, grown by
+    // SLIVER_OVERSCAN rows on each side and clamped to the materialized rows.
+    let (lo, hi) = if let Some(c) = clip {
+        let win_top = c.y;
+        let win_bottom = c.y.saturating_add(c.h);
+        let mut first = None;
+        let mut last = None;
+        for (i, &(ry, rh)) in spans.iter().enumerate() {
+            if ry < win_bottom && ry.saturating_add(rh) > win_top {
+                if first.is_none() {
+                    first = Some(i);
+                }
+                last = Some(i);
+            }
+        }
+        match (first, last) {
+            (Some(f), Some(l)) => (
+                f.saturating_sub(SLIVER_OVERSCAN),
+                (l + SLIVER_OVERSCAN).min(spans.len().saturating_sub(1)),
+            ),
+            _ => (spans.len(), spans.len()), // no row intersects: place nothing
+        }
+    } else {
+        (0, spans.len().saturating_sub(1))
+    };
+
+    // Rewalk rows, placing only the selected range. y/h come straight from the
+    // pre-pass, so a visible row's rect is byte-equal to the full-layout path.
+    let mut row = 0usize;
+    for element in &elements {
+        let mut scoped = state.clone();
+        if let Some(name) = n.props.item.as_deref() {
+            scoped.set(name, StateValue::Str(element.clone()));
+        }
+        for c in n.children.iter().filter(|c| visible(c, &scoped)) {
+            if row >= lo && row <= hi && row < spans.len() {
+                let (sy, h) = spans[row];
+                let w = c
+                    .props
+                    .width
+                    .unwrap_or_else(|| natural_w(c, bp, &scoped))
+                    .min(content.w)
+                    .max(0);
+                let child_rect = inset(
+                    Rect {
+                        x: content.x,
+                        y: sy,
+                        w,
+                        h,
+                    },
+                    c.props.margin,
+                );
+                place(
+                    c,
+                    child_rect,
+                    bp,
+                    pal,
+                    &scoped,
+                    rtl,
+                    n.props.align,
+                    elapsed_ms,
+                    clip,
+                    icons,
+                    anim,
+                    out,
+                );
+            }
+            row += 1;
+        }
+    }
+}
 /// Current elements of the `For` node's `source` list state; a missing source
 /// or a non-list value yields no elements (zero rows, never an error).
 fn list_elements(n: &Node, state: &StateView) -> Vec<String> {
