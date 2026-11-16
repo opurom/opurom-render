@@ -1622,6 +1622,73 @@ fn place_grid(
     let col_total = (content.w - gutter.saturating_mul(cols.saturating_sub(1))).max(0);
     let col_w = col_total / cols;
     let col_rem = col_total % cols;
+    // Opt-in: a direct child declares columnSpan. Pack spanning cells into rows
+    // while the plain path below stays byte-identical when none declares it.
+    if kids.iter().any(|c| c.props.column_span.is_some()) {
+        let width_of = |p: i64| col_w + if p < col_rem { 1 } else { 0 };
+        // (row, child index, logical start column, spanned columns)
+        let mut cells: Vec<(usize, usize, i64, i64)> = Vec::new();
+        let mut row = 0usize;
+        let mut cursor = 0i64;
+        for (i, c) in kids.iter().enumerate() {
+            let span = c.props.column_span.unwrap_or(1).clamp(1, cols);
+            if cursor + span > cols {
+                row += 1;
+                cursor = 0;
+            }
+            cells.push((row, i, cursor, span));
+            cursor += span;
+        }
+        let rcount = row + 1;
+        let mut heights = vec![0i64; rcount];
+        for &(r, i, _, _) in &cells {
+            heights[r] = heights[r].max(natural_h(kids[i], bp, state));
+        }
+        let mut y = content.y;
+        for r in 0..rcount {
+            let h = heights[r];
+            for &(rr, i, start, span) in &cells {
+                if rr != r {
+                    continue;
+                }
+                let p_start = if rtl { cols - start - span } else { start };
+                let mut x = content.x;
+                for p in 0..p_start {
+                    x += width_of(p) + gutter;
+                }
+                let mut w = gutter.saturating_mul(span - 1);
+                for p in p_start..p_start + span {
+                    w += width_of(p);
+                }
+                let c = kids[i];
+                let cw = c.props.width.unwrap_or(w).min(w).max(0);
+                let ch = c.props.height.unwrap_or(h).min(h).max(0);
+                let child_rect = Rect {
+                    x: x + (w - cw) / 2,
+                    y: y + (h - ch) / 2,
+                    w: cw,
+                    h: ch,
+                };
+                let child_rect = inset(child_rect, c.props.margin);
+                place(
+                    c,
+                    child_rect,
+                    bp,
+                    pal,
+                    state,
+                    rtl,
+                    n.props.align,
+                    elapsed_ms,
+                    clip,
+                    icons,
+                    anim,
+                    out,
+                );
+            }
+            y += h;
+        }
+        return;
+    }
     let rows = (kids.len() as i64 + cols - 1) / cols;
 
     // Row heights: the tallest natural height in each row.
