@@ -439,3 +439,57 @@ pub fn plan_dirty(
     walk(node, changed, &mut layout, &mut paint);
     (layout, paint)
 }
+
+/// One node participating in the §2.1 two-level key diff. Pure data: matching
+/// reads these records and never reassigns `static_id` or edits the IR.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyedNode {
+    /// Global static id from the IR; stable and never changed by matching.
+    pub static_id: u32,
+    /// Node kind tag; cross-position key matching only pairs equal kinds.
+    pub kind: &'static str,
+    /// Additive reuse hint. `None` keeps the default index alignment.
+    pub key: Option<String>,
+}
+
+/// §2.1 two-level alignment over one parent's children. Returns, for each
+/// position in `next`, the position in `prev` whose cached layout/raster may be
+/// reused (`None` = no match, lay out fresh).
+///
+/// - Default path (no keys): align by parent-child index against the static id,
+///   exactly as today, so every golden stays byte-identical.
+/// - Enhanced path: same-parent, same-kind nodes with equal, non-empty keys
+///   match across positions; each previous node is consumed at most once.
+/// - A key that finds no partner falls back to index alignment; a missing or
+///   mismatched hint never errors. Static ids are never reassigned.
+pub fn align_by_key(prev: &[KeyedNode], next: &[KeyedNode]) -> Vec<Option<usize>> {
+    let mut used = vec![false; prev.len()];
+    let mut out = vec![None; next.len()];
+
+    // Enhanced pass: keyed, same-kind, cross-position matches.
+    for (ni, node) in next.iter().enumerate() {
+        let Some(key) = node.key.as_deref().filter(|k| !k.is_empty()) else {
+            continue;
+        };
+        if let Some(pi) = prev.iter().enumerate().find_map(|(i, p)| {
+            (!used[i] && p.kind == node.kind && p.key.as_deref() == Some(key)).then_some(i)
+        }) {
+            used[pi] = true;
+            out[ni] = Some(pi);
+        }
+    }
+
+    // Default pass: remaining slots align by index against the static id.
+    for (ni, node) in next.iter().enumerate() {
+        if out[ni].is_some() {
+            continue;
+        }
+        if let Some(p) = prev.get(ni) {
+            if !used[ni] && p.kind == node.kind {
+                used[ni] = true;
+                out[ni] = Some(ni);
+            }
+        }
+    }
+    out
+}

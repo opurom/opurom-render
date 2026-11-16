@@ -70,8 +70,8 @@ pub use image::{
     CacheStats, Image, ImageFit, CACHE_CAPACITY, MAX_DECODED_BYTES, MAX_IMAGE_DIMENSION,
 };
 pub use incremental::{
-    dep_values, deps, paint_hash, plan_dirty, subtree_hash, Hasher, IncrementalMeta, LayoutCache,
-    NodeIdentity, RecomputeCounters,
+    align_by_key, dep_values, deps, paint_hash, plan_dirty, subtree_hash, Hasher, IncrementalMeta,
+    KeyedNode, LayoutCache, NodeIdentity, RecomputeCounters,
 };
 pub use interaction::{
     is_interactive, NodeState, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
