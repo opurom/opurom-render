@@ -64,6 +64,28 @@ pub struct Ir {
     /// Opt-in kernel visual-quality signals from the root `renderQuality`
     /// object. `None` keeps every pixel on the pinned default path.
     pub render_quality: Option<RenderQuality>,
+    /// Root text direction from the optional `directionality` key. `Ltr` is the
+    /// default when absent; there are no v1 subtree overrides.
+    pub directionality: Directionality,
+}
+
+/// Root text direction (IR_ADDITIONS §15.2). `Ltr` is the default; the enum is
+/// total so the raster can branch on it without an optional unwrap.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Directionality {
+    #[default]
+    Ltr,
+    Rtl,
+}
+
+impl Directionality {
+    pub fn parse(s: &str) -> Option<Directionality> {
+        match s {
+            "ltr" => Some(Directionality::Ltr),
+            "rtl" => Some(Directionality::Rtl),
+            _ => None,
+        }
+    }
 }
 
 /// Opt-in kernel visual-quality signals declared at the IR root. Each field is
@@ -1819,6 +1841,17 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
     };
     let icons = parse_icons(o.get("icons"))?;
     let render_quality = parse_render_quality(o.get("renderQuality"))?;
+    // Optional root direction; an unknown value is a readable typed error so a
+    // misspelt direction never silently renders left-to-right.
+    let directionality = match o.get("directionality") {
+        Some(v) => Directionality::parse(&string_field(o, "directionality", "IR root")?)
+            .ok_or_else(|| {
+                bad(format!(
+                    "IR root.directionality {v:?} is invalid: expected \"ltr\" or \"rtl\""
+                ))
+            })?,
+        None => Directionality::Ltr,
+    };
     Ok(Ir {
         version,
         app,
@@ -1830,6 +1863,7 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
         initial_route,
         icons,
         render_quality,
+        directionality,
     })
 }
 
