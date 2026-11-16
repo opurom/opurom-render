@@ -476,6 +476,9 @@ pub enum Op {
     Append,
     /// Remove one element of a list state by index (`items.removeAt(i)`).
     RemoveAt,
+    /// Replace a list state wholesale (`items = ...`); `set` may not target a
+    /// list (DYNAMIC_LISTS aligns with the core kernel's op contract).
+    Assign,
     /// Navigate forward to the route named in `target`; never changes state.
     Push,
     /// Navigate back one page; carries no target and never changes state.
@@ -1313,6 +1316,7 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         "toggle" => Op::Toggle,
         "append" => Op::Append,
         "removeAt" => Op::RemoveAt,
+        "assign" => Op::Assign,
         "push" => Op::Push,
         "pop" => Op::Pop,
         other => return Err(bad(format!("{what}.op has unknown value {other:?}"))),
@@ -1380,8 +1384,13 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         }
         None => None,
     };
+    let expected = if op == Op::Assign {
+        Some(ValueType::List)
+    } else {
+        None
+    };
     let value = match a.get("value") {
-        Some(v) => Some(state_value(v, None, &format!("{what}.value"))?),
+        Some(v) => Some(state_value(v, expected, &format!("{what}.value"))?),
         None => None,
     };
     match op {
@@ -1443,9 +1452,39 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
             }
         }
         Op::Set => {
+            // A list is replaced whole by `assign` (core e0dc310), so `set`
+            // never reaches a list target in any spelling.
+            if decl.typ == ValueType::List {
+                return Err(bad(format!(
+                    "{what}: set cannot replace a list target; use assign"
+                )));
+            }
             if let Some(ref v) = value {
                 if v.typ() != decl.typ {
                     return Err(bad(format!("{what}: set value type mismatch")));
+                }
+            }
+        }
+        Op::Assign => {
+            if decl.typ != ValueType::List {
+                return Err(bad(format!("{what}: assign needs a list target")));
+            }
+            match (&value, &value_from) {
+                // Exactly one spelling: a whole string array, or another list
+                // state's current value; the generic valueFrom parse above has
+                // already matched its type to this list.
+                (Some(StateValue::List(_)), None) => {}
+                // Unreachable through the typed parse above; kept so a future
+                // change cannot silently accept a non-list value.
+                (Some(_), None) => {
+                    return Err(bad(format!("{what}: assign value must be a string array")))
+                }
+                (None, Some(_)) => {}
+                (None, None) => return Err(bad(format!("{what}: assign needs a value"))),
+                (Some(_), Some(_)) => {
+                    return Err(bad(format!(
+                        "{what}: assign takes value and valueFrom exclusively"
+                    )))
                 }
             }
         }
