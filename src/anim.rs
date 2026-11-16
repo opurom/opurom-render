@@ -75,6 +75,8 @@ pub struct AnimSpec {
     pub curve: Curve,
     pub duration_ms: i64,
     pub delay_ms: i64,
+    /// Shared-clock slice `[begin,end]` in 0..1000, when driven by a clock.
+    pub interval: Option<(i64, i64)>,
 }
 
 impl AnimSpec {
@@ -83,7 +85,15 @@ impl AnimSpec {
             curve,
             duration_ms: duration_ms.clamp(0, ANIMATE_MAX_MS),
             delay_ms: delay_ms.clamp(0, ANIMATE_MAX_MS),
+            interval: None,
         }
+    }
+
+    /// Attach a shared-clock slice to a schedule. The slice is a pure time
+    /// remap of the curve and never changes the default path.
+    pub fn with_interval(mut self, begin: i64, end: i64) -> AnimSpec {
+        self.interval = Some((begin, end));
+        self
     }
 
     /// The elapsed time at which the animation is fully settled.
@@ -105,6 +115,15 @@ impl AnimSpec {
             return ONE;
         }
         let elapsed = elapsed_ms - self.delay_ms;
+        if let Some((b, e)) = self.interval {
+            // Shared-clock slice: the spec defines progress directly as the
+            // normalized time remapped into [b,e] (a linear ease). i128 math;
+            // before the slice the start value holds, after it the end value.
+            let period = self.duration_ms.max(1) as i128;
+            let tn = (elapsed as i128 * 1000 / period).clamp(0, 1000);
+            let local = ((tn - b as i128) * 1000 / (e - b) as i128).clamp(0, 1000);
+            return (local * ONE as i128 / 1000) as i64;
+        }
         progress(self.curve, elapsed).clamp(0, ONE)
     }
 }

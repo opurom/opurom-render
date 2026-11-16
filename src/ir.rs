@@ -486,6 +486,10 @@ pub struct Props {
     pub duration: Option<i64>,
     /// Implicit-animation start delay in milliseconds (`animate` prop).
     pub delay: Option<i64>,
+    /// Shared-clock id; nodes with the same id share one animation timeline.
+    pub anim_clock: Option<String>,
+    /// `[begin,end]` slice of the shared clock period, in 0..1000.
+    pub anim_interval: Option<(i64, i64)>,
     // Kind props.
     pub columns: Option<i64>,
     /// Column count the compact tier should keep; `None` stacks to one column.
@@ -1086,6 +1090,33 @@ fn effect_integer(
     }
 }
 
+/// Optional `[begin,end]` shared-clock slice in 0..1000. Invalid slices are
+/// ignored here (the compiler rejects them); render degrades safely to no slice.
+fn anim_interval_prop(o: &Map<String, Value>, what: &str) -> Result<Option<(i64, i64)>, IrError> {
+    let Some(v) = o.get("animInterval") else {
+        return Ok(None);
+    };
+    let Some(items) = v.as_array() else {
+        return Ok(None);
+    };
+    if items.len() != 2 {
+        return Ok(None);
+    }
+    let b = match integer(&items[0], &format!("{what}.animInterval[0]")) {
+        Ok(n) => n,
+        Err(_) => return Ok(None),
+    };
+    let e = match integer(&items[1], &format!("{what}.animInterval[1]")) {
+        Ok(n) => n,
+        Err(_) => return Ok(None),
+    };
+    if (0..=1000).contains(&b) && (0..=1000).contains(&e) && e > b {
+        Ok(Some((b, e)))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Validate the optional `effects` array. Unknown effect fields are ignored
 /// like other IR props; numeric fields are clamped here so raster arithmetic
 /// never sees an unbounded value.
@@ -1366,6 +1397,8 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         animate,
         duration: anim_duration_prop(o, "duration", what)?,
         delay: anim_duration_prop(o, "delay", what)?,
+        anim_clock: opt_string(o, "animClock", what)?,
+        anim_interval: anim_interval_prop(o, what)?,
         columns: opt_integer(o, "columns", what)?,
         compact_columns: opt_integer(o, "compactColumns", what)?,
         column_span: opt_integer(o, "columnSpan", what)?,

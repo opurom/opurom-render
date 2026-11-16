@@ -1275,6 +1275,12 @@ fn anim_interpolate(
             .unwrap_or_else(|| default_duration_ms(n.props.animate)),
         n.props.delay.unwrap_or(0),
     );
+    // Shared-clock slice is meaningful only with a clock id; a bare interval
+    // is ignored. Without both, the schedule is byte-identical to the old path.
+    let contract = match (n.props.anim_clock.as_deref(), n.props.anim_interval) {
+        (Some(_), Some((b, e))) => contract.with_interval(b, e),
+        _ => contract,
+    };
     let target_vec = target.to_vec();
     let existing = anim.entries.get(&n.id);
     let is_entry = existing.is_none();
