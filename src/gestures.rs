@@ -25,6 +25,32 @@
 //!   the down point. Every later move on that down reports
 //!   [`Gesture::Drag`] with the delta from the down point.
 //!
+//! Gesture arena arbitration:
+//!
+//! The four recognizers (tap, double tap, long press, drag — drag being the
+//! recognizer that drives a scroll) compete in one arena per pointer sequence,
+//! opened at `down` and closed when the sequence ends:
+//!
+//! - The **first accept wins**. `drag` accepts on the first `move` past
+//!   [`DRAG_THRESHOLD`]; `longPress` accepts once the elapsed time reaches
+//!   [`LONG_PRESS_MS`]; `tap` and `doubleTap` stay pending to `up` and reject
+//!   themselves the moment the displacement exceeds [`DRAG_THRESHOLD`], since
+//!   they can no longer win.
+//! - Rejecting the losers makes them inert: only the winner emits afterwards.
+//!   A `drag` winner keeps emitting deltas; `longPress`/`tap`/`doubleTap`
+//!   emit once and the sequence is consumed.
+//! - At `up` with no winner, only members whose own conditions hold are
+//!   eligible and the fixed priority table picks among them. A bare `up` never
+//!   accepts a `drag`: a lift without a prior out-of-slop move is a tap or
+//!   nothing.
+//! - When several members become acceptable on the same event, the fixed
+//!   priority resolves it: `longPress` (3) > `drag` (2) > `doubleTap` (1) >
+//!   `tap` (0). This matches the engine's historical evaluation order, so a
+//!   single-recognizer sequence behaves exactly as before the arena existed.
+//!
+//! The winner stays readable through [`GestureEngine::arena_winner`] after the
+//! sequence ends, until the next `down` opens a fresh arena.
+//!
 //! The engine tracks a single active pointer. A second `down` while a pointer
 //! is still down, a `move`/`up` before any `down`, a `move`/`up` on a different
 //! node, and any event for an unregistered node are all ignored and report
@@ -90,6 +116,78 @@ pub const DOUBLE_TAP_SLOP: i64 = 100;
 /// Distance past which a move becomes a drag, in logical px.
 pub const DRAG_THRESHOLD: i64 = 18;
 
+/// Fixed arbitration priority of one arena member: when several members become
+/// acceptable on the same event, the highest value wins. The order mirrors the
+/// engine's historical evaluation order (long press, then drag, then double
+/// tap, then tap), so arena arbitration never changes a single-recognizer
+/// sequence's output.
+const fn arena_priority(kind: GestureKind) -> u8 {
+    match kind {
+        GestureKind::LongPress => 3,
+        GestureKind::Drag => 2,
+        GestureKind::DoubleTap => 1,
+        GestureKind::Tap => 0,
+    }
+}
+
+/// The arbitration state of one pointer sequence: which of the four members
+/// has won, and which members are ruled out. Opened at `down`, decided at the
+/// first accept or at `up`; the winner stays readable until the next `down`.
+#[derive(Clone, Debug, Default)]
+struct Arena {
+    winner: Option<GestureKind>,
+    rejected: [bool; 4],
+}
+
+impl Arena {
+    /// Index of one member's slot in the fixed four-member table.
+    const fn slot(kind: GestureKind) -> usize {
+        match kind {
+            GestureKind::Tap => 0,
+            GestureKind::DoubleTap => 1,
+            GestureKind::LongPress => 2,
+            GestureKind::Drag => 3,
+        }
+    }
+
+    /// Open a fresh arena for a new pointer sequence.
+    fn open(&mut self) {
+        *self = Arena::default();
+    }
+
+    /// Rule one member out; it can never win this sequence.
+    fn reject(&mut self, kind: GestureKind) {
+        self.rejected[Arena::slot(kind)] = true;
+    }
+
+    /// Accept one member: the first accept wins, every other member is
+    /// rejected at once.
+    fn accept(&mut self, kind: GestureKind) {
+        if self.winner.is_none() {
+            self.winner = Some(kind);
+            for other in [
+                GestureKind::Tap,
+                GestureKind::DoubleTap,
+                GestureKind::LongPress,
+                GestureKind::Drag,
+            ] {
+                if other != kind {
+                    self.reject(other);
+                }
+            }
+        }
+    }
+
+    /// The member that won the current sequence, readable after it ends.
+    fn winner(&self) -> Option<GestureKind> {
+        self.winner
+    }
+
+    fn is_rejected(&self, kind: GestureKind) -> bool {
+        self.rejected[Arena::slot(kind)]
+    }
+}
+
 /// The active pointer's down sample.
 #[derive(Clone, Copy, Debug)]
 struct Down {
@@ -117,8 +215,7 @@ pub struct GestureEngine {
     nodes: Vec<(u32, Rect)>,
     down: Option<Down>,
     last_tap: Option<TapMark>,
-    long_pressed: bool,
-    drag_active: bool,
+    arena: Arena,
 }
 
 impl GestureEngine {
@@ -175,8 +272,8 @@ impl GestureEngine {
             y,
             t,
         });
-        self.long_pressed = false;
-        self.drag_active = false;
+        // Every recognizer joins a fresh arena for this pointer sequence.
+        self.arena.open();
         None
     }
 
@@ -193,20 +290,45 @@ impl GestureEngine {
         if down.node != node_id {
             return None;
         }
-        if let Some(gesture) = self.check_long_press(t) {
-            return Some(gesture);
-        }
-        if self.long_pressed {
+        // A decided arena lets only the drag winner keep emitting deltas; a
+        // long press or tap winner already consumed the sequence.
+        if let Some(winner) = self.arena.winner() {
+            if winner == GestureKind::Drag {
+                return Some(Gesture::Drag {
+                    dx: x.saturating_sub(down.x),
+                    dy: y.saturating_sub(down.y),
+                });
+            }
             return None;
         }
-        if self.drag_active || !within(x, y, down.x, down.y, DRAG_THRESHOLD) {
-            self.drag_active = true;
-            return Some(Gesture::Drag {
-                dx: x.saturating_sub(down.x),
-                dy: y.saturating_sub(down.y),
-            });
+        let displaced = !within(x, y, down.x, down.y, DRAG_THRESHOLD);
+        if displaced {
+            // Past the slop the tap members can no longer win this sequence.
+            self.arena.reject(GestureKind::Tap);
+            self.arena.reject(GestureKind::DoubleTap);
         }
-        None
+        // Same-event accept tie resolved by the fixed priority table.
+        let accepted = [
+            (t.saturating_sub(down.t) >= LONG_PRESS_MS).then_some(GestureKind::LongPress),
+            displaced.then_some(GestureKind::Drag),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by_key(|kind| arena_priority(*kind));
+        match accepted {
+            Some(GestureKind::LongPress) => {
+                self.arena.accept(GestureKind::LongPress);
+                Some(Gesture::LongPress)
+            }
+            Some(GestureKind::Drag) => {
+                self.arena.accept(GestureKind::Drag);
+                Some(Gesture::Drag {
+                    dx: x.saturating_sub(down.x),
+                    dy: y.saturating_sub(down.y),
+                })
+            }
+            _ => None,
+        }
     }
 
     /// Lifts the active pointer at `(x, y)` at time `t`.
@@ -224,52 +346,68 @@ impl GestureEngine {
         if down.node != node_id {
             return None;
         }
-        if let Some(gesture) = self.check_long_press(t) {
-            self.down = None;
-            return Some(gesture);
-        }
-        if self.long_pressed || self.drag_active {
+        // A decided arena ends the sequence silently at the lift.
+        if self.arena.winner().is_some() {
             self.down = None;
             return None;
         }
-        if !within(x, y, down.x, down.y, DRAG_THRESHOLD)
-            || t.saturating_sub(down.t) > TAP_TIMEOUT_MS
-        {
-            self.down = None;
-            return None;
-        }
-        if let Some(mark) = self.last_tap {
-            let gap = t.saturating_sub(mark.t);
-            let in_window = gap >= DOUBLE_TAP_MIN_MS
-                && gap <= DOUBLE_TAP_INTERVAL_MS
-                && within(x, y, mark.x, mark.y, DOUBLE_TAP_SLOP)
-                && mark.node == node_id;
-            if in_window {
-                self.last_tap = None;
-                self.down = None;
-                return Some(Gesture::DoubleTap);
-            }
-        }
-        self.last_tap = Some(TapMark {
-            node: node_id,
-            x,
-            y,
-            t,
-        });
+        let elapsed = t.saturating_sub(down.t);
+        let tap_ok = within(x, y, down.x, down.y, DRAG_THRESHOLD) && elapsed <= TAP_TIMEOUT_MS;
+        let double_ok = tap_ok
+            && self.last_tap.is_some_and(|mark| {
+                let gap = t.saturating_sub(mark.t);
+                gap >= DOUBLE_TAP_MIN_MS
+                    && gap <= DOUBLE_TAP_INTERVAL_MS
+                    && within(x, y, mark.x, mark.y, DOUBLE_TAP_SLOP)
+                    && mark.node == node_id
+            });
+        // Nobody accepted during the sequence: the lift itself decides among
+        // the members whose own conditions hold, by the fixed priority table.
+        // A bare lift never accepts a drag.
+        let winner = [
+            (elapsed >= LONG_PRESS_MS).then_some(GestureKind::LongPress),
+            double_ok.then_some(GestureKind::DoubleTap),
+            tap_ok.then_some(GestureKind::Tap),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by_key(|kind| arena_priority(*kind));
         self.down = None;
-        Some(Gesture::Tap)
+        match winner {
+            Some(GestureKind::LongPress) => {
+                self.arena.accept(GestureKind::LongPress);
+                Some(Gesture::LongPress)
+            }
+            Some(GestureKind::DoubleTap) => {
+                self.last_tap = None;
+                self.arena.accept(GestureKind::DoubleTap);
+                Some(Gesture::DoubleTap)
+            }
+            Some(GestureKind::Tap) => {
+                self.last_tap = Some(TapMark {
+                    node: node_id,
+                    x,
+                    y,
+                    t,
+                });
+                self.arena.accept(GestureKind::Tap);
+                Some(Gesture::Tap)
+            }
+            _ => None,
+        }
     }
 
-    /// Fires the long press once the active down reaches [`LONG_PRESS_MS`].
-    fn check_long_press(&mut self, t: i64) -> Option<Gesture> {
-        let Some(down) = self.down else {
-            return None;
-        };
-        if !self.long_pressed && !self.drag_active && t.saturating_sub(down.t) >= LONG_PRESS_MS {
-            self.long_pressed = true;
-            return Some(Gesture::LongPress);
-        }
-        None
+    /// The arena winner of the current (or just-ended) pointer sequence, until
+    /// the next `down` opens a fresh arena. `None` while undecided or when the
+    /// sequence ended with no winner.
+    pub fn arena_winner(&self) -> Option<GestureKind> {
+        self.arena.winner()
+    }
+
+    /// Whether `kind` has been ruled out of the current arena by an accept or
+    /// by crossing the drag slop.
+    pub fn arena_rejected(&self, kind: GestureKind) -> bool {
+        self.arena.is_rejected(kind)
     }
 
     fn find(&self, id: u32) -> Option<(u32, Rect)> {
@@ -476,6 +614,116 @@ mod tests {
         );
         assert_eq!(GestureKind::parse("drag"), Some(GestureKind::Drag));
         assert_eq!(GestureKind::parse("swipe"), None);
+    }
+
+    /// Gate 1: press on a button, move past the drag slop, release. The drag
+    /// member accepts first, the tap members are rejected, and the lift of a
+    /// decided sequence emits nothing.
+    #[test]
+    fn drag_accepts_past_slop_and_tap_never_fires() {
+        let mut engine = engine();
+        assert_eq!(engine.on_down(1, 20, 20, 0), None);
+        // Inside the slop: no member accepts yet.
+        assert_eq!(engine.on_move(1, 30, 20, 10), None);
+        assert_eq!(engine.arena_winner(), None);
+        // Past the slop: drag is the first accept.
+        assert_eq!(
+            engine.on_move(1, 60, 20, 20),
+            Some(Gesture::Drag { dx: 40, dy: 0 })
+        );
+        assert_eq!(engine.arena_winner(), Some(GestureKind::Drag));
+        assert!(engine.arena_rejected(GestureKind::Tap));
+        assert!(engine.arena_rejected(GestureKind::LongPress));
+        // The decided sequence ends silently at the lift: no tap.
+        assert_eq!(engine.on_up(1, 60, 20, 40), None);
+        assert_eq!(engine.on_up(1, 20, 20, 50), None);
+    }
+
+    /// Gate 2: a plain press-and-lift with no displacement lets the tap member
+    /// win at the lift, and drag/long press are rejected.
+    #[test]
+    fn tap_wins_a_lift_with_no_displacement() {
+        let mut engine = engine();
+        assert_eq!(engine.on_down(1, 20, 20, 0), None);
+        assert_eq!(engine.on_up(1, 21, 21, 20), Some(Gesture::Tap));
+        assert_eq!(engine.arena_winner(), Some(GestureKind::Tap));
+        assert!(engine.arena_rejected(GestureKind::Drag));
+    }
+
+    /// Gate 3: inside a scroll region a drag-capable node still resolves a
+    /// click by threshold: a lift within the slop is a tap, a move past it is
+    /// a drag.
+    #[test]
+    fn scroll_region_click_is_resolved_by_the_threshold() {
+        // The scroll region: a node whose recognizers include drag.
+        let mut engine = engine();
+        // Click: small jitter, then lift, stays inside the slop.
+        assert_eq!(engine.on_down(1, 40, 40, 0), None);
+        assert_eq!(engine.on_move(1, 45, 43, 10), None);
+        assert_eq!(engine.on_up(1, 45, 43, 30), Some(Gesture::Tap));
+        // Drag: a move crosses the slop, the drag member wins for the sequence.
+        assert_eq!(engine.on_down(1, 40, 40, 100), None);
+        assert_eq!(
+            engine.on_move(1, 40, 70, 110),
+            Some(Gesture::Drag { dx: 0, dy: 30 })
+        );
+        assert_eq!(engine.arena_winner(), Some(GestureKind::Drag));
+        assert_eq!(engine.on_up(1, 40, 70, 130), None);
+    }
+
+    /// Gate 4: with nobody accepting during the sequence the lift decides by
+    /// the fixed priority — a held pointer resolves to long press, a second
+    /// qualifying tap resolves to double tap over plain tap.
+    #[test]
+    fn lift_without_an_accept_is_resolved_by_priority() {
+        let mut engine = engine();
+        // Held past LONG_PRESS_MS with no moves: long press outranks tap.
+        assert_eq!(engine.on_down(1, 10, 10, 0), None);
+        assert_eq!(
+            engine.on_up(1, 10, 10, LONG_PRESS_MS),
+            Some(Gesture::LongPress)
+        );
+        assert_eq!(engine.arena_winner(), Some(GestureKind::LongPress));
+        // A second qualifying tap: at that lift tap and doubleTap are both
+        // eligible and doubleTap has the higher priority.
+        let mut pair = GestureEngine::new();
+        pair.add_node(1, rect(0, 0, 200, 200));
+        assert_eq!(pair.on_down(1, 10, 10, 0), None);
+        assert_eq!(pair.on_up(1, 10, 10, 10), Some(Gesture::Tap));
+        assert_eq!(pair.on_down(1, 10, 10, 60), None);
+        assert_eq!(pair.on_up(1, 10, 10, 80), Some(Gesture::DoubleTap));
+        assert_eq!(pair.arena_winner(), Some(GestureKind::DoubleTap));
+        assert!(pair.arena_rejected(GestureKind::Tap));
+        // Nobody eligible: a lift past the tap timeout with no long press
+        // (early, then time jumps past the window on a fresh sequence) leaves
+        // the arena without a winner.
+        let mut undecided = GestureEngine::new();
+        undecided.add_node(1, rect(0, 0, 200, 200));
+        assert_eq!(undecided.on_down(1, 10, 10, 0), None);
+        assert_eq!(undecided.on_move(1, 14, 10, 10), None);
+        assert_eq!(undecided.on_up(1, 14, 10, TAP_TIMEOUT_MS + 1), None);
+        assert_eq!(undecided.arena_winner(), None);
+    }
+
+    /// A same-event tie on one move resolves by the fixed priority table:
+    /// elapsed past LONG_PRESS_MS and displacement past the slop arrive
+    /// together, long press (3) outranks drag (2), and drag stays inert.
+    #[test]
+    fn same_event_tie_follows_the_fixed_priority() {
+        let mut engine = engine();
+        assert_eq!(engine.on_down(1, 10, 10, 0), None);
+        assert_eq!(
+            engine.on_move(1, 10 + DRAG_THRESHOLD + 1, 10, LONG_PRESS_MS),
+            Some(Gesture::LongPress)
+        );
+        assert_eq!(engine.arena_winner(), Some(GestureKind::LongPress));
+        assert!(engine.arena_rejected(GestureKind::Drag));
+        // The drag member lost: later moves report nothing.
+        assert_eq!(
+            engine.on_move(1, 10 + DRAG_THRESHOLD + 2, 10, LONG_PRESS_MS + 1),
+            None
+        );
+        assert_eq!(engine.on_up(1, 10, 10, LONG_PRESS_MS + 2), None);
     }
 
     #[test]
