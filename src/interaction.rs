@@ -136,9 +136,19 @@ pub fn press_color(c: Rgba) -> Rgba {
     }
 }
 
+/// Caller-owned press phase (ANIMATION_AND_PHYSICS.md §8). A runtime value that
+/// never enters the IR or state JSON. `touch` is in logical pixels relative to
+/// the pressed node; `None` makes the ripple centre the node rect centre.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PressPhase {
+    pub node_id: u32,
+    pub press_start_tick: i64,
+    pub touch: Option<(i64, i64)>,
+}
+
 /// Ripple timing in milliseconds. Structural constants held here until the
 /// material token table lands; callers may override duration per primitive.
-/// The value matches the medium motion token (bounded, 220 ms).
+/// The value is the framework default from the medium motion token (§7).
 pub const RIPPLE_DURATION_MS: i64 = 220;
 /// Peak alpha of a fresh ripple, in fixed-point `UNIT` units.
 pub const RIPPLE_PEAK_ALPHA: i64 = 256; // 25% opacity

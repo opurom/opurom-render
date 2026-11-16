@@ -586,6 +586,44 @@ impl Canvas {
         self.fill_circle(r, c);
     }
 
+    /// Draw the press ripple for one node at `elapsed_ms`. The ripple is clipped
+    /// to the node's own clip intersected with the current canvas clip, so it
+    /// never spills past a parent viewport. `touch` is relative to the node; a
+    /// `None` touch centres the circle in the node rect. Integer fixed-point
+    /// only, driven entirely by the caller clock.
+    pub fn draw_node_ripple(
+        &mut self,
+        n: &LaidOut,
+        press_start_tick: i64,
+        elapsed_ms: i64,
+        touch: Option<(i64, i64)>,
+        tint: Rgba,
+    ) {
+        let progress = interaction::ripple_progress(
+            elapsed_ms.saturating_sub(press_start_tick),
+            interaction::RIPPLE_DURATION_MS,
+        );
+        if progress <= 0 {
+            return;
+        }
+        let max_r = (n.rect.w.max(0) / 2).max(n.rect.h.max(0) / 2);
+        let radius = interaction::ripple_radius(progress, max_r);
+        let alpha = interaction::ripple_alpha(progress, interaction::RIPPLE_PEAK_ALPHA);
+        let color = with_alpha(tint, alpha);
+        let (cx, cy) = match touch {
+            Some((tx, ty)) => (n.rect.x + tx, n.rect.y + ty),
+            None => (n.rect.x + n.rect.w / 2, n.rect.y + n.rect.h / 2),
+        };
+        let outer = self.clip;
+        self.clip = match (outer, n.clip) {
+            (Some(a), Some(b)) => Some(intersect(a, b)),
+            (Some(a), None) => Some(a),
+            (None, b) => b,
+        };
+        self.draw_ripple(cx, cy, radius, color);
+        self.clip = outer;
+    }
+
     /// Two diagonal strokes (a check mark), integer Bresenham-ish stepping.
     pub fn draw_check(&mut self, r: Rect, c: Rgba, width: i64) {
         let w = width.max(1);

@@ -70,9 +70,9 @@ pub use image::{
     CacheStats, Image, ImageFit, CACHE_CAPACITY, MAX_DECODED_BYTES, MAX_IMAGE_DIMENSION,
 };
 pub use interaction::{
-    is_interactive, press_color, ripple_alpha, ripple_progress, ripple_radius, NodeState, Tone,
-    Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY, RIPPLE_DURATION_MS,
-    RIPPLE_PEAK_ALPHA, SUCCESS, WARNING,
+    is_interactive, press_color, ripple_alpha, ripple_progress, ripple_radius, NodeState,
+    PressPhase, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
+    RIPPLE_DURATION_MS, RIPPLE_PEAK_ALPHA, SUCCESS, WARNING,
 };
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Directionality, Event, Ir, IrError, Kind,
@@ -379,6 +379,42 @@ impl Renderer {
             &mut self.anim.borrow_mut(),
         );
         let pixels = self.raster_laid(&laid, ir);
+        self.finish_frame(laid, pixels)
+    }
+
+    /// Render at `elapsed_ms` with an optional caller-owned press phase: the
+    /// pressed node resolves to `Active` (authored `disabled` still wins) and
+    /// its ripple is painted with the same caller clock. No phase, or no press,
+    /// is byte-identical to [`Renderer::render_at`].
+    pub fn render_with_press(
+        &mut self,
+        ir: &Ir,
+        state: &StateView,
+        elapsed_ms: i64,
+        press: Option<&PressPhase>,
+    ) -> Frame {
+        let mut laid = crate::layout::layout_animated_at(
+            ir,
+            state,
+            self.width,
+            self.height,
+            elapsed_ms,
+            &mut self.anim.borrow_mut(),
+        );
+        if let Some(p) = press {
+            if let Some(n) = laid.iter_mut().find(|n| n.id == p.node_id) {
+                if n.state != NodeState::Disabled {
+                    n.state = NodeState::Active;
+                }
+            }
+        }
+        let pixels = self.raster_laid_press(&laid, ir, press, elapsed_ms);
+        self.finish_frame(laid, pixels)
+    }
+
+    /// Post-layout bookkeeping shared by every full render: diff against the
+    /// buffered frame, then commit the new buffer and node list.
+    fn finish_frame(&mut self, laid: Vec<LaidOut>, pixels: Vec<u8>) -> Frame {
         let dirty = match (self.prev.as_deref(), self.prev_size) {
             (Some(prev), Some((pw, ph))) => {
                 diff_resize_rects(prev, pw, ph, &pixels, self.width, self.height)
@@ -410,6 +446,31 @@ impl Renderer {
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
             raster::draw(&mut canvas, n);
+        }
+        effects::apply_frame_blurs(&mut canvas, laid);
+        canvas.pixels
+    }
+
+    /// Press-phase raster: identical to the default pass plus one ripple drawn
+    /// for the pressed node after its box, tinted by that node's accent. With
+    /// no phase the two loops are the same sequence.
+    fn raster_laid_press(
+        &self,
+        laid: &[LaidOut],
+        ir: &Ir,
+        press: Option<&PressPhase>,
+        elapsed_ms: i64,
+    ) -> Vec<u8> {
+        let pal = Palette::from_theme(&ir.theme);
+        let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
+        canvas.set_edge_aa(self.edge_aa);
+        canvas.set_suppress_text(self.suppress_text);
+        canvas.set_render_quality(ir.render_quality.as_ref());
+        for n in laid {
+            raster::draw(&mut canvas, n);
+            if let Some(p) = press.filter(|p| p.node_id == n.id) {
+                canvas.draw_node_ripple(n, p.press_start_tick, elapsed_ms, p.touch, n.accent);
+            }
         }
         effects::apply_frame_blurs(&mut canvas, laid);
         canvas.pixels
