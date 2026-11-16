@@ -16,6 +16,7 @@ use crate::effects::{
 };
 use crate::font::FontMetrics;
 use crate::gestures::GestureKind;
+use crate::icons::IconPaths;
 use crate::image::ImageFit;
 use crate::interaction::{NodeState, Tone, Variant};
 use crate::particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
@@ -55,6 +56,10 @@ pub struct Ir {
     pub routes: BTreeMap<String, Route>,
     /// The route `tree` mirrors when `routes` is non-empty; `None` otherwise.
     pub initial_route: Option<String>,
+    /// Package icons from the optional top-level `icons` table, keyed by name
+    /// and parsed once to integer 24x24 geometry. Empty when the IR carries no
+    /// package icons, in which case the raster uses the built-in set.
+    pub icons: BTreeMap<String, IconPaths>,
 }
 
 /// One declared route: its content tree and optional title.
@@ -1648,6 +1653,7 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
         }
         None => None,
     };
+    let icons = parse_icons(o.get("icons"))?;
     Ok(Ir {
         version,
         app,
@@ -1657,7 +1663,46 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
         transition,
         routes,
         initial_route,
+        icons,
     })
+}
+
+/// Parse the optional top-level `icons` table. It may be a JSON array of
+/// `{name, paths: [d...], viewBox}` entries (the compiler's shape) or an object
+/// keyed by icon name with the same record. A malformed entry is skipped: an
+/// unusable package glyph degrades to the built-in set, never a hard error.
+fn parse_icons(v: Option<&Value>) -> Result<BTreeMap<String, IconPaths>, IrError> {
+    let mut table = BTreeMap::new();
+    let entries: Vec<&Value> = match v {
+        None | Some(Value::Null) => return Ok(table),
+        Some(Value::Array(items)) => items.iter().collect(),
+        Some(Value::Object(map)) => map.values().collect(),
+        Some(_) => return Err(bad("IR root.icons must be an array or object")),
+    };
+    for entry in entries {
+        let Ok(rec) = object(entry, "icon entry") else {
+            continue;
+        };
+        let Some(name) = rec.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let view_box = rec
+            .get("viewBox")
+            .and_then(Value::as_str)
+            .unwrap_or("0 0 24 24");
+        let Some(paths) = rec.get("paths").and_then(Value::as_array) else {
+            continue;
+        };
+        let ds: Vec<String> = paths
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect();
+        if let Some(icon) = IconPaths::from_paths(name, view_box, &ds) {
+            table.insert(name.to_string(), icon);
+        }
+    }
+    Ok(table)
 }
 
 /// Parse one route tree. The id counter seeds from the tree's root id, so a

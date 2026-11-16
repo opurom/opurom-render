@@ -1557,9 +1557,15 @@ fn draw_icon(canvas: &mut Canvas, n: &LaidOut) {
     let color = with_alpha(n.text_color.unwrap_or(n.accent), n.effects.opacity);
     let x0 = n.rect.x + (n.rect.w - box_size) / 2;
     let y0 = n.rect.y + (n.rect.h - box_size) / 2;
+    // A package icon from the IR `icons` table wins over the built-in glyph set;
+    // a name only in the built-in set uses that; neither falls back to the disc.
+    let package = n.icon_shape.as_ref();
     for py in 0..box_size {
         for px in 0..box_size {
-            let cov = icons::icon_coverage(name, box_size, px, py);
+            let cov = match package {
+                Some(icon) => icons::path_coverage(icon, box_size, px, py),
+                None => icons::icon_coverage(name, box_size, px, py),
+            };
             let a = ((color.a as i64 * cov + UNIT / 2) / UNIT).clamp(0, 255) as u8;
             if a != 0 {
                 canvas.set(x0 + px, y0 + py, Rgba { a, ..color });

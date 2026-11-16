@@ -248,6 +248,9 @@ pub struct LaidOut {
     pub text: Option<String>,
     /// Built-in icon name for `Kind::Icon`, or `None` when it has none.
     pub icon_name: Option<String>,
+    /// Package icon geometry resolved from the IR `icons` table for this
+    /// node's name. `None` falls back to the built-in glyph set at raster time.
+    pub icon_shape: Option<crate::icons::IconPaths>,
     pub text_color: Option<Rgba>,
     pub text_scale: i64,
     pub text_align: Align,
@@ -768,6 +771,7 @@ pub fn layout_animated_at(
         Align::Start,
         elapsed_ms,
         None,
+        &ir.icons,
         anim,
         &mut out,
     );
@@ -890,6 +894,7 @@ fn place(
     inherited_align: Align,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
@@ -1114,11 +1119,15 @@ fn place(
     };
 
     // The icon glyph is drawn from the declared name; the fallback glyph is
-    // only a safety net for a name the language layer failed to reject.
-    let icon_name = if n.kind == Kind::Icon {
-        n.props.name.clone()
+    // only a safety net for a name the language layer failed to reject. A
+    // package icon resolved from the IR `icons` table takes precedence over the
+    // built-in set at raster time.
+    let (icon_name, icon_shape) = if n.kind == Kind::Icon {
+        let name = n.props.name.clone();
+        let shape = name.as_deref().and_then(|k| icons.get(k)).cloned();
+        (name, shape)
     } else {
-        None
+        (None, None)
     };
 
     let mut visual_effects = n.props.effects.clone();
@@ -1136,6 +1145,7 @@ fn place(
         border_w,
         text,
         icon_name,
+        icon_shape,
         text_color,
         text_scale: scale,
         text_align,
@@ -1172,14 +1182,16 @@ fn place(
 
     match n.kind {
         Kind::Grid => place_grid(
-            n, rect, bp, pal, state, elapsed_ms, clip, padding, anim, out,
+            n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
         ),
-        Kind::Scroll => place_scroll(n, rect, bp, pal, state, elapsed_ms, padding, anim, out),
+        Kind::Scroll => place_scroll(
+            n, rect, bp, pal, state, elapsed_ms, padding, icons, anim, out,
+        ),
         Kind::Dialog => place_dialog(
-            n, rect, bp, pal, state, elapsed_ms, clip, padding, anim, out,
+            n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
         ),
         _ => place_children(
-            n, rect, bp, pal, state, elapsed_ms, clip, padding, anim, out,
+            n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
         ),
     }
 }
@@ -1279,6 +1291,7 @@ fn place_children(
     elapsed_ms: i64,
     clip: Option<Rect>,
     padding: i64,
+    icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
@@ -1495,6 +1508,7 @@ fn place_children(
             n.props.align,
             elapsed_ms,
             child_clip,
+            icons,
             anim,
             out,
         );
@@ -1519,6 +1533,7 @@ fn place_grid(
     elapsed_ms: i64,
     clip: Option<Rect>,
     padding: i64,
+    icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
@@ -1598,6 +1613,7 @@ fn place_grid(
                 n.props.align,
                 elapsed_ms,
                 clip,
+                icons,
                 anim,
                 out,
             );
@@ -1621,6 +1637,7 @@ fn place_scroll(
     state: &StateView,
     elapsed_ms: i64,
     padding: i64,
+    icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
@@ -1652,6 +1669,7 @@ fn place_scroll(
             n.props.align,
             elapsed_ms,
             clip,
+            icons,
             anim,
             out,
         );
@@ -1670,6 +1688,7 @@ fn place_dialog(
     elapsed_ms: i64,
     clip: Option<Rect>,
     padding: i64,
+    icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
 ) {
@@ -1708,6 +1727,7 @@ fn place_dialog(
             n.props.align,
             elapsed_ms,
             clip,
+            icons,
             anim,
             out,
         );
