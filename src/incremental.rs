@@ -225,6 +225,7 @@ fn appearance(node: &Node, h: &mut Hasher) {
     h.text(28, &format!("{:?}", p.particles));
     h.text(29, &format!("{:?}", p.gradient));
     h.int(30, i64::from(p.gradient_horizontal));
+    h.int(31, i64::from(p.repaint_boundary));
 }
 
 /// Paint hash: only appearance-bearing fields, no geometry of children.
@@ -243,9 +244,198 @@ pub fn subtree_hash(node: &Node, state: &StateView) -> u64 {
     appearance(node, &mut h);
     h.int(41, dep_values(node, state) as i64);
     h.int(42, node.children.len() as i64);
+    h.int(45, i64::from(node.props.relayout_boundary));
     for c in &node.children {
         h.int(43, c.id as i64);
         h.int(44, subtree_hash(c, state) as i64);
     }
     h.finish()
+}
+
+/// Counters for the incremental pipeline. Asserted by tests, never timed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RecomputeCounters {
+    /// Nodes whose layout was actually recomputed this pass.
+    pub layout_recomputed: usize,
+    /// Nodes whose laid-out subtree was reused from cache this pass.
+    pub layout_reused: usize,
+    /// Nodes scheduled for repaint by the paint plan.
+    pub paint_recomputed: usize,
+    /// Nodes whose raster was kept by a repaint boundary.
+    pub paint_reused: usize,
+}
+
+/// A bounded, deterministic LRU cache of laid-out subtrees. Keyed by stable
+/// identity plus the layout memo key (§6); a miss affects speed only, never
+/// output bytes. Eviction uses an access counter, not a wall clock.
+pub struct LayoutCache {
+    entries: std::collections::BTreeMap<String, (u64, Vec<crate::layout::LaidOut>, u64)>,
+    order: Vec<String>,
+    capacity: usize,
+    tick: u64,
+    /// Row key set by `place_for` for the current generated row.
+    pub row_key: Option<String>,
+    pub counters: RecomputeCounters,
+    active: bool,
+}
+
+impl LayoutCache {
+    pub fn new(capacity: usize) -> LayoutCache {
+        LayoutCache {
+            entries: std::collections::BTreeMap::new(),
+            order: Vec::new(),
+            capacity: capacity.max(1),
+            tick: 0,
+            row_key: None,
+            counters: RecomputeCounters::default(),
+            active: false,
+        }
+    }
+
+    pub fn activate(&mut self) {
+        self.active = true;
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+
+    pub fn reset_counters(&mut self) {
+        self.counters = RecomputeCounters::default();
+    }
+
+    /// Layout memo key (§6): identity, subtree hash, resolved dep values,
+    /// incoming constraint, viewport clip, rtl, breakpoint and clock phase.
+    pub fn key(
+        &self,
+        id: &NodeIdentity,
+        subtree: u64,
+        deps: u64,
+        rect: crate::layout::Rect,
+        clip: Option<crate::layout::Rect>,
+        rtl: bool,
+        bp: u8,
+        phase: i64,
+    ) -> String {
+        let c = clip
+            .map(|r| format!("{},{},{},{}", r.x, r.y, r.w, r.h))
+            .unwrap_or_else(|| "none".into());
+        // The incoming constraint is the parent-given width/height, not the
+        // absolute position. Absolute y is applied as a translation on a cache
+        // hit, so inserting a For row reuses surviving rows' memo entries.
+        format!(
+            "{}|{:016x}|{:016x}|{},{}|{}|{}|{}|{}",
+            id.key(),
+            subtree,
+            deps,
+            rect.w,
+            rect.h,
+            c,
+            u8::from(rtl),
+            bp,
+            phase
+        )
+    }
+
+    /// Look up a cacheable subtree. Returns the stored segment and the delta-y
+    /// to translate it by (rows shift when a sibling is inserted before them).
+    pub fn get(&mut self, key: &str, hash: u64, new_y: i64) -> Option<Vec<crate::layout::LaidOut>> {
+        let (stored_hash, seg, _last) = self.entries.get(key)?.clone();
+        if stored_hash != hash || seg.is_empty() {
+            return None;
+        }
+        self.tick += 1;
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.2 = self.tick;
+        }
+        let delta = new_y - seg[0].rect.y;
+        let mut out = seg;
+        if delta != 0 {
+            for l in &mut out {
+                l.rect.y += delta;
+                if let Some((_, y)) = l.text_origin.as_mut() {
+                    *y += delta;
+                }
+                if let Some(mut c) = l.clip {
+                    c.y += delta;
+                    l.clip = Some(c);
+                }
+            }
+        }
+        Some(out)
+    }
+
+    pub fn insert(&mut self, key: String, hash: u64, seg: Vec<crate::layout::LaidOut>) {
+        self.tick += 1;
+        self.entries.insert(key.clone(), (hash, seg, self.tick));
+        if !self.order.contains(&key) {
+            self.order.push(key.clone());
+        }
+        if self.order.len() > self.capacity {
+            // Stable LRU: evict the oldest-accessed key; BTreeMap keeps the
+            // remaining iteration order deterministic.
+            let mut oldest = None;
+            let mut oldest_tick = u64::MAX;
+            for k in &self.order {
+                let t = self.entries.get(k).map(|e| e.2).unwrap_or(0);
+                if t < oldest_tick {
+                    oldest_tick = t;
+                    oldest = Some(k.clone());
+                }
+            }
+            if let Some(k) = oldest {
+                self.entries.remove(&k);
+                self.order.retain(|x| x != &k);
+            }
+        }
+    }
+
+    /// Number of live memo entries (for tests and observability).
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+/// Apply a changed-key set to a tree, honouring boundaries (§4 / §2.3).
+/// Layout marks propagate upward to the nearest relayout boundary and stop;
+/// paint marks propagate upward to the nearest repaint boundary and stop.
+/// `layoutDirty` implies `paintDirty`; paint never promotes to layout.
+/// A boundary node itself is dirty when a mark reaches it, but does not pass
+/// the mark to its parent. Returns pre-order id lists of dirty nodes.
+pub fn plan_dirty(
+    node: &Node,
+    changed: &std::collections::BTreeSet<String>,
+) -> (Vec<String>, Vec<String>) {
+    fn walk(
+        node: &Node,
+        changed: &std::collections::BTreeSet<String>,
+        layout: &mut Vec<String>,
+        paint: &mut Vec<String>,
+    ) -> (bool, bool) {
+        let own = deps(node).iter().any(|k| changed.contains(k));
+        let mut child_layout = false;
+        let mut child_paint = false;
+        for c in &node.children {
+            let (cl, cp) = walk(c, changed, layout, paint);
+            child_layout |= cl;
+            child_paint |= cp;
+        }
+        // The node is dirty if it changed directly or a child propagated up.
+        let layout_dirty = own || child_layout;
+        let paint_dirty = layout_dirty || child_paint;
+        if layout_dirty {
+            layout.push(format!("{}", node.id));
+        }
+        if paint_dirty {
+            paint.push(format!("{}", node.id));
+        }
+        // A boundary consumes the mark: it does not escape to the parent.
+        let up_layout = layout_dirty && !node.props.relayout_boundary;
+        let up_paint = paint_dirty && !node.props.repaint_boundary;
+        (up_layout, up_paint)
+    }
+    let mut layout = Vec::new();
+    let mut paint = Vec::new();
+    walk(node, changed, &mut layout, &mut paint);
+    (layout, paint)
 }

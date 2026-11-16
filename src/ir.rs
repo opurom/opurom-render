@@ -522,6 +522,9 @@ pub struct Props {
     pub effects: Vec<VisualEffect>,
     // Optional deterministic particle field.
     pub particles: Option<Particles>,
+    // Incremental-render boundaries (additive, opt-in).
+    pub repaint_boundary: bool,
+    pub relayout_boundary: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1378,6 +1381,8 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         rows: opt_integer(o, "rows", what)?,
         effects: effects_prop(o, what)?,
         particles: particles_prop(o, what)?,
+        repaint_boundary: opt_bool(o, "repaintBoundary", what)?,
+        relayout_boundary: opt_bool(o, "relayoutBoundary", what)?,
         source,
         item,
     })

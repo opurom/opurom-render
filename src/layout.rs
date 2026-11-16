@@ -812,6 +812,55 @@ pub fn layout_animated_at(
         &ir.icons,
         anim,
         &mut out,
+        None,
+    );
+    out
+}
+
+/// Opt-in incremental layout with a keyed memo cache (§6). Output is
+/// byte-identical to [`layout_animated_at`] with a cold cache; a warm cache
+/// reuses unchanged subtrees and records work in `cache.counters`.
+pub fn layout_cached_at(
+    ir: &Ir,
+    state: &StateView,
+    width: u32,
+    height: u32,
+    elapsed_ms: i64,
+    cache: &mut crate::incremental::LayoutCache,
+) -> Vec<LaidOut> {
+    let bp = Breakpoint::from_width(width);
+    let rtl = ir.directionality == Directionality::Rtl;
+    let pal = Palette::from_theme(&ir.theme);
+    let mut tree = with_theme_font_scale(&ir.tree, ir.theme.font_scale);
+    fill_font_metrics(&mut tree, ir.theme.font_metrics);
+    let mut out = Vec::new();
+    let mut root = Rect {
+        x: 0,
+        y: 0,
+        w: width as i64,
+        h: height as i64,
+    };
+    if let Some(w) = tree.props.width {
+        root.w = root.w.min(w);
+    }
+    if let Some(h) = tree.props.height {
+        root.h = root.h.min(h);
+    }
+    let mut anim = AnimTable::new();
+    place(
+        &tree,
+        root,
+        bp,
+        &pal,
+        state,
+        rtl,
+        Align::Start,
+        elapsed_ms,
+        None,
+        &ir.icons,
+        &mut anim,
+        &mut out,
+        Some(cache),
     );
     out
 }
@@ -923,6 +972,16 @@ fn control_of(n: &Node, state: &StateView) -> Option<Control> {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn bp_code(bp: Breakpoint) -> u8 {
+    match bp {
+        Breakpoint::Compact => 0,
+        Breakpoint::Medium => 1,
+        Breakpoint::Expanded => 2,
+        Breakpoint::Wide => 3,
+        Breakpoint::Ultra => 4,
+    }
+}
+
 fn place(
     n: &Node,
     rect: Rect,
@@ -936,9 +995,35 @@ fn place(
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
+    mut cache: Option<&mut crate::incremental::LayoutCache>,
 ) {
     if !visible(n, state) {
         return; // hidden subtree: no layout, no raster
+    }
+    // Incremental layout (§6): reuse a cacheable subtree when identity, hash,
+    // resolved deps and incoming constraint are unchanged. A hit skips all
+    // recursion and glyph work below this node. Opt-in only: with no active
+    // cache this block is inert and the full path is byte-identical.
+    let mut cache_key = None;
+    let mut cache_start = out.len();
+    if let Some(c) = cache.as_deref_mut() {
+        if c.is_active() {
+            let mut id = crate::incremental::NodeIdentity::node(n.id);
+            if let Some(k) = c.row_key.take() {
+                id.row_key = Some(k);
+            }
+            let sh = crate::incremental::subtree_hash(n, state);
+            let dv = crate::incremental::dep_values(n, state);
+            let key = c.key(&id, sh, dv, rect, clip, rtl, bp_code(bp), elapsed_ms);
+            if let Some(seg) = c.get(&key, sh, rect.y) {
+                out.extend(seg.iter().cloned());
+                c.counters.layout_reused += seg.len();
+                return;
+            }
+            c.counters.layout_recomputed += 1;
+            cache_key = Some((key, sh));
+            cache_start = out.len();
+        }
     }
     let dir = direction(n.kind, bp);
     let scale = font_scale(&n.props, 16);
@@ -1223,26 +1308,90 @@ fn place(
         },
     });
 
-    if n.children.is_empty() || rect.w <= 0 || rect.h <= 0 {
-        return;
+    if !n.children.is_empty() && rect.w > 0 && rect.h > 0 {
+        match n.kind {
+            Kind::Grid => place_grid(
+                n,
+                rect,
+                bp,
+                pal,
+                state,
+                rtl,
+                elapsed_ms,
+                clip,
+                padding,
+                icons,
+                anim,
+                out,
+                cache.as_deref_mut(),
+            ),
+            Kind::Scroll => place_scroll(
+                n,
+                rect,
+                bp,
+                pal,
+                state,
+                rtl,
+                elapsed_ms,
+                padding,
+                icons,
+                anim,
+                out,
+                cache.as_deref_mut(),
+            ),
+            Kind::For => place_for(
+                n,
+                rect,
+                bp,
+                pal,
+                state,
+                rtl,
+                elapsed_ms,
+                clip,
+                padding,
+                icons,
+                anim,
+                out,
+                cache.as_deref_mut(),
+            ),
+            Kind::Dialog => place_dialog(
+                n,
+                rect,
+                bp,
+                pal,
+                state,
+                rtl,
+                elapsed_ms,
+                clip,
+                padding,
+                icons,
+                anim,
+                out,
+                cache.as_deref_mut(),
+            ),
+            _ => place_children(
+                n,
+                rect,
+                bp,
+                pal,
+                state,
+                rtl,
+                elapsed_ms,
+                clip,
+                padding,
+                icons,
+                anim,
+                out,
+                cache.as_deref_mut(),
+            ),
+        }
     }
-
-    match n.kind {
-        Kind::Grid => place_grid(
-            n, rect, bp, pal, state, rtl, elapsed_ms, clip, padding, icons, anim, out,
-        ),
-        Kind::Scroll => place_scroll(
-            n, rect, bp, pal, state, rtl, elapsed_ms, padding, icons, anim, out,
-        ),
-        Kind::For => place_for(
-            n, rect, bp, pal, state, rtl, elapsed_ms, clip, padding, icons, anim, out,
-        ),
-        Kind::Dialog => place_dialog(
-            n, rect, bp, pal, state, rtl, elapsed_ms, clip, padding, icons, anim, out,
-        ),
-        _ => place_children(
-            n, rect, bp, pal, state, rtl, elapsed_ms, clip, padding, icons, anim, out,
-        ),
+    // Store the full laid-out subtree under its memo key.
+    if let (Some((key, sh)), Some(c)) = (cache_key, cache.as_deref_mut()) {
+        let seg = out[cache_start..].to_vec();
+        if !seg.is_empty() {
+            c.insert(key, sh, seg);
+        }
     }
 }
 
@@ -1345,6 +1494,7 @@ fn place_children(
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
+    mut cache: Option<&mut crate::incremental::LayoutCache>,
 ) {
     let dir = direction(n.kind, bp);
     let content = inset(rect, padding);
@@ -1569,6 +1719,7 @@ fn place_children(
             icons,
             anim,
             out,
+            cache.as_deref_mut(),
         );
         cursor = cursor.saturating_add(main.saturating_add(gap));
     }
@@ -1595,6 +1746,7 @@ fn place_grid(
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
+    mut cache: Option<&mut crate::incremental::LayoutCache>,
 ) {
     let kids: Vec<&Node> = n.children.iter().filter(|c| visible(c, state)).collect();
     if kids.is_empty() {
@@ -1679,6 +1831,7 @@ fn place_grid(
                 icons,
                 anim,
                 out,
+                cache.as_deref_mut(),
             );
             x += w;
             // The gutter separates two columns; the last one adds no trailing gap.
@@ -1704,6 +1857,7 @@ fn place_scroll(
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
+    mut cache: Option<&mut crate::incremental::LayoutCache>,
 ) {
     let content = inset(rect, padding);
     let clip = Some(rect);
@@ -1737,6 +1891,7 @@ fn place_scroll(
             icons,
             anim,
             out,
+            cache.as_deref_mut(),
         );
         y = y.saturating_add(h.saturating_add(gap));
     }
@@ -1762,6 +1917,7 @@ fn place_for(
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
+    mut cache: Option<&mut crate::incremental::LayoutCache>,
 ) {
     let content = inset(rect, padding);
     let gap = n.props.gap.max(0);
@@ -1853,6 +2009,7 @@ fn place_for(
                     icons,
                     anim,
                     out,
+                    cache.as_deref_mut(),
                 );
                 // Runtime row identity pairs the template node id with this
                 // element's value, index-independent (inserting a row reuses
@@ -1892,6 +2049,7 @@ fn place_dialog(
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
+    mut cache: Option<&mut crate::incremental::LayoutCache>,
 ) {
     let content = inset(rect, padding);
     let title_h = font::GLYPH_H.saturating_mul(font_scale(&n.props, 16));
@@ -1932,6 +2090,7 @@ fn place_dialog(
             icons,
             anim,
             out,
+            cache.as_deref_mut(),
         );
         y = y.saturating_add(h.saturating_add(gap));
     }

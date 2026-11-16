@@ -69,7 +69,10 @@ pub use icons::{icon_coverage, icon_shape, IconShape, Shape, ICON_NAMES};
 pub use image::{
     CacheStats, Image, ImageFit, CACHE_CAPACITY, MAX_DECODED_BYTES, MAX_IMAGE_DIMENSION,
 };
-pub use incremental::{dep_values, deps, paint_hash, subtree_hash, Hasher, NodeIdentity};
+pub use incremental::{
+    dep_values, deps, paint_hash, plan_dirty, subtree_hash, Hasher, IncrementalMeta, LayoutCache,
+    NodeIdentity, RecomputeCounters,
+};
 pub use interaction::{
     is_interactive, NodeState, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
     SUCCESS, WARNING,
@@ -80,8 +83,9 @@ pub use ir::{
     ThemeMode, ThemeTokens, ValueType,
 };
 pub use layout::{
-    fluid_grid, layout, layout_animated_at, layout_at, Breakpoint, Control, Direction, Effects,
-    FluidGrid, LaidOut, Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH, SETTLED_MS,
+    fluid_grid, layout, layout_animated_at, layout_at, layout_cached_at, Breakpoint, Control,
+    Direction, Effects, FluidGrid, LaidOut, Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH,
+    SETTLED_MS,
 };
 pub use nav::{NavError, Navigation, Navigator, MAX_STACK_DEPTH};
 pub use particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
