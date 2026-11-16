@@ -278,6 +278,11 @@ pub struct LaidOut {
     pub clip: Option<Rect>,
     /// Absolute glyph origin, used when the text is not centred in the box.
     pub text_origin: Option<(i64, i64)>,
+    /// Exact text typography for the system-font span layer; none of these
+    /// feed the quantized bitmap raster path.
+    pub text_weight: Option<String>,
+    pub text_letter_spacing: Option<i64>,
+    pub text_font_px: Option<i64>,
     /// Animation clock phase in milliseconds (drives the spinner).
     pub phase: i64,
     pub accent: Rgba,
@@ -1206,6 +1211,9 @@ fn place(
         control: control_of(n, state),
         clip,
         text_origin: None,
+        text_weight: n.props.weight.clone(),
+        text_letter_spacing: n.props.letter_spacing,
+        text_font_px: n.props.font_px,
         phase: elapsed_ms,
         accent: pal.accent,
         on_accent: pal.on_accent,

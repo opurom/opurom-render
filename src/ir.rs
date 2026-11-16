@@ -492,6 +492,10 @@ pub struct Props {
     pub compact_columns: Option<i64>,
     /// Columns a direct Grid child spans; `None` means one column.
     pub column_span: Option<i64>,
+    /// Exact text typography, opt-in and orthogonal to the quantized raster path.
+    pub weight: Option<String>,
+    pub letter_spacing: Option<i64>,
+    pub font_px: Option<i64>,
     pub labels: Vec<String>,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -1365,6 +1369,12 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         columns: opt_integer(o, "columns", what)?,
         compact_columns: opt_integer(o, "compactColumns", what)?,
         column_span: opt_integer(o, "columnSpan", what)?,
+        weight: opt_string(o, "weight", what)?,
+        letter_spacing: opt_signed_integer(o, "letterSpacing", what)?,
+        font_px: match opt_integer(o, "fontPx", what)? {
+            Some(0) => return Err(bad(format!("{what}.fontPx must be a positive integer"))),
+            other => other,
+        },
         labels: labels_prop(o, "labels", what)?,
         min: opt_signed_integer(o, "min", what)?,
         max: opt_signed_integer(o, "max", what)?,

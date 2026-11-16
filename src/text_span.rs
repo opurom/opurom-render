@@ -19,6 +19,11 @@ pub struct TextSpan {
     pub align: Align,
     /// Absolute glyph origin, or `None` when the text is centred in its box.
     pub origin: Option<(i64, i64)>,
+    /// Exact typography for the system-font layer; none means the field is
+    /// omitted from JSON so default spans stay byte-identical.
+    pub weight: Option<String>,
+    pub letter_spacing: Option<i64>,
+    pub font_px: Option<i64>,
 }
 
 fn align_name(a: Align) -> &'static str {
@@ -54,6 +59,9 @@ pub fn text_spans(laid: &[LaidOut]) -> Vec<TextSpan> {
                 size: n.text_scale,
                 align: n.text_align,
                 origin: n.text_origin,
+                weight: n.text_weight.clone(),
+                letter_spacing: n.text_letter_spacing,
+                font_px: n.text_font_px,
             })
         })
         .collect()
@@ -62,7 +70,10 @@ pub fn text_spans(laid: &[LaidOut]) -> Vec<TextSpan> {
 /// Serialize spans to a deterministic JSON array. Field order is fixed and
 /// every number is an integer, so two runs over the same input are byte-equal.
 /// Shape: `[{"x":..,"y":..,"w":..,"h":..,"text":"..","color":[r,g,b,a],
-/// "size":..,"align":"start|center|end","origin":[x,y]|null}, ...]`.
+/// "size":..,"align":"start|center|end","origin":[x,y]|null, ...opt-in
+/// "weight"/"letterSpacing"/"fontPx" when declared}, ...]`. The three typography
+/// keys appear only when the source declared them; default spans keep the exact
+/// pinned bytes. Field order is fixed and every number is an integer.
 pub fn text_spans_json(laid: &[LaidOut]) -> String {
     fn escape(text: &str, out: &mut String) {
         for c in text.chars() {
@@ -119,6 +130,21 @@ pub fn text_spans_json(laid: &[LaidOut]) -> String {
                 out.push(']');
             }
             None => out.push_str("null"),
+        }
+        // Opt-in typography: each key is emitted only when explicitly declared,
+        // so a default span's bytes are unchanged from the pinned golden.
+        if let Some(w) = &s.weight {
+            out.push_str(",\"weight\":\"");
+            escape(w, &mut out);
+            out.push('"');
+        }
+        if let Some(ls) = s.letter_spacing {
+            out.push_str(",\"letterSpacing\":");
+            out.push_str(&ls.to_string());
+        }
+        if let Some(fp) = s.font_px {
+            out.push_str(",\"fontPx\":");
+            out.push_str(&fp.to_string());
         }
         out.push('}');
     }
