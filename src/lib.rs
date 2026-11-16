@@ -213,6 +213,17 @@ pub struct Renderer {
     suppress_text: bool,
 }
 
+/// True when the IR node with `id` is tappable: either a `gesture: tap` prop
+/// or a `tap` event. The Cards demo Action nodes use the event form. The press
+/// phase is caller-owned; only authored tappable nodes gain the Text layer.
+fn node_has_tap(node: &crate::ir::Node, id: u32) -> bool {
+    if node.id == id {
+        return node.props.gesture == Some(crate::gestures::GestureKind::Tap)
+            || node.events.iter().any(|e| e.name == "tap");
+    }
+    node.children.iter().any(|c| node_has_tap(c, id))
+}
+
 impl Renderer {
     pub fn try_new(width: u32, height: u32) -> Result<Renderer, IrError> {
         if width == 0 || height == 0 || width as u64 * height as u64 > MAX_PIXELS {
@@ -473,6 +484,24 @@ impl Renderer {
         canvas.set_suppress_text(self.suppress_text);
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
+            // A tappable Text has no authored fill, so Active darkening has
+            // nothing to paint. Draw the M3 pressed state layer beneath the
+            // glyph: low-alpha accent, only for a pressed tap-gesture Text.
+            if press.map_or(false, |p| p.node_id == n.id) {
+                if n.kind == crate::Kind::Text
+                    && n.state == crate::interaction::NodeState::Active
+                    && node_has_tap(&ir.tree, n.id)
+                {
+                    let c = n.text_color.unwrap_or(n.accent);
+                    let layer = Rgba {
+                        r: c.r,
+                        g: c.g,
+                        b: c.b,
+                        a: 26, // 10% state layer on primary
+                    };
+                    canvas.fill_rounded(n.rect, layer, n.radius);
+                }
+            }
             raster::draw(&mut canvas, n);
             if let Some(p) = press.filter(|p| p.node_id == n.id) {
                 canvas.draw_node_ripple(n, p.press_start_tick, elapsed_ms, p.touch, n.accent);
