@@ -1383,6 +1383,20 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
     })
 }
 
+/// BCP-47 primary subtag plus optional 2-8 char subtags (IR_ADDITIONS §15.1).
+/// Mirrors the core/kernel validator so `set @locale` accepts the same tags.
+fn valid_locale_tag(tag: &str) -> bool {
+    let mut parts = tag.split('-');
+    let Some(primary) = parts.next() else {
+        return false;
+    };
+    (2..=3).contains(&primary.len())
+        && primary.bytes().all(|b| b.is_ascii_lowercase())
+        && parts.all(|part| {
+            (2..=8).contains(&part.len()) && part.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+}
+
 fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Action, IrError> {
     let op = match string_field(a, "op", what)?.as_str() {
         "set" => Op::Set,
@@ -1428,6 +1442,29 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         });
     }
     let target = string_field(a, "target", what)?;
+    // `set @locale` is the compiler's event spelling of the reserved locale
+    // patch (IR_ADDITIONS §15.4). It is not a state name, so it bypasses the
+    // declared-state lookup; every other op keeps that lookup unchanged.
+    if op == Op::Set && target == "@locale" {
+        if a.get("valueFrom").is_some() {
+            return Err(bad(format!(
+                "{what}: @locale takes a literal tag, not valueFrom"
+            )));
+        }
+        let tag = a
+            .get("value")
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad(format!("{what}: @locale value must be a string")))?;
+        if !valid_locale_tag(tag) {
+            return Err(bad(format!("{what}: {tag:?} is not a BCP-47 tag")));
+        }
+        return Ok(Action {
+            op,
+            target,
+            value: Some(StateValue::Str(tag.to_string())),
+            value_from: None,
+        });
+    }
     let decl = decls.iter().find(|d| d.name == target).ok_or_else(|| {
         bad(format!(
             "{what}.target refers to undeclared state {target:?}"
