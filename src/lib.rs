@@ -47,6 +47,7 @@ pub mod perf;
 pub mod primitives;
 pub mod raster;
 pub mod svg;
+pub mod text_span;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use anim::{
@@ -94,6 +95,7 @@ pub use perf::{
     TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
 };
 pub use svg::{svg, svg_at};
+pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +208,8 @@ pub struct Renderer {
     anim: RefCell<AnimTable>,
     /// Opt-in 4x geometric edge coverage; off by default for golden parity.
     edge_aa: bool,
+    /// Opt-in display-layer split: skip bitmap text for system-font overlay.
+    suppress_text: bool,
 }
 
 impl Renderer {
@@ -225,6 +229,7 @@ impl Renderer {
             redraw_pixels: 0,
             anim: RefCell::new(AnimTable::new()),
             edge_aa: false,
+            suppress_text: false,
         })
     }
 
@@ -232,6 +237,12 @@ impl Renderer {
     /// default path stays byte-identical; capture/display-list output ignores it.
     pub fn set_edge_aa(&mut self, on: bool) {
         self.edge_aa = on;
+    }
+
+    /// Skip bitmap text so a display host can overlay system-font spans. The
+    /// default path stays byte-identical; capture mode is unaffected.
+    pub fn set_suppress_text(&mut self, on: bool) {
+        self.suppress_text = on;
     }
 
     /// Convenience constructor; use `try_new` for untrusted CLI input.
@@ -299,6 +310,7 @@ impl Renderer {
         );
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_suppress_text(self.suppress_text);
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in &laid {
             raster::draw(&mut canvas, n);
@@ -330,6 +342,7 @@ impl Renderer {
         );
         let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_suppress_text(self.suppress_text);
         for n in &laid {
             let frame = crate::effects::EffectFrame::new(self.width, self.height, n);
             if frame.has_local {
@@ -398,6 +411,7 @@ impl Renderer {
         let pal = Palette::from_theme(&ir.theme);
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_suppress_text(self.suppress_text);
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
             raster::draw(&mut canvas, n);
@@ -452,6 +466,7 @@ impl Renderer {
                 let mut canvas =
                     raster::Canvas::from_pixels(self.width, self.height, prev.to_vec());
                 canvas.set_edge_aa(self.edge_aa);
+                canvas.set_suppress_text(self.suppress_text);
                 canvas.set_render_quality(ir.render_quality.as_ref());
                 canvas.clip = Some(region);
                 canvas.fill_rect(region, pal.stage);

@@ -64,6 +64,9 @@ pub struct Canvas {
     /// Gradient intermediate precision: 10 is the pinned default, 16 switches
     /// to the dithered RGBA8 path. Capture ignores the switch.
     gradient_bits: u8,
+    /// Opt-in display-layer split: skip bitmap text so the host can overlay
+    /// system-font spans. Off by default so every golden stays byte-identical.
+    suppress_text: bool,
     capture: bool,
     commands: Vec<Command>,
 }
@@ -85,6 +88,7 @@ impl Canvas {
             clip: None,
             edge_aa: false,
             gradient_bits: 10,
+            suppress_text: false,
             capture: false,
             commands: Vec::new(),
         }
@@ -102,6 +106,12 @@ impl Canvas {
         if !self.capture && bits == 16 {
             self.gradient_bits = 16;
         }
+    }
+
+    /// Suppress bitmap text rasterization so a display host can paint system
+    /// font spans instead. Every other primitive is unaffected. Default false.
+    pub fn set_suppress_text(&mut self, on: bool) {
+        self.suppress_text = on;
     }
 
     /// Apply the root `renderQuality` opt-in signals. Capture ignores every
@@ -197,6 +207,7 @@ impl Canvas {
             clip: None,
             edge_aa: false,
             gradient_bits: 10,
+            suppress_text: false,
             capture: false,
             commands: Vec::new(),
         }
@@ -1745,6 +1756,9 @@ fn draw_icon(canvas: &mut Canvas, n: &LaidOut) {
 }
 
 fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
+    if canvas.suppress_text {
+        return;
+    }
     let text = match &n.text {
         Some(t) if !t.is_empty() => t,
         _ => return,
