@@ -213,6 +213,9 @@ pub enum Kind {
     Map,
     Menu,
     Tooltip,
+    /// Runtime list loop: lays out one template per element of the `source`
+    /// list state, binding each element to the `item` name (DYNAMIC_LISTS).
+    For,
     // Extended primitives, resolved through `crate::primitives`.
     Extended(u16),
     Other,
@@ -254,6 +257,7 @@ impl Kind {
             Kind::Menu => "Menu",
             Kind::Tooltip => "Tooltip",
             Kind::Extended(code) => crate::primitives::name_of(code),
+            Kind::For => "For",
             Kind::Other => "Other",
         }
     }
@@ -294,6 +298,7 @@ impl Kind {
             "Map" => Kind::Map,
             "Menu" => Kind::Menu,
             "Tooltip" => Kind::Tooltip,
+            "For" => Kind::For,
             _ => match crate::primitives::parse(s) {
                 Some(code) => Kind::Extended(code),
                 None => Kind::Other,
@@ -439,6 +444,10 @@ pub struct Props {
     pub role: Option<Role>,
     /// Optional interactive gesture: `tap`, `doubleTap`, `longPress` or `drag`.
     pub gesture: Option<GestureKind>,
+    /// `For` node: the list state name to iterate (DYNAMIC_LISTS).
+    pub source: Option<String>,
+    /// `For` node: the loop variable name bound per element inside the template.
+    pub item: Option<String>,
     /// Resolved five-state matrix state; `Default` when the prop is absent.
     pub state: NodeState,
     /// `disabled` wins over `state` and over a caller-supplied override.
@@ -463,6 +472,10 @@ pub enum Op {
     Add,
     Sub,
     Toggle,
+    /// Append one element to a list state (`items.append(value)`).
+    Append,
+    /// Remove one element of a list state by index (`items.removeAt(i)`).
+    RemoveAt,
     /// Navigate forward to the route named in `target`; never changes state.
     Push,
     /// Navigate back one page; carries no target and never changes state.
@@ -1188,6 +1201,22 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         ),
         None => None,
     };
+    let source = match o.get("source") {
+        None => None,
+        Some(v) => Some(
+            v.as_str()
+                .ok_or_else(|| bad(format!("{what}.source must be a string")))?
+                .to_string(),
+        ),
+    };
+    let item = match o.get("item") {
+        None => None,
+        Some(v) => Some(
+            v.as_str()
+                .ok_or_else(|| bad(format!("{what}.item must be a string")))?
+                .to_string(),
+        ),
+    };
     let state = match opt_string(o, "state", what)? {
         Some(s) => NodeState::parse(&s).ok_or_else(|| {
             bad(format!(
@@ -1271,6 +1300,8 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         rows: opt_integer(o, "rows", what)?,
         effects: effects_prop(o, what)?,
         particles: particles_prop(o, what)?,
+        source,
+        item,
     })
 }
 
@@ -1280,6 +1311,8 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         "add" => Op::Add,
         "sub" => Op::Sub,
         "toggle" => Op::Toggle,
+        "append" => Op::Append,
+        "removeAt" => Op::RemoveAt,
         "push" => Op::Push,
         "pop" => Op::Pop,
         other => return Err(bad(format!("{what}.op has unknown value {other:?}"))),
@@ -1368,6 +1401,45 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         Op::Toggle => {
             if decl.typ != ValueType::Bool {
                 return Err(bad(format!("{what}: toggle needs a bool target")));
+            }
+        }
+        Op::Append => {
+            if decl.typ != ValueType::List {
+                return Err(bad(format!("{what}: append needs a list target")));
+            }
+            match (&value, &value_from) {
+                // Phase A lists are string arrays: append a string literal or
+                // the current value of a string state.
+                (Some(StateValue::Str(_)), None) => {}
+                (None, Some(name)) => {
+                    let src = decls
+                        .iter()
+                        .find(|d| d.name == *name)
+                        .expect("checked above");
+                    if src.typ != ValueType::Str {
+                        return Err(bad(format!(
+                            "{what}: append valueFrom must reference a string state"
+                        )));
+                    }
+                }
+                _ => {
+                    return Err(bad(format!(
+                        "{what}: append needs a string value or valueFrom"
+                    )))
+                }
+            }
+        }
+        Op::RemoveAt => {
+            if decl.typ != ValueType::List {
+                return Err(bad(format!("{what}: removeAt needs a list target")));
+            }
+            match &value {
+                Some(StateValue::Int(n)) if *n >= 0 => {}
+                _ => {
+                    return Err(bad(format!(
+                        "{what}: removeAt needs a non-negative integer value"
+                    )))
+                }
             }
         }
         Op::Set => {

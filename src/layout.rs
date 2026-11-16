@@ -7,7 +7,7 @@ use crate::image::ImageFit;
 use crate::interaction::{NodeState, Tone, Variant};
 use crate::ir::Contrast;
 use crate::particles::Particles;
-use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateView, Theme, ThemeMode};
+use crate::{font, Align, Ir, Kind, Node, Props, Rgba, StateValue, StateView, Theme, ThemeMode};
 
 /// Elapsed time at which every animation curve has settled.
 pub const SETTLED_MS: i64 = 4000;
@@ -621,6 +621,18 @@ fn natural_h(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
     }
     let scale = font_scale(&n.props, 16);
     match n.kind {
+        // The body height times the current element count, plus the node gap
+        // between generated rows; no elements means no rows and no height.
+        Kind::For => {
+            let len = list_elements(n, state).len() as i64;
+            if len == 0 {
+                0
+            } else {
+                let body = container_extent(n, bp, state, false);
+                let gaps = n.props.gap.max(0).saturating_mul(len - 1);
+                body.saturating_mul(len).saturating_add(gaps)
+            }
+        }
         Kind::Text => font::GLYPH_H.saturating_mul(scale),
         Kind::Button => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
         Kind::Input => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
@@ -947,7 +959,7 @@ fn place(
             Some(n.props.border.unwrap_or(pal.border)),
             1,
         ),
-        Kind::Text | Kind::Spacer => (None, None, 0),
+        Kind::Text | Kind::Spacer | Kind::For => (None, None, 0),
         Kind::Divider => (Some(n.props.border.unwrap_or(pal.border)), None, 0),
         Kind::Icon => (Some(n.props.color.unwrap_or(pal.accent)), n.props.border, 0),
         Kind::Badge => (Some(n.props.color.unwrap_or(pal.accent)), n.props.border, 0),
@@ -1186,6 +1198,9 @@ fn place(
         ),
         Kind::Scroll => place_scroll(
             n, rect, bp, pal, state, elapsed_ms, padding, icons, anim, out,
+        ),
+        Kind::For => place_for(
+            n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
         ),
         Kind::Dialog => place_dialog(
             n, rect, bp, pal, state, elapsed_ms, clip, padding, icons, anim, out,
@@ -1674,6 +1689,82 @@ fn place_scroll(
             out,
         );
         y = y.saturating_add(h.saturating_add(gap));
+    }
+}
+
+/// A `For` node lays its template out once per element of the `source` list
+/// state, with the `item` name bound to that element in a scoped state view.
+///
+/// Rows follow array order (deterministic, no sorting or filtering); an empty
+/// or missing list lays out nothing. Every instance shares the template's node
+/// ids, so identical rows animate and diff identically.
+#[allow(clippy::too_many_arguments)]
+fn place_for(
+    n: &Node,
+    rect: Rect,
+    bp: Breakpoint,
+    pal: &Palette,
+    state: &StateView,
+    elapsed_ms: i64,
+    clip: Option<Rect>,
+    padding: i64,
+    icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
+    anim: &mut AnimTable,
+    out: &mut Vec<LaidOut>,
+) {
+    let content = inset(rect, padding);
+    let gap = n.props.gap.max(0);
+    let elements = list_elements(n, state);
+    let mut y = content.y;
+    for element in &elements {
+        // Item scope: the element binds only inside this row's template, and the
+        // scoped view is dropped once the row is laid out.
+        let mut scoped = state.clone();
+        if let Some(name) = n.props.item.as_deref() {
+            scoped.set(name, StateValue::Str(element.clone()));
+        }
+        for c in n.children.iter().filter(|c| visible(c, &scoped)) {
+            let h = c.props.height.unwrap_or_else(|| natural_h(c, bp, &scoped));
+            let w = c
+                .props
+                .width
+                .unwrap_or_else(|| natural_w(c, bp, &scoped))
+                .min(content.w)
+                .max(0);
+            let child_rect = inset(
+                Rect {
+                    x: content.x,
+                    y,
+                    w,
+                    h,
+                },
+                c.props.margin,
+            );
+            place(
+                c,
+                child_rect,
+                bp,
+                pal,
+                &scoped,
+                n.props.align,
+                elapsed_ms,
+                clip,
+                icons,
+                anim,
+                out,
+            );
+            y = y.saturating_add(h.saturating_add(gap));
+        }
+    }
+}
+
+/// Current elements of the `For` node's `source` list state; a missing source
+/// or a non-list value yields no elements (zero rows, never an error).
+fn list_elements(n: &Node, state: &StateView) -> Vec<String> {
+    let source = n.props.source.as_deref().unwrap_or("");
+    match state.get(source) {
+        Some(StateValue::List(list)) => list.clone(),
+        _ => Vec::new(),
     }
 }
 
