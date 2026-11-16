@@ -61,6 +61,20 @@ impl Canvas {
         self.edge_aa = on && !self.capture;
     }
 
+    /// Apply the root `renderQuality` opt-in signals. Capture ignores every
+    /// signal so the display-list command stream stays byte-identical; the
+    /// software-only paths change pixels but never the recorded commands.
+    pub fn set_render_quality(&mut self, rq: Option<&crate::ir::RenderQuality>) {
+        if self.capture {
+            return;
+        }
+        if let Some(rq) = rq {
+            if rq.msaa == Some(4) {
+                self.edge_aa = true;
+            }
+        }
+    }
+
     /// 4x4 integer coverage of a rounded-box edge at one pixel. Sub-samples are
     /// taken in a 4x-scaled space so the existing quarter-circle predicate is
     /// reused without floats. Interior pixels return 255 and keep the fast path.

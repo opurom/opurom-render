@@ -61,6 +61,37 @@ pub struct Ir {
     /// and parsed once to integer 24x24 geometry. Empty when the IR carries no
     /// package icons, in which case the raster uses the built-in set.
     pub icons: BTreeMap<String, IconPaths>,
+    /// Opt-in kernel visual-quality signals from the root `renderQuality`
+    /// object. `None` keeps every pixel on the pinned default path.
+    pub render_quality: Option<RenderQuality>,
+}
+
+/// Opt-in kernel visual-quality signals declared at the IR root. Each field is
+/// independent and absent means the pinned default path. Unknown subfields are
+/// ignored so a newer emitter can add hints without breaking this parser.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RenderQuality {
+    /// 4x4 edge coverage; 4 is the only implemented sample count.
+    pub msaa: Option<i64>,
+    /// Gradient intermediate precision; 16 is the only dithered path.
+    pub gradient_bits: Option<i64>,
+    /// Vector path smoothing; "bezier" is the only implemented curve mode.
+    pub curve: Option<String>,
+    /// Stroke scaling; "physical" is the only implemented stroke mode.
+    pub stroke: Option<String>,
+    /// Text vertical placement; "grid" is the only implemented baseline mode.
+    pub text_baseline: Option<String>,
+}
+
+impl RenderQuality {
+    /// True when no quality signal is declared.
+    pub fn is_default(&self) -> bool {
+        self.msaa.is_none()
+            && self.gradient_bits.is_none()
+            && self.curve.is_none()
+            && self.stroke.is_none()
+            && self.text_baseline.is_none()
+    }
 }
 
 /// One declared route: its content tree and optional title.
@@ -1787,6 +1818,7 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
         None => None,
     };
     let icons = parse_icons(o.get("icons"))?;
+    let render_quality = parse_render_quality(o.get("renderQuality"))?;
     Ok(Ir {
         version,
         app,
@@ -1797,7 +1829,79 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
         routes,
         initial_route,
         icons,
+        render_quality,
     })
+}
+
+/// Parse the optional root `renderQuality` object. A declared subfield is
+/// checked against the single value this renderer implements; an unknown
+/// subfield is ignored for forward compatibility. Absence and JSON null are
+/// both the default path.
+fn parse_render_quality(v: Option<&Value>) -> Result<Option<RenderQuality>, IrError> {
+    let Some(v) = v else {
+        return Ok(None);
+    };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let what = "IR root.renderQuality";
+    let o = object(v, what)?;
+    let msaa = match o.get("msaa") {
+        Some(value) => {
+            let n = integer(value, &format!("{what}.msaa"))?;
+            if n != 4 {
+                return Err(bad(format!("{what}.msaa {n} is unsupported: expected 4")));
+            }
+            Some(n)
+        }
+        None => None,
+    };
+    let gradient_bits = match o.get("gradientBits") {
+        Some(value) => {
+            let n = integer(value, &format!("{what}.gradientBits"))?;
+            if n != 16 {
+                return Err(bad(format!(
+                    "{what}.gradientBits {n} is unsupported: expected 16"
+                )));
+            }
+            Some(n)
+        }
+        None => None,
+    };
+    let curve = match opt_string(o, "curve", what)? {
+        Some(s) if s == "bezier" => Some(s),
+        Some(s) => {
+            return Err(bad(format!(
+                "{what}.curve {s:?} is unsupported: expected \"bezier\""
+            )))
+        }
+        None => None,
+    };
+    let stroke = match opt_string(o, "stroke", what)? {
+        Some(s) if s == "physical" => Some(s),
+        Some(s) => {
+            return Err(bad(format!(
+                "{what}.stroke {s:?} is unsupported: expected \"physical\""
+            )))
+        }
+        None => None,
+    };
+    let text_baseline = match opt_string(o, "textBaseline", what)? {
+        Some(s) if s == "grid" => Some(s),
+        Some(s) => {
+            return Err(bad(format!(
+                "{what}.textBaseline {s:?} is unsupported: expected \"grid\""
+            )))
+        }
+        None => None,
+    };
+    Ok(Some(RenderQuality {
+        msaa,
+        gradient_bits,
+        curve,
+        stroke,
+        text_baseline,
+    }))
 }
 
 /// Parse the optional top-level `icons` table. It may be a JSON array of

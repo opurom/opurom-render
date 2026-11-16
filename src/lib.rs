@@ -72,7 +72,8 @@ pub use interaction::{
 };
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Event, Ir, IrError, Kind, Node, Op, Props,
-    Role, Route, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens, ValueType,
+    RenderQuality, Role, Route, StateDecl, StateValue, StateView, Theme, ThemeMode, ThemeTokens,
+    ValueType,
 };
 pub use layout::{
     fluid_grid, layout, layout_animated_at, layout_at, Breakpoint, Control, Direction, Effects,
@@ -290,6 +291,7 @@ impl Renderer {
         );
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_render_quality(ir.render_quality.as_ref());
         for n in &laid {
             raster::draw(&mut canvas, n);
         }
@@ -360,7 +362,7 @@ impl Renderer {
             elapsed_ms,
             &mut self.anim.borrow_mut(),
         );
-        let pixels = self.raster_laid(&laid, &ir.theme);
+        let pixels = self.raster_laid(&laid, ir);
         let dirty = match (self.prev.as_deref(), self.prev_size) {
             (Some(prev), Some((pw, ph))) => {
                 diff_resize_rects(prev, pw, ph, &pixels, self.width, self.height)
@@ -384,10 +386,11 @@ impl Renderer {
     }
 
     /// Shared full raster: lay out and draw every node over a fresh canvas.
-    fn raster_laid(&self, laid: &[LaidOut], theme: &Theme) -> Vec<u8> {
-        let pal = Palette::from_theme(theme);
+    fn raster_laid(&self, laid: &[LaidOut], ir: &Ir) -> Vec<u8> {
+        let pal = Palette::from_theme(&ir.theme);
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
             raster::draw(&mut canvas, n);
         }
@@ -425,7 +428,7 @@ impl Renderer {
             && self.prev_laid.is_some()
             && self.prev_size == Some((self.width, self.height));
         let (pixels, redrawn_nodes, redraw_pixels) = if !reusable {
-            let pixels = self.raster_laid(&laid, &ir.theme);
+            let pixels = self.raster_laid(&laid, ir);
             (pixels, laid.len(), self.width as u64 * self.height as u64)
         } else {
             let prev = self.prev.as_ref().unwrap();
@@ -435,12 +438,13 @@ impl Renderer {
                 // Nothing changed: reuse the buffer without touching it.
                 (prev.to_vec(), 0, 0)
             } else if !layout_is_incremental_safe(&laid) {
-                let pixels = self.raster_laid(&laid, &ir.theme);
+                let pixels = self.raster_laid(&laid, ir);
                 (pixels, laid.len(), self.width as u64 * self.height as u64)
             } else {
                 let mut canvas =
                     raster::Canvas::from_pixels(self.width, self.height, prev.to_vec());
                 canvas.set_edge_aa(self.edge_aa);
+                canvas.set_render_quality(ir.render_quality.as_ref());
                 canvas.clip = Some(region);
                 canvas.fill_rect(region, pal.stage);
                 let mut redrawn = 0usize;
