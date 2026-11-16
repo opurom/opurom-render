@@ -12,6 +12,37 @@ use crate::{font, Align, Kind, LaidOut, Rect, Rgba};
 /// Fixed-point unit: 1024 == fully opaque.
 const UNIT: i64 = 1024;
 
+/// Fixed-point unit for the opt-in 16-bit gradient intermediate.
+const GRADIENT_UNIT: i64 = 1 << 16;
+
+/// Bayer 2x2 base, indexed by [x bit][y bit].
+const BAYER2: [[i64; 2]; 2] = [[0, 3], [2, 1]];
+
+/// 256x256 ordered dither threshold in 0..=65535, built from eight bit levels
+/// of the classic Bayer recursion. Pure integer, fixed for every frame.
+fn bayer256(x: i64, y: i64) -> i64 {
+    let mut v = 0i64;
+    for bit in 0..8 {
+        let bx = ((x >> bit) & 1) as usize;
+        let by = ((y >> bit) & 1) as usize;
+        v += BAYER2[bx][by] << (2 * (7 - bit));
+    }
+    v
+}
+
+/// Quantize 16-bit linear channels to RGBA8 with deterministic ordered
+/// dithering: floor(v/65536*255 + (threshold+0.5)/65536), all integer.
+fn dither_rgb8(v: [i64; 3], x: i64, y: i64) -> [u8; 3] {
+    let threshold = bayer256(x, y);
+    let bias = (2 * threshold + 1) * (GRADIENT_UNIT / 2);
+    let denom = GRADIENT_UNIT * 65536;
+    let mut out = [0u8; 3];
+    for k in 0..3 {
+        out[k] = ((v[k] * 255 * 65536 + bias) / denom).clamp(0, 255) as u8;
+    }
+    out
+}
+
 // Data primitives use theme-independent, deterministic ink colours. They are
 // only ever drawn for the eight new kinds, so they cannot affect 0.1.0 goldens.
 const INK: Rgba = Rgba::rgb(0x1b, 0x1f, 0x27);
@@ -30,6 +61,9 @@ pub struct Canvas {
     /// pinned golden frames stay byte-identical; capture mode ignores it so the
     /// display-list/GPU command stream is never altered.
     edge_aa: bool,
+    /// Gradient intermediate precision: 10 is the pinned default, 16 switches
+    /// to the dithered RGBA8 path. Capture ignores the switch.
+    gradient_bits: u8,
     capture: bool,
     commands: Vec<Command>,
 }
@@ -50,6 +84,7 @@ impl Canvas {
             pixels,
             clip: None,
             edge_aa: false,
+            gradient_bits: 10,
             capture: false,
             commands: Vec::new(),
         }
@@ -59,6 +94,14 @@ impl Canvas {
     /// stream byte-identical, so this is a no-op while recording display lists.
     pub fn set_edge_aa(&mut self, on: bool) {
         self.edge_aa = on && !self.capture;
+    }
+
+    /// Select the 16-bit dithered gradient path. Capture ignores the switch so
+    /// the recorded command stream stays byte-identical to the default path.
+    pub fn set_gradient_bits(&mut self, bits: u8) {
+        if !self.capture && bits == 16 {
+            self.gradient_bits = 16;
+        }
     }
 
     /// Apply the root `renderQuality` opt-in signals. Capture ignores every
@@ -71,6 +114,9 @@ impl Canvas {
         if let Some(rq) = rq {
             if rq.msaa == Some(4) {
                 self.edge_aa = true;
+            }
+            if rq.gradient_bits == Some(16) {
+                self.gradient_bits = 16;
             }
         }
     }
@@ -150,6 +196,7 @@ impl Canvas {
             pixels,
             clip: None,
             edge_aa: false,
+            gradient_bits: 10,
             capture: false,
             commands: Vec::new(),
         }
@@ -363,12 +410,35 @@ impl Canvas {
         for y in r.y.max(0)..y1 {
             for x in r.x.max(0)..x1 {
                 let local = if horizontal { x - r.x } else { y - r.y };
-                let t = if last <= 0 {
-                    UNIT
+                let c = if self.gradient_bits == 16 {
+                    let t = if last <= 0 {
+                        GRADIENT_UNIT
+                    } else {
+                        (local * GRADIENT_UNIT) / last
+                    };
+                    let mix = |a: u8, b: u8| -> i64 {
+                        let lo = a as i64 * 257;
+                        let hi = b as i64 * 257;
+                        lo + ((hi - lo) * t) / GRADIENT_UNIT
+                    };
+                    let rgb = dither_rgb8(
+                        [
+                            mix(top.r, bottom.r),
+                            mix(top.g, bottom.g),
+                            mix(top.b, bottom.b),
+                        ],
+                        x,
+                        y,
+                    );
+                    Rgba { r: rgb[0], g: rgb[1], b: rgb[2], a: 255 }
                 } else {
-                    (local * UNIT) / last
+                    let t = if last <= 0 {
+                        UNIT
+                    } else {
+                        (local * UNIT) / last
+                    };
+                    crate::layout::lerp_color(top, bottom, t)
                 };
-                let c = crate::layout::lerp_color(top, bottom, t);
                 let c = with_alpha(c, alpha);
                 if self.edge_aa {
                     let cov = Self::round_coverage(r, x, y, rad);
@@ -1966,6 +2036,25 @@ fn draw_glyphs_smooth(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordered_dither_thresholds_and_quantization_match_hand_values() {
+        // Bayer recursion at four-bit levels: each (x,y) low bit selects a
+        // 2x2 base value shifted by the remaining high-bit weight.
+        assert_eq!(bayer256(0, 0), 0);
+        assert_eq!(bayer256(1, 0), 32768);
+        assert_eq!(bayer256(0, 1), 49152);
+        assert_eq!(bayer256(1, 1), 16384);
+        assert_eq!(bayer256(2, 0), 8192);
+        assert_eq!(bayer256(0, 255), 65535);
+        assert_eq!(bayer256(255, 255), 21845);
+
+        let mid = [32768; 3];
+        assert_eq!(dither_rgb8(mid, 0, 0), [127; 3]);
+        assert_eq!(dither_rgb8(mid, 1, 0), [128; 3]);
+        assert_eq!(dither_rgb8([0; 3], 1, 0), [0; 3]);
+        assert_eq!(dither_rgb8([65535; 3], 1, 0), [255; 3]);
+    }
 
     #[test]
     fn line_coverage_matches_analytic_4x_subsample_oracle() {
