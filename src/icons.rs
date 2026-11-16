@@ -472,8 +472,9 @@ pub fn icon_shape(name: &str) -> &'static IconShape {
     }
 }
 
-/// Even-odd point-in-polygon test over integer coordinates.
-fn in_polygon(x: i64, y: i64, poly: &[(i64, i64)]) -> bool {
+/// Even-odd point-in-polygon test; `x, y` and `poly` share one fixed-point
+/// scale (`poly` vertices arrive already scaled by the caller).
+fn in_polygon(x: i64, y: i64, poly: &[(i64, i64)], scale: i64) -> bool {
     let n = poly.len();
     if n < 3 {
         return false;
@@ -481,8 +482,8 @@ fn in_polygon(x: i64, y: i64, poly: &[(i64, i64)]) -> bool {
     let mut inside = false;
     let mut j = n - 1;
     for i in 0..n {
-        let (xi, yi) = poly[i];
-        let (xj, yj) = poly[j];
+        let (xi, yi) = (poly[i].0 * scale, poly[i].1 * scale);
+        let (xj, yj) = (poly[j].0 * scale, poly[j].1 * scale);
         if (yi > y) != (yj > y) {
             // Cross-multiply the edge/scanline intersection so the sign of the
             // denominator cannot flip the comparison.
@@ -511,27 +512,37 @@ fn segment_dist2(x: i64, y: i64, a: (i64, i64), b: (i64, i64)) -> i64 {
     (len2 * (px * px + py * py) - t * t) / len2
 }
 
-/// True when `(x, y)` lies on a shape: inside a filled polygon or disc, or
-/// within half a stroke of a polyline or circle outline.
+/// True when the `PATH_FIX`-scaled `(x, y)` lies on a shape: inside a filled
+/// polygon or disc, or within half a stroke of a polyline or circle outline.
 fn shape_hit(shape: &IconShape, x: i64, y: i64) -> bool {
     shape.fills.iter().any(|s| shape_on(s, x, y)) || shape.strokes.iter().any(|s| shape_on(s, x, y))
 }
 
+/// Hit-test one builtin primitive. `(x, y)` is `PATH_FIX`-scaled; the static
+/// constants are whole icon units, so each one is scaled up here.
 fn shape_on(s: &Shape, x: i64, y: i64) -> bool {
     match s {
-        Shape::Polygon(poly) => in_polygon(x, y, poly),
-        Shape::Polyline(pts) => pts
-            .windows(2)
-            .any(|w| segment_dist2(x, y, w[0], w[1]) <= STROKE_HALF * STROKE_HALF),
+        Shape::Polygon(poly) => in_polygon(x, y, poly, PATH_FIX),
+        Shape::Polyline(pts) => pts.windows(2).any(|w| {
+            segment_dist2(
+                x,
+                y,
+                (w[0].0 * PATH_FIX, w[0].1 * PATH_FIX),
+                (w[1].0 * PATH_FIX, w[1].1 * PATH_FIX),
+            ) <= (STROKE_HALF * PATH_FIX) * (STROKE_HALF * PATH_FIX)
+        }),
         Shape::Circle { cx, cy, r, filled } => {
+            let (cx, cy) = (cx * PATH_FIX, cy * PATH_FIX);
             let dx = x - cx;
             let dy = y - cy;
             let d2 = dx * dx + dy * dy;
+            let r = r * PATH_FIX;
             if *filled {
                 d2 <= r * r
             } else {
-                let lo = (r - STROKE_HALF).max(0);
-                d2 >= lo * lo && d2 <= (r + STROKE_HALF) * (r + STROKE_HALF)
+                let lo = (r - STROKE_HALF * PATH_FIX).max(0);
+                let hi = r + STROKE_HALF * PATH_FIX;
+                d2 >= lo * lo && d2 <= hi * hi
             }
         }
     }
@@ -548,9 +559,9 @@ pub fn icon_coverage(name: &str, size: i64, px: i64, py: i64) -> i64 {
     }
     let mut on = 0i64;
     for sy in 0..ICON_AA {
-        let cy = ((py * ICON_AA + sy) * ICON_BOX + ICON_BOX / 2) / den;
+        let cy = ((py * ICON_AA + sy) * ICON_BOX * PATH_FIX + den / 2) / den;
         for sx in 0..ICON_AA {
-            let cx = ((px * ICON_AA + sx) * ICON_BOX + ICON_BOX / 2) / den;
+            let cx = ((px * ICON_AA + sx) * ICON_BOX * PATH_FIX + den / 2) / den;
             if shape_hit(shape, cx, cy) {
                 on += 1;
             }
@@ -559,9 +570,10 @@ pub fn icon_coverage(name: &str, size: i64, px: i64, py: i64) -> i64 {
     (on * UNIT) / (ICON_AA * ICON_AA)
 }
 
-/// One parsed subpath: an open integer polyline in the 24x24 icon box, stroked
-/// with the same 2-unit ribbon as the built-in shapes. `closed` records a
-/// trailing `Z` so a closed subpath joins its last point back to its first.
+/// One parsed subpath: an open `PATH_FIX`-scaled polyline in the 24x24 icon
+/// box, stroked with the same 2-unit ribbon as the built-in shapes. `closed`
+/// records a trailing `Z` so a closed subpath joins its last point back to
+/// its first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubPath {
     pub points: Vec<(i64, i64)>,
@@ -704,15 +716,16 @@ fn atan2_approx(y: i64, x: i64) -> i64 {
     angle.rem_euclid(TAU)
 }
 
-/// Parse an SVG path `d` string into integer subpaths in the 24x24 box.
+/// Parse an SVG path `d` string into `PATH_FIX`-scaled subpaths in the 24x24
+/// box.
 ///
 /// Supports M/m L/l H/h V/v C/c S/s Q/q T/t Z/z and downward-converts the
 /// curves/arcs to line segments on a fixed subdivision (shortcut: A/a arcs and
-/// cubic/quadratic curves are flattened to straight segments dense enough for a
-/// 24-unit glyph; upgrade to exact arc/cubic rasterisation if a package ships
-/// very large-radius curves). All math is integer fixed point scaled by
-/// `PATH_FIX`, rounded back to whole icon units, so a path always parses to the
-/// same integer points.
+/// cubic/quadratic curves are flattened to straight segments; CURVE_STEPS
+/// bounds the facet length so a magnified glyph stays smooth). All math is
+/// integer fixed point scaled by `PATH_FIX` and never rounds back to whole
+/// icon units, so sub-unit control points survive and a path always parses to
+/// the same points.
 pub fn parse_path_d(d: &str) -> Option<Vec<SubPath>> {
     let tokens = tokenize_path(d)?;
     let mut sp = PathScanner {
@@ -733,10 +746,12 @@ pub fn parse_path_d(d: &str) -> Option<Vec<SubPath>> {
 }
 
 /// Fixed-point denominator for path arithmetic: coordinates are kept as
-/// `PATH_FIX`-scaled integers and rounded to whole icon units when emitted.
-const PATH_FIX: i64 = 64;
+/// `PATH_FIX`-scaled integers through parsing, flattening and hit-testing, so
+/// sub-unit SVG control points survive at magnified sizes. Emission clamps to
+/// the box without rounding back to whole icon units.
+const PATH_FIX: i64 = 1024;
 /// Straight segments per cubic/quadratic curve, and per arc quadrant.
-const CURVE_STEPS: i64 = 8;
+const CURVE_STEPS: i64 = 24;
 
 fn tokenize_path(d: &str) -> Option<Vec<PathTok>> {
     let bytes = d.as_bytes();
@@ -868,7 +883,7 @@ impl<'a> PathScanner<'a> {
                         }
                         self.cx = px;
                         self.cy = py;
-                        self.cur.push((unit(px), unit(py)));
+                        self.cur.push((fix(px), fix(py)));
                         if !self.next_is_num() {
                             break;
                         }
@@ -879,7 +894,7 @@ impl<'a> PathScanner<'a> {
                     let (px, py) = self.line_point(cmd)?;
                     self.cx = px;
                     self.cy = py;
-                    self.cur.push((unit(px), unit(py)));
+                    self.cur.push((fix(px), fix(py)));
                     self.prev_cmd = cmd;
                     if !self.next_is_num() {
                         break;
@@ -1053,7 +1068,7 @@ impl<'a> PathScanner<'a> {
         if rx == 0 || ry == 0 || (sx == ex && sy == ey) {
             self.cx = ex;
             self.cy = ey;
-            self.cur.push((unit(ex), unit(ey)));
+            self.cur.push((fix(ex), fix(ey)));
             return;
         }
         if rot_deg % 360 != 0 {
@@ -1061,15 +1076,17 @@ impl<'a> PathScanner<'a> {
             // ships a rotated elliptical arc.
             self.cx = ex;
             self.cy = ey;
-            self.cur.push((unit(ex), unit(ey)));
+            self.cur.push((fix(ex), fix(ey)));
             return;
         }
         let dx2 = (sx - ex) / 2;
         let dy2 = (sy - ey) / 2;
-        let lam = (dx2 * dx2) / rx.max(1) / rx.max(1) + (dy2 * dy2) / ry.max(1) / ry.max(1);
+        // lambda = (dx2/rx)^2 + (dy2/ry)^2 in PATH_FIX units; a chord longer
+        // than the radii permits (lambda > 1) scales them up by sqrt(lambda).
+        let lam = (dx2 * dx2 * PATH_FIX) / rx.max(1).max(1) / rx.max(1)
+            + (dy2 * dy2 * PATH_FIX) / ry.max(1) / ry.max(1);
         if lam > PATH_FIX {
-            // Radii too small: scale up by sqrt(lam) (in fixed point).
-            let scale = isqrt(lam * PATH_FIX);
+            let scale = isqrt(lam.saturating_mul(PATH_FIX));
             rx = rx * scale / PATH_FIX;
             ry = ry * scale / PATH_FIX;
         }
@@ -1077,7 +1094,11 @@ impl<'a> PathScanner<'a> {
         let ry2 = ry * ry;
         let num = (rx2 * ry2 - rx2 * dy2 * dy2 - ry2 * dx2 * dx2).max(0);
         let den = (rx2 * dy2 * dy2 + ry2 * dx2 * dx2).max(1);
-        let coef = isqrt(num.saturating_mul(PATH_FIX) / den);
+        // i128 keeps num*PATH_FIX exact for radii up to the whole icon box.
+        let coef = {
+            let q = ((num as i128).saturating_mul(PATH_FIX as i128)) / den as i128;
+            isqrt(q.min(i64::MAX as i128) as i64)
+        };
         let sign = if large == sweep { -1 } else { 1 };
         // Centre offset in the (unrotated) ellipse frame.
         let cxp = sign * coef * rx * dy2 / (ry * PATH_FIX).max(1);
@@ -1102,7 +1123,7 @@ impl<'a> PathScanner<'a> {
             let (ct, st) = cos_sin_from_turn(theta);
             let px = cx + rx * ct / TRIG;
             let py = cy + ry * st / TRIG;
-            self.cur.push((unit(px), unit(py)));
+            self.cur.push((fix(px), fix(py)));
         }
         self.cx = ex;
         self.cy = ey;
@@ -1128,7 +1149,7 @@ impl<'a> PathScanner<'a> {
             let b3 = t * t * t;
             let x = (b0 * sx + b1 * x1 + b2 * x2 + b3 * ex) / (PATH_FIX * PATH_FIX * PATH_FIX);
             let y = (b0 * sy + b1 * y1 + b2 * y2 + b3 * ey) / (PATH_FIX * PATH_FIX * PATH_FIX);
-            self.cur.push((unit(x), unit(y)));
+            self.cur.push((fix(x), fix(y)));
         }
         self.cx = ex;
         self.cy = ey;
@@ -1144,16 +1165,17 @@ impl<'a> PathScanner<'a> {
             let b2 = t * t;
             let x = (b0 * sx + b1 * x1 + b2 * ex) / (PATH_FIX * PATH_FIX);
             let y = (b0 * sy + b1 * y1 + b2 * ey) / (PATH_FIX * PATH_FIX);
-            self.cur.push((unit(x), unit(y)));
+            self.cur.push((fix(x), fix(y)));
         }
         self.cx = ex;
         self.cy = ey;
     }
 }
 
-/// Round a `PATH_FIX`-scaled coordinate to whole icon units, clamped to the box.
-fn unit(fixed: i64) -> i64 {
-    ((fixed + PATH_FIX / 2) / PATH_FIX).clamp(0, ICON_BOX)
+/// Clamp a `PATH_FIX`-scaled coordinate to the icon box, keeping sub-unit
+/// precision instead of rounding back to whole icon units.
+fn fix(v: i64) -> i64 {
+    v.clamp(0, ICON_BOX * PATH_FIX)
 }
 
 /// Fixed-point coverage (0..=UNIT) of one pixel of a package icon drawn into a
@@ -1166,9 +1188,9 @@ pub fn path_coverage(icon: &IconPaths, size: i64, px: i64, py: i64) -> i64 {
     }
     let mut on = 0i64;
     for sy in 0..ICON_AA {
-        let cy = ((py * ICON_AA + sy) * ICON_BOX + ICON_BOX / 2) / den;
+        let cy = ((py * ICON_AA + sy) * ICON_BOX * PATH_FIX + den / 2) / den;
         for sx in 0..ICON_AA {
-            let cx = ((px * ICON_AA + sx) * ICON_BOX + ICON_BOX / 2) / den;
+            let cx = ((px * ICON_AA + sx) * ICON_BOX * PATH_FIX + den / 2) / den;
             if path_hit(icon, cx, cy) {
                 on += 1;
             }
@@ -1177,18 +1199,20 @@ pub fn path_coverage(icon: &IconPaths, size: i64, px: i64, py: i64) -> i64 {
     (on * UNIT) / (ICON_AA * ICON_AA)
 }
 
+/// Hit-test a package path; points and `(x, y)` are `PATH_FIX`-scaled.
 fn path_hit(icon: &IconPaths, x: i64, y: i64) -> bool {
+    let half = (STROKE_HALF * PATH_FIX) * (STROKE_HALF * PATH_FIX);
     icon.subpaths.iter().any(|sp| {
         sp.points
             .windows(2)
-            .any(|w| segment_dist2(x, y, w[0], w[1]) <= STROKE_HALF * STROKE_HALF)
-            || (sp.closed && closed_segment_hit(sp, x, y))
+            .any(|w| segment_dist2(x, y, w[0], w[1]) <= half)
+            || (sp.closed && closed_segment_hit(sp, x, y, half))
     })
 }
 
-fn closed_segment_hit(sp: &SubPath, x: i64, y: i64) -> bool {
+fn closed_segment_hit(sp: &SubPath, x: i64, y: i64, half: i64) -> bool {
     match (sp.points.first(), sp.points.last()) {
-        (Some(&a), Some(&b)) => segment_dist2(x, y, b, a) <= STROKE_HALF * STROKE_HALF,
+        (Some(&a), Some(&b)) => segment_dist2(x, y, b, a) <= half,
         _ => false,
     }
 }
@@ -1257,9 +1281,13 @@ mod tests {
         assert_eq!(subs.len(), 1);
         let sp = &subs[0];
         assert!(sp.closed, "trailing Z closes the subpath");
-        assert_eq!(sp.points.first(), Some(&(3, 3)));
-        assert_eq!(sp.points.last(), Some(&(3, 3)), "closed path repeats first");
-        assert!(sp.points.contains(&(21, 3)));
+        assert_eq!(sp.points.first(), Some(&(3 * PATH_FIX, 3 * PATH_FIX)));
+        assert_eq!(
+            sp.points.last(),
+            Some(&(3 * PATH_FIX, 3 * PATH_FIX)),
+            "closed path repeats first"
+        );
+        assert!(sp.points.contains(&(21 * PATH_FIX, 3 * PATH_FIX)));
     }
 
     #[test]
@@ -1268,13 +1296,25 @@ mod tests {
         let subs = parse_path_d("m0 0 l10 0 c0 5 5 10 10 10 z").unwrap();
         let sp = &subs[0];
         assert_eq!(sp.points.first(), Some(&(0, 0)));
-        assert!(sp.points.contains(&(10, 0)));
-        // Relative cubic end (10,10) lands at (20,10); curve points stay in-box.
-        assert!(sp.points.iter().any(|&(x, y)| x == 20 && y == 10));
+        assert!(sp.points.contains(&(10 * PATH_FIX, 0)));
+        // Relative cubic end (10,10) lands at (20,10) in fixed point; every
+        // point stays inside the icon box at PATH_FIX scale.
         assert!(sp
             .points
             .iter()
-            .all(|&(x, y)| (0..=24).contains(&x) && (0..=24).contains(&y)));
+            .any(|&(x, y)| x == 20 * PATH_FIX && y == 10 * PATH_FIX));
+        assert!(sp
+            .points
+            .iter()
+            .all(|&(x, y)| (0..=24 * PATH_FIX).contains(&x) && (0..=24 * PATH_FIX).contains(&y)));
+        // The flattened cubic must keep sub-unit precision: intermediate
+        // points land strictly between whole icon units.
+        assert!(
+            sp.points
+                .iter()
+                .any(|&(x, y)| x % PATH_FIX != 0 || y % PATH_FIX != 0),
+            "curve flattening must keep sub-unit points"
+        );
     }
 
     #[test]
