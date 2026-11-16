@@ -136,6 +136,31 @@ pub fn press_color(c: Rgba) -> Rgba {
     }
 }
 
+/// Ripple timing in milliseconds. Structural constants held here until the
+/// material token table lands; callers may override duration per primitive.
+/// The value matches the medium motion token (bounded, 220 ms).
+pub const RIPPLE_DURATION_MS: i64 = 220;
+/// Peak alpha of a fresh ripple, in fixed-point `UNIT` units.
+pub const RIPPLE_PEAK_ALPHA: i64 = 256; // 25% opacity
+
+/// Normalized ripple progress at `elapsed_ms` since the press, in `0..=UNIT`.
+/// Before the press zero, after the duration exactly `UNIT`; integer only.
+pub fn ripple_progress(elapsed_ms: i64, duration_ms: i64) -> i64 {
+    let d = duration_ms.max(1);
+    (elapsed_ms.clamp(0, d) as i128 * UNIT as i128 / d as i128) as i64
+}
+
+/// Ripple radius at `progress`: grows linearly to `max_radius`, integer fixed
+/// point with half-up rounding so small radii do not stall at zero.
+pub fn ripple_radius(progress: i64, max_radius: i64) -> i64 {
+    ((progress as i128 * max_radius as i128 + UNIT as i128 / 2) / UNIT as i128) as i64
+}
+
+/// Ripple alpha at `progress`: fades from `peak` to zero as the circle grows.
+pub fn ripple_alpha(progress: i64, peak: i64) -> i64 {
+    (peak as i128 * (UNIT - progress) as i128 / UNIT as i128).clamp(0, UNIT as i128) as i64
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
     Primary,

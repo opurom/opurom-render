@@ -70,8 +70,9 @@ pub use image::{
     CacheStats, Image, ImageFit, CACHE_CAPACITY, MAX_DECODED_BYTES, MAX_IMAGE_DIMENSION,
 };
 pub use interaction::{
-    is_interactive, NodeState, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
-    SUCCESS, WARNING,
+    is_interactive, press_color, ripple_alpha, ripple_progress, ripple_radius, NodeState, Tone,
+    Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY, RIPPLE_DURATION_MS,
+    RIPPLE_PEAK_ALPHA, SUCCESS, WARNING,
 };
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Directionality, Event, Ir, IrError, Kind,

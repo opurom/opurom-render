@@ -570,6 +570,22 @@ impl Canvas {
         }
     }
 
+    /// Opt-in ripple disc at `(cx,cy)` with the given radius and color. Delegates
+    /// to `fill_circle`, so the viewport/parent clip and edge coverage apply
+    /// unchanged; a zero radius or fully transparent color draws nothing.
+    pub fn draw_ripple(&mut self, cx: i64, cy: i64, radius: i64, c: Rgba) {
+        if radius <= 0 || c.a == 0 {
+            return;
+        }
+        let r = Rect {
+            x: cx - radius,
+            y: cy - radius,
+            w: radius.saturating_mul(2),
+            h: radius.saturating_mul(2),
+        };
+        self.fill_circle(r, c);
+    }
+
     /// Two diagonal strokes (a check mark), integer Bresenham-ish stepping.
     pub fn draw_check(&mut self, r: Rect, c: Rgba, width: i64) {
         let w = width.max(1);
