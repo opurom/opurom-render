@@ -27,10 +27,7 @@ pub fn cubic_bezier(
             + ti * ti * ti * d as i128;
         ((num + round) / denom) as i64
     };
-    (
-        axis(p0.0, p1.0, p2.0, p3.0),
-        axis(p0.1, p1.1, p2.1, p3.1),
-    )
+    (axis(p0.0, p1.0, p2.0, p3.0), axis(p0.1, p1.1, p2.1, p3.1))
 }
 
 #[cfg(test)]

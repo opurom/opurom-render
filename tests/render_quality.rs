@@ -103,7 +103,11 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
         .arg(&ppm)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(
         format!("digest={}", digest_hex(&fs::read(&ppm).unwrap())),
         fs::read_to_string("tests/fixtures/effects.digest.txt")

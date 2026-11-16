@@ -10,10 +10,45 @@ fn scene(on: bool) -> Vec<u8> {
     if on {
         c.set_edge_aa(true);
     }
-    c.fill_rounded(Rect { x: 1, y: 1, w: 12, h: 12 }, Rgba::rgb(255, 0, 0), 4);
-    c.fill_circle(Rect { x: 16, y: 1, w: 12, h: 12 }, Rgba::rgb(0, 255, 0));
-    c.stroke_circle(Rect { x: 1, y: 16, w: 12, h: 12 }, Rgba::rgb(0, 0, 255), 2);
-    c.draw_check(Rect { x: 16, y: 16, w: 12, h: 12 }, Rgba::rgb(255, 255, 255), 1);
+    c.fill_rounded(
+        Rect {
+            x: 1,
+            y: 1,
+            w: 12,
+            h: 12,
+        },
+        Rgba::rgb(255, 0, 0),
+        4,
+    );
+    c.fill_circle(
+        Rect {
+            x: 16,
+            y: 1,
+            w: 12,
+            h: 12,
+        },
+        Rgba::rgb(0, 255, 0),
+    );
+    c.stroke_circle(
+        Rect {
+            x: 1,
+            y: 16,
+            w: 12,
+            h: 12,
+        },
+        Rgba::rgb(0, 0, 255),
+        2,
+    );
+    c.draw_check(
+        Rect {
+            x: 16,
+            y: 16,
+            w: 12,
+            h: 12,
+        },
+        Rgba::rgb(255, 255, 255),
+        1,
+    );
     c.pixels
 }
 
@@ -54,17 +89,31 @@ fn full_scene_edge_pixels_match_the_fixed_4x_coverage_oracle() {
     // coverage values themselves are checked against an independent analytic
     // point-to-segment reference in raster.rs unit tests.
     assert_eq!(digest_hex(&aa), "9f422bcb800abf64");
-    assert!(count_partial(&aa) >= 20, "edge coverage must produce partial pixels");
+    assert!(
+        count_partial(&aa) >= 20,
+        "edge coverage must produce partial pixels"
+    );
     assert_eq!(aa, scene(true), "the opt-in frame is byte-deterministic");
-    assert!(aa.chunks_exact(4).all(|p| p[3] == 255), "frame stays opaque");
+    assert!(
+        aa.chunks_exact(4).all(|p| p[3] == 255),
+        "frame stays opaque"
+    );
 }
 
 #[test]
 fn msaa_flag_changes_pixels_but_not_the_capture_stream() {
     let plain = scene(false);
     let aa = scene(true);
-    assert_ne!(digest_hex(&plain), digest_hex(&aa), "the opt-in flag must matter");
-    assert_eq!(count_partial(&plain), 0, "default edges are hard integer edges");
+    assert_ne!(
+        digest_hex(&plain),
+        digest_hex(&aa),
+        "the opt-in flag must matter"
+    );
+    assert_eq!(
+        count_partial(&plain),
+        0,
+        "default edges are hard integer edges"
+    );
 
     let src = parse_ir(&scene_ir(None)).unwrap();
     let qsrc = parse_ir(&scene_ir(Some(json!({ "msaa": 4 })))).unwrap();
@@ -76,8 +125,14 @@ fn msaa_flag_changes_pixels_but_not_the_capture_stream() {
         "renderQuality.msaa must change the raster frame"
     );
     assert_eq!(
-        Renderer::new(48, 48).display_list(&src, &state).to_json().unwrap(),
-        Renderer::new(48, 48).display_list(&qsrc, &qstate).to_json().unwrap(),
+        Renderer::new(48, 48)
+            .display_list(&src, &state)
+            .to_json()
+            .unwrap(),
+        Renderer::new(48, 48)
+            .display_list(&qsrc, &qstate)
+            .to_json()
+            .unwrap(),
         "capture mode records the same command stream"
     );
 }
@@ -88,8 +143,14 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
     let counter = fs::read_to_string("../opurom-examples/golden/counter.opuir.json").unwrap();
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
-    assert_eq!(digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels), "8d45f412996a99c6");
-    assert_eq!(digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels), "318beb1dd337bc4e");
+    assert_eq!(
+        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        "8d45f412996a99c6"
+    );
+    assert_eq!(
+        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        "318beb1dd337bc4e"
+    );
 
     let ppm = dir.join("msaa-effects.ppm");
     let out = Command::new(env!("CARGO_BIN_EXE_opurom-render"))
@@ -98,9 +159,15 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
         .arg(&ppm)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(
         format!("digest={}", digest_hex(&fs::read(&ppm).unwrap())),
-        fs::read_to_string("tests/fixtures/effects.digest.txt").unwrap().trim()
+        fs::read_to_string("tests/fixtures/effects.digest.txt")
+            .unwrap()
+            .trim()
     );
 }

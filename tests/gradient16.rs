@@ -15,7 +15,12 @@ fn ramp(bits: u8) -> Vec<u8> {
     let mut c = Canvas::new(256, 4, Rgba::rgb(0, 0, 0));
     c.set_gradient_bits(bits);
     c.fill_rounded_gradient(
-        Rect { x: 0, y: 0, w: 256, h: 4 },
+        Rect {
+            x: 0,
+            y: 0,
+            w: 256,
+            h: 4,
+        },
         Rgba::rgb(0, 0, 0),
         Rgba::rgb(15, 15, 15),
         0,
@@ -87,13 +92,26 @@ fn ten_bit_default_bands_wider_and_flag_changes_pixels() {
     let state = StateView::from_ir(&src);
     let qstate = StateView::from_ir(&qsrc);
     assert_eq!(src.render_quality, None);
-    assert_eq!(qsrc.render_quality.as_ref().unwrap().gradient_bits, Some(16));
+    assert_eq!(
+        qsrc.render_quality.as_ref().unwrap().gradient_bits,
+        Some(16)
+    );
     let a = Renderer::new(96, 96).pixels(&src, &state);
     let b = Renderer::new(96, 96).pixels(&qsrc, &qstate);
-    assert_ne!(digest_hex(&a), digest_hex(&b), "renderQuality.gradientBits must change the raster frame");
+    assert_ne!(
+        digest_hex(&a),
+        digest_hex(&b),
+        "renderQuality.gradientBits must change the raster frame"
+    );
     assert_eq!(
-        Renderer::new(96, 96).display_list(&src, &state).to_json().unwrap(),
-        Renderer::new(96, 96).display_list(&qsrc, &qstate).to_json().unwrap(),
+        Renderer::new(96, 96)
+            .display_list(&src, &state)
+            .to_json()
+            .unwrap(),
+        Renderer::new(96, 96)
+            .display_list(&qsrc, &qstate)
+            .to_json()
+            .unwrap(),
         "capture mode records the same command stream"
     );
 }
@@ -104,8 +122,14 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
     let counter = fs::read_to_string("../opurom-examples/golden/counter.opuir.json").unwrap();
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
-    assert_eq!(digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels), "8d45f412996a99c6");
-    assert_eq!(digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels), "318beb1dd337bc4e");
+    assert_eq!(
+        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        "8d45f412996a99c6"
+    );
+    assert_eq!(
+        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        "318beb1dd337bc4e"
+    );
 
     let ppm = dir.join("gradient-effects.ppm");
     let out = Command::new(env!("CARGO_BIN_EXE_opurom-render"))
@@ -114,9 +138,15 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
         .arg(&ppm)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(
         format!("digest={}", digest_hex(&fs::read(&ppm).unwrap())),
-        fs::read_to_string("tests/fixtures/effects.digest.txt").unwrap().trim()
+        fs::read_to_string("tests/fixtures/effects.digest.txt")
+            .unwrap()
+            .trim()
     );
 }

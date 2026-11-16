@@ -54,8 +54,8 @@ pub use anim::{
     StepMode, Transition, TransitionKind, ANIMATE_DEFAULT_MS, ANIMATE_MAX_MS, INERTIA_SETTLE_MS,
     ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, SPRING_SETTLE_MS, TRANSITION_MS,
 };
-pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
 pub use curve::cubic_bezier;
+pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
 pub use effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };

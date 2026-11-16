@@ -430,7 +430,12 @@ impl Canvas {
                         x,
                         y,
                     );
-                    Rgba { r: rgb[0], g: rgb[1], b: rgb[2], a: 255 }
+                    Rgba {
+                        r: rgb[0],
+                        g: rgb[1],
+                        b: rgb[2],
+                        a: 255,
+                    }
                 } else {
                     let t = if last <= 0 {
                         UNIT
@@ -2103,7 +2108,10 @@ mod tests {
         for &(x0, y0, x1, y1, x, y, w) in cases {
             let got = line_coverage(x0, y0, x1, y1, x, y, w);
             let want = reference(x0, y0, x1, y1, x, y, w);
-            assert_eq!(got, want, "coverage at ({x},{y}) on ({x0},{y0})->({x1},{y1})");
+            assert_eq!(
+                got, want,
+                "coverage at ({x},{y}) on ({x0},{y0})->({x1},{y1})"
+            );
             if got > 0 && got < 255 {
                 partial += 1;
             }

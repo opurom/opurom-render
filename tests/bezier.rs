@@ -57,7 +57,10 @@ fn known_segment_matches_oracle_points_within_one_integer_unit() {
         );
     }
     assert_eq!(cubic_bezier(P0, P1, P2, P3, UNIT / 2), (50, 75));
-    assert_eq!(cubic_bezier(P0, P1, P2, P3, UNIT / 2), cubic_bezier(P0, P1, P2, P3, UNIT / 2));
+    assert_eq!(
+        cubic_bezier(P0, P1, P2, P3, UNIT / 2),
+        cubic_bezier(P0, P1, P2, P3, UNIT / 2)
+    );
 }
 
 #[test]
@@ -80,8 +83,14 @@ fn default_path_bytes_and_command_stream_stay_identical() {
     let counter = fs::read_to_string("../opurom-examples/golden/counter.opuir.json").unwrap();
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
-    assert_eq!(digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels), "8d45f412996a99c6");
-    assert_eq!(digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels), "318beb1dd337bc4e");
+    assert_eq!(
+        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        "8d45f412996a99c6"
+    );
+    assert_eq!(
+        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        "318beb1dd337bc4e"
+    );
 
     let effects_ppm = dir.join("bezier-effects.ppm");
     let out = Command::new(env!("CARGO_BIN_EXE_opurom-render"))
@@ -90,10 +99,16 @@ fn default_path_bytes_and_command_stream_stay_identical() {
         .arg(&effects_ppm)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(
         format!("digest={}", digest_hex(&fs::read(&effects_ppm).unwrap())),
-        fs::read_to_string("tests/fixtures/effects.digest.txt").unwrap().trim()
+        fs::read_to_string("tests/fixtures/effects.digest.txt")
+            .unwrap()
+            .trim()
     );
 
     // The curve flag is a contract signal only until a vector-path consumer
@@ -111,9 +126,18 @@ fn default_path_bytes_and_command_stream_stay_identical() {
     let sa = StateView::from_ir(&a);
     let sb = StateView::from_ir(&b);
     assert_eq!(a.render_quality, None);
-    assert_eq!(b.render_quality.as_ref().unwrap().curve.as_deref(), Some("bezier"));
     assert_eq!(
-        Renderer::new(64, 64).display_list(&a, &sa).to_json().unwrap(),
-        Renderer::new(64, 64).display_list(&b, &sb).to_json().unwrap()
+        b.render_quality.as_ref().unwrap().curve.as_deref(),
+        Some("bezier")
+    );
+    assert_eq!(
+        Renderer::new(64, 64)
+            .display_list(&a, &sa)
+            .to_json()
+            .unwrap(),
+        Renderer::new(64, 64)
+            .display_list(&b, &sb)
+            .to_json()
+            .unwrap()
     );
 }
