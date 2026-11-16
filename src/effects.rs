@@ -258,11 +258,14 @@ impl EffectFrame {
             .max()
             .unwrap_or(0)
             .min(EFFECT_MAX_RADIUS + EFFECT_MAX_OFFSET);
+        let bounds = clipped_area(width, height, clip, n.rect, pad);
         EffectFrame {
-            has_local: !local.is_empty(),
+            // A node with no visible area paints no local effects: the software
+            // path would no-op anyway, and the GPU rejects dead bounds.
+            has_local: !local.is_empty() && bounds.w > 0 && bounds.h > 0,
             rect: n.rect,
             clip,
-            bounds: clipped_area(width, height, clip, n.rect, pad),
+            bounds,
             inner: clipped_area(width, height, clip, n.rect, 0),
             shape_radius: shape_radius(n),
             shape: n.fill.is_some(),

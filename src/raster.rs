@@ -303,7 +303,9 @@ impl Canvas {
         }
     }
 
-    /// Two-stop vertical gradient inside a rounded rectangle.
+    /// Two-stop gradient inside a rounded rectangle, sweeping vertically by
+    /// default or along the horizontal axis when asked. The per-pixel maths is
+    /// identical on both axes, so the recorded command reproduces the frame.
     pub fn fill_rounded_gradient(
         &mut self,
         r: Rect,
@@ -311,6 +313,7 @@ impl Canvas {
         bottom: Rgba,
         radius: i64,
         alpha: i64,
+        horizontal: bool,
     ) {
         if r.w <= 0 || r.h <= 0 {
             return;
@@ -318,28 +321,41 @@ impl Canvas {
         let rad = radius.max(0).min(r.w.min(r.h) / 2);
         let x1 = (r.x + r.w).min(self.width as i64);
         let y1 = (r.y + r.h).min(self.height as i64);
-        let last = r.h - 1;
+        let last = if horizontal { r.w - 1 } else { r.h - 1 };
         let alpha_u8 = ((alpha.clamp(0, UNIT) * 255) / UNIT) as u8;
         if self.capture && alpha_u8 > 0 && self.visible_rect(r, top) {
             let clip = self.effective_clip();
-            self.emit(Command::Gradient {
-                rect: r,
-                clip,
-                radius: rad,
-                top,
-                bottom,
-                alpha: alpha_u8,
-            });
+            let command = if horizontal {
+                Command::GradientHorizontal {
+                    rect: r,
+                    clip,
+                    radius: rad,
+                    top,
+                    bottom,
+                    alpha: alpha_u8,
+                }
+            } else {
+                Command::Gradient {
+                    rect: r,
+                    clip,
+                    radius: rad,
+                    top,
+                    bottom,
+                    alpha: alpha_u8,
+                }
+            };
+            self.emit(command);
         }
         for y in r.y.max(0)..y1 {
-            let t = if last <= 0 {
-                UNIT
-            } else {
-                ((y - r.y) * UNIT) / last
-            };
-            let c = crate::layout::lerp_color(top, bottom, t);
-            let c = with_alpha(c, alpha);
             for x in r.x.max(0)..x1 {
+                let local = if horizontal { x - r.x } else { y - r.y };
+                let t = if last <= 0 {
+                    UNIT
+                } else {
+                    (local * UNIT) / last
+                };
+                let c = crate::layout::lerp_color(top, bottom, t);
+                let c = with_alpha(c, alpha);
                 if self.edge_aa {
                     let cov = Self::round_coverage(r, x, y, rad);
                     self.set_covered(x, y, c, cov);
@@ -755,14 +771,28 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
                     let mid = crate::layout::lerp_color(a, b, UNIT / 2);
                     canvas.fill_circle(inner, with_alpha(mid, alpha))
                 }
-                Some((a, b)) => canvas.fill_rounded_gradient(inner, a, b, inner_radius, alpha),
+                Some((a, b)) => canvas.fill_rounded_gradient(
+                    inner,
+                    a,
+                    b,
+                    inner_radius,
+                    alpha,
+                    n.effects.gradient_horizontal,
+                ),
                 None if round => canvas.fill_circle(inner, with_alpha(fill, alpha)),
                 None => canvas.fill_rounded(inner, with_alpha(fill, alpha), inner_radius),
             }
         }
     } else if fill.a > 0 {
         match n.effects.gradient {
-            Some((a, b)) => canvas.fill_rounded_gradient(n.rect, a, b, n.radius, alpha),
+            Some((a, b)) => canvas.fill_rounded_gradient(
+                n.rect,
+                a,
+                b,
+                n.radius,
+                alpha,
+                n.effects.gradient_horizontal,
+            ),
             None => canvas.fill_rounded(n.rect, with_alpha(fill, alpha), n.radius),
         }
     }

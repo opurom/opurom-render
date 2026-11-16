@@ -122,8 +122,11 @@ pub enum Direction {
 /// Style effects. Every value is integer-only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Effects {
-    /// Two-stop linear gradient (top to bottom).
+    /// Two-stop linear gradient (top to bottom, or along the horizontal axis
+    /// when `gradient_horizontal` is set).
     pub gradient: Option<(Rgba, Rgba)>,
+    /// Sweep the gradient along the horizontal axis (`gradientDirection`).
+    pub gradient_horizontal: bool,
     /// Frosted fill (surface blended with accent).
     pub glass: bool,
     /// Soft shadow strength, 0..=8.
@@ -171,6 +174,7 @@ impl Default for Effects {
     fn default() -> Self {
         Effects {
             gradient: None,
+            gradient_horizontal: false,
             glass: false,
             shadow: 0,
             opacity: UNIT,
@@ -1125,6 +1129,7 @@ fn place(
 
     let effects = Effects {
         gradient: n.props.gradient,
+        gradient_horizontal: n.props.gradient_horizontal,
         glass: n.props.glass,
         shadow,
         opacity,

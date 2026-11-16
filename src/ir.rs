@@ -13,6 +13,7 @@
 use crate::anim::{Curve, TransitionKind};
 use crate::effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
+    GAUSSIAN_MAX_RADIUS, GAUSSIAN_MIN_RADIUS,
 };
 use crate::font::FontMetrics;
 use crate::gestures::GestureKind;
@@ -419,6 +420,10 @@ pub struct Props {
     // Canonical style effects.
     pub shadow: Option<i64>,
     pub gradient: Option<(Rgba, Rgba)>,
+    /// `gradientDirection: "horizontal"` sweeps the gradient along the rect's
+    /// horizontal axis; the default (absent, or `"vertical"`) keeps top to
+    /// bottom.
+    pub gradient_horizontal: bool,
     pub glass: bool,
     /// Alpha in fixed point: 0 = transparent, 1024 = opaque.
     pub opacity: Option<i64>,
@@ -1040,6 +1045,13 @@ fn effects_prop(o: &Map<String, Value>, what: &str) -> Result<Vec<VisualEffect>,
         let kind = VisualEffectKind::parse(&kind_s)
             .ok_or_else(|| bad(format!("{path}.kind has unknown value {kind_s:?}")))?;
         let radius = effect_integer(fx, "radius", &path, 3)?.clamp(0, EFFECT_MAX_RADIUS);
+        if kind == VisualEffectKind::Gaussian
+            && !(GAUSSIAN_MIN_RADIUS..=GAUSSIAN_MAX_RADIUS).contains(&radius)
+        {
+            return Err(bad(format!(
+                "{path}: gaussian radius {radius} must be between {GAUSSIAN_MIN_RADIUS} and {GAUSSIAN_MAX_RADIUS}"
+            )));
+        }
         let dx = effect_integer(fx, "dx", &path, radius / 2)?
             .clamp(-EFFECT_MAX_OFFSET, EFFECT_MAX_OFFSET);
         let dy = effect_integer(fx, "dy", &path, radius / 2)?
@@ -1279,6 +1291,16 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         size: opt_integer(o, "size", what)?,
         shadow,
         gradient: gradient_prop(o, "gradient", what)?,
+        gradient_horizontal: match opt_string(o, "gradientDirection", what)?.as_deref() {
+            None => false,
+            Some("horizontal") => true,
+            Some("vertical") => false,
+            Some(other) => {
+                return Err(bad(format!(
+                    "{what}.gradientDirection has unknown value {other:?}: expected vertical or horizontal"
+                )))
+            }
+        },
         glass: opt_bool(o, "glass", what)?,
         opacity: unit_prop(o, "opacity", what)?,
         border: color_prop(o, "border", what)?,

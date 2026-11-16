@@ -386,11 +386,7 @@ fn cli_commands_accepts_gaussian_and_clamps_radius() {
     let ir_path = dir.join("capability-command-gaussian.opuir.json");
     let ppm = dir.join("capability-command-gaussian.ppm");
     let commands = dir.join("capability-command-gaussian.commands.json");
-    fs::write(
-        &ir_path,
-        ir_of(Some(r#"[{"kind":"gaussian","radius":4}]"#)),
-    )
-    .unwrap();
+    fs::write(&ir_path, ir_of(Some(r#"[{"kind":"gaussian","radius":4}]"#))).unwrap();
     let _ = fs::remove_file(&commands);
 
     let accepted = ProcessCommand::new(env!("CARGO_BIN_EXE_opurom-render"))

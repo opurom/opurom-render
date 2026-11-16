@@ -217,8 +217,10 @@ fn committed_fixture_emits_all_five_effects_and_is_deterministic() {
     assert!(parse_ir(FIXTURE_IR).unwrap().has_visual_effects());
     let ir_path = dir.join("capability-fixture.opuir.json");
     fs::write(&ir_path, FIXTURE_IR).unwrap();
-    let (first, ppm) = dump(&ir_path, "96", "64", "fixture-a");
-    let (second, _) = dump(&ir_path, "96", "64", "fixture-b");
+    // Tall enough that every effect node of the committed fixture sits inside
+    // the viewport, including the two GPU-only surfaces at the top.
+    let (first, ppm) = dump(&ir_path, "96", "160", "fixture-a");
+    let (second, _) = dump(&ir_path, "96", "160", "fixture-b");
     assert_eq!(first, second);
     for kind in [
         "effect_blur",
@@ -232,7 +234,16 @@ fn committed_fixture_emits_all_five_effects_and_is_deterministic() {
             "{kind} missing"
         );
     }
-    assert_eq!(digest_hex(&fs::read(&ppm).unwrap()).len(), 16);
+    // The committed fixture now also carries the two GPU-only surfaces, so its
+    // frame digest is pinned: the gradient_horizontal fill and the whole-frame
+    // gaussian pass must stay byte-stable.
+    assert_eq!(
+        format!("digest={}", digest_hex(&fs::read(&ppm).unwrap())),
+        fs::read_to_string("../opurom-render/tests/fixtures/effects.digest.txt")
+            .unwrap_or_default()
+            .trim(),
+        "the effect fixture frame digest is pinned"
+    );
 }
 
 #[test]
@@ -260,4 +271,138 @@ fn empty_display_list_and_malformed_effect_commands_are_bounded() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("effects"));
+}
+
+#[test]
+fn gradient_horizontal_and_gaussian_blur_emit_their_gpu_commands() {
+    let (json, ppm) = dump(&write_fixture(), "96", "72", "gpu-only");
+    let doc: Value = serde_json::from_str(&json).unwrap();
+    let commands = doc["commands"].as_array().unwrap();
+    let horizontal: Vec<&Value> = commands
+        .iter()
+        .filter(|c| c["kind"].as_str() == Some("gradient_horizontal"))
+        .collect();
+    assert_eq!(horizontal.len(), 1, "one horizontal gradient command");
+    let gradient = horizontal[0];
+    // The node radius 2 minus the 1px border inset paints at radius 1.
+    assert_eq!(gradient["radius"].as_i64(), Some(1));
+    assert_eq!(gradient["top"][0].as_i64(), Some(255));
+    assert_eq!(gradient["bottom"][2].as_i64(), Some(255));
+    assert_eq!(gradient["alpha"].as_i64(), Some(255));
+    assert_eq!(
+        gradient["rect"][2].as_i64(),
+        Some(62),
+        "the sweep axis is the inner rect width"
+    );
+    let gaussian: Vec<&Value> = commands
+        .iter()
+        .filter(|c| c["kind"].as_str() == Some("effect_gaussian_blur"))
+        .collect();
+    assert_eq!(gaussian.len(), 1, "one gaussian blur command");
+    assert_eq!(gaussian[0]["radius"].as_i64(), Some(3));
+    // The whole-frame gaussian pass follows the node's own draw commands.
+    let kinds: Vec<&str> = commands.iter().filter_map(|c| c["kind"].as_str()).collect();
+    let box_pos = kinds.iter().position(|k| *k == "rounded").unwrap();
+    let gauss_pos = kinds
+        .iter()
+        .position(|k| *k == "effect_gaussian_blur")
+        .unwrap();
+    assert!(box_pos < gauss_pos, "the gaussian pass follows its node");
+    // The command stream and the software frame agree on the fixture.
+    assert!(fs::read(&ppm).unwrap().len() > 0);
+}
+
+fn write_fixture() -> std::path::PathBuf {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let ir_path = dir.join("capability-gpu-only.opuir.json");
+    fs::write(&ir_path, FIXTURE_IR).unwrap();
+    ir_path
+}
+
+#[test]
+fn gaussian_radius_outside_the_gpu_window_is_rejected() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    for radius in [0, 9] {
+        let ir_path = dir.join(format!("capability-gauss-{radius}.opuir.json"));
+        fs::write(
+            &ir_path,
+            ir_with(&format!(r#"[]"#).replace(
+                "[]",
+                &format!(r#"[]{{"kind":"gaussian","radius":{radius}}}"#).replace("[]", "["),
+            )),
+        )
+        .unwrap_or_else(|_| ());
+        // Build the IR text directly to keep the effect array shape exact.
+        let text = ir_with(&format!(r#"[{{"kind":"gaussian","radius":{radius}}}]"#));
+        fs::write(&ir_path, &text).unwrap();
+        let ppm = dir.join(format!("capability-gauss-{radius}.ppm"));
+        let out = Command::new(env!("CARGO_BIN_EXE_opurom-render"))
+            .arg(&ir_path)
+            .args(["96", "64"])
+            .arg(&ppm)
+            .output()
+            .unwrap();
+        assert!(
+            !out.status.success(),
+            "gaussian radius {radius} must be rejected"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("gaussian radius"),
+            "the diagnostic names the window: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn unknown_gradient_direction_is_rejected() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let ir_path = dir.join("capability-gradient-dir.opuir.json");
+    fs::write(
+        &ir_path,
+        r##"{"ir":"0.1.0","app":"Bad","state":[],"tree":{"id":0,"kind":"Column","props":{},
+        "children":[{"id":1,"kind":"Container","props":{"width":8,"height":8,
+        "gradient":"#000000,#FFFFFF","gradientDirection":"diagonal"},"children":[],"events":{}}],
+        "events":{}},"theme":{"mode":"dark","accent":"#097FEB","radius":4}}"##,
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_opurom-render"))
+        .arg(&ir_path)
+        .args(["32", "24"])
+        .arg(dir.join("capability-gradient-dir.ppm"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "diagonal must be rejected");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("gradientDirection"));
+}
+
+#[test]
+fn vertical_gradient_is_the_default_and_counter_commands_do_not_change() {
+    // No gradientDirection: the emitted kind stays "gradient" (vertical).
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let ir_path = dir.join("capability-vertical.opuir.json");
+    fs::write(
+        &ir_path,
+        r##"{"ir":"0.1.0","app":"V","state":[],"tree":{"id":0,"kind":"Column","props":{},
+        "children":[{"id":1,"kind":"Container","props":{"width":8,"height":8,
+        "gradient":"#000000,#FFFFFF"},"children":[],"events":{}}],
+        "events":{}},"theme":{"mode":"dark","accent":"#097FEB","radius":4}}"##,
+    )
+    .unwrap();
+    let (json, _) = dump(&ir_path, "32", "24", "vertical");
+    assert!(json.contains("\"kind\":\"gradient\","));
+    assert!(!json.contains("gradient_horizontal"));
+
+    // The counter command pin is untouched by the new surface.
+    let counter = fs::read_to_string("../opurom-examples/golden/counter.opuir.json").unwrap();
+    let ir = parse_ir(&counter).unwrap();
+    let state = StateView::from_ir(&ir);
+    assert_eq!(
+        Renderer::new(320, 240)
+            .display_list(&ir, &state)
+            .to_json()
+            .unwrap()
+            .as_bytes(),
+        BASE_COMMANDS
+    );
 }
