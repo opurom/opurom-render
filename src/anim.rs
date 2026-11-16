@@ -22,6 +22,10 @@ pub enum Curve {
     Ease,
     Inertia,
     Collision,
+    Fast,
+    Medium,
+    Large,
+    Color,
 }
 
 impl Curve {
@@ -32,6 +36,10 @@ impl Curve {
             "ease" => Curve::Ease,
             "inertia" => Curve::Inertia,
             "collision" => Curve::Collision,
+            "fast" => Curve::Fast,
+            "medium" => Curve::Medium,
+            "large" => Curve::Large,
+            "color" => Curve::Color,
             _ => return None,
         })
     }
@@ -43,6 +51,10 @@ impl Curve {
             Curve::Ease => "ease",
             Curve::Inertia => "inertia",
             Curve::Collision => "collision",
+            Curve::Fast => "fast",
+            Curve::Medium => "medium",
+            Curve::Large => "large",
+            Curve::Color => "color",
         }
     }
 }
@@ -108,8 +120,19 @@ pub fn default_duration_ms(curve: Curve) -> i64 {
         Curve::Spring => SPRING_SETTLE_MS,
         Curve::Inertia => INERTIA_SETTLE_MS,
         Curve::Collision => COLLISION_SETTLE_MS,
+        Curve::Fast => MOTION_FAST_MS,
+        Curve::Medium => MOTION_MEDIUM_MS,
+        Curve::Large => MOTION_LARGE_MS,
+        Curve::Color => MOTION_COLOR_MS,
     }
 }
+
+/// Motion token durations from §7, in milliseconds. Each token curve uses its
+/// own fixed duration so the name and the timing map together.
+pub const MOTION_FAST_MS: i64 = 120;
+pub const MOTION_MEDIUM_MS: i64 = 220;
+pub const MOTION_LARGE_MS: i64 = 280;
+pub const MOTION_COLOR_MS: i64 = 180;
 
 /// The measured settle time of the spring solver: the first elapsed time at
 /// which `progress(Curve::Spring, ..)` returns `ONE`.
@@ -326,7 +349,64 @@ pub fn progress(curve: Curve, elapsed_ms: i64) -> i64 {
         Curve::Spring => spring(elapsed_ms),
         Curve::Inertia => inertia(elapsed_ms),
         Curve::Collision => collision(elapsed_ms),
+        Curve::Fast => cubic_bezier(elapsed_ms, MOTION_FAST_MS, 400, 0, 200, 1000),
+        Curve::Medium => cubic_bezier(elapsed_ms, MOTION_MEDIUM_MS, 340, 1560, 640, 1000),
+        Curve::Large => cubic_bezier(elapsed_ms, MOTION_LARGE_MS, 220, 1000, 360, 1000),
+        Curve::Color => ease_over(elapsed_ms, MOTION_COLOR_MS),
     }
+}
+
+/// Ease-out cubic over an explicit duration, sharing the exact integer form of
+/// `ease` so the `color` token keeps the historical easing shape.
+fn ease_over(elapsed_ms: i64, duration_ms: i64) -> i64 {
+    let t = (elapsed_ms.clamp(0, duration_ms) as i128 * ONE as i128 / duration_ms as i128) as i64;
+    let inv = ONE - t;
+    ONE - (inv * inv * inv) / (ONE * ONE)
+}
+
+/// Deterministic integer evaluation of a CSS `cubic-bezier(x1,y1,x2,y2)` easing.
+/// Control points are fixed-point thousandths (e.g. `(0.4,0,0.2,1)` becomes
+/// `(400,0,200,1000)`). For a normalized time `t`, the x axis is monotonic, so
+/// a bisection solves `x(u)=t` for the curve parameter `u`; `y(u)` is then the
+/// progress. All math is `i128` and ends clamped to `0..=ONE`, so overshoot in
+/// a control point (medium's 1560) is bounded like the existing curves.
+fn cubic_bezier(elapsed_ms: i64, duration_ms: i64, x1: i64, y1: i64, x2: i64, y2: i64) -> i64 {
+    let t = (elapsed_ms.clamp(0, duration_ms) as i128 * ONE as i128 / duration_ms as i128) as i64;
+    if t <= 0 {
+        return 0;
+    }
+    if t >= ONE {
+        return ONE;
+    }
+    // Solve x(u) = t on u in 0..=ONE with fixed bisection (10 steps covers the
+    // full 1024 range). point(u) is evaluated in thousandths via i128.
+    let (mut lo, mut hi) = (0i64, ONE);
+    for _ in 0..11 {
+        let mid = (lo + hi) / 2;
+        if bezier_axis(mid, x1, x2) < t {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        if hi - lo <= 1 {
+            break;
+        }
+    }
+    // shortcut: medium's y1=1560 overshoot is clamped away by the shared 0..=ONE
+    // bound, like spring/collision; open a runtime contract to expose visible
+    // overshoot to consumers.
+    bezier_axis(hi, y1, y2).clamp(0, ONE)
+}
+
+/// One axis of a cubic bezier at parameter `u`, returned in `ONE` units.
+/// `p1`/`p2` are the two inner control points in thousandths.
+fn bezier_axis(u: i64, p1: i64, p2: i64) -> i64 {
+    let u = u as i128;
+    let n = ONE as i128;
+    let inv = n - u;
+    // B(u) = 3(1-u)^2 u p1 + 3(1-u) u^2 p2 + u^3, with p3 = 1000.
+    let v = 3 * inv * inv * u * p1 as i128 + 3 * inv * u * u * p2 as i128 + u * u * u * 1000;
+    (v / (n * n * 1000)) as i64
 }
 
 /// Ease-out cubic: `1 - (1 - t)^3`, evaluated in fixed point.
