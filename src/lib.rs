@@ -30,6 +30,7 @@
 
 pub mod a11y;
 pub mod anim;
+pub mod curve;
 pub mod display;
 pub mod effects;
 pub mod font;
@@ -54,6 +55,7 @@ pub use anim::{
     ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, SPRING_SETTLE_MS, TRANSITION_MS,
 };
 pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
+pub use curve::cubic_bezier;
 pub use effects::{
     VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
 };
