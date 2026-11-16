@@ -1070,9 +1070,21 @@ fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
             .clamp(0, image.height as i128 - 1) as usize;
         for x in bounds.x..bounds.x.saturating_add(bounds.w) {
             let u = x - inner.x - fit.x;
-            if u < 0 || u >= fit.w || Canvas::outside_round(inner, x, y, radius) {
+            if u < 0 || u >= fit.w {
                 continue;
             }
+            let coverage = if canvas.edge_aa {
+                let cov = Canvas::round_coverage(inner, x, y, radius);
+                if cov == 0 {
+                    continue;
+                }
+                cov
+            } else {
+                if Canvas::outside_round(inner, x, y, radius) {
+                    continue;
+                }
+                255
+            };
             let sx = ((u as i128 * image.width as i128) / fit.w as i128)
                 .clamp(0, image.width as i128 - 1) as usize;
             let Some(index) = (sy * image.width + sx).checked_mul(4) else {
@@ -1081,7 +1093,11 @@ fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
             let Some(px) = image.pixels.get(index..index + 4) else {
                 continue;
             };
-            let alpha = ((i64::from(px[3]) * opacity + UNIT / 2) / UNIT).clamp(0, 255) as u8;
+            // Source alpha carries edge coverage into the blend. `set` keeps
+            // the capture command stream intact; capture rejects edge_aa so
+            // coverage is always 255 there and no command changes.
+            let alpha = (i64::from(px[3]) * opacity + UNIT / 2) / UNIT;
+            let alpha = ((alpha * i64::from(coverage)) / 255).clamp(0, 255) as u8;
             if alpha == 0 {
                 continue;
             }
