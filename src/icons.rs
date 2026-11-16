@@ -1,394 +1,276 @@
 //! Built-in icon glyph set.
 //!
-//! Every icon is an integer vector path authored in a 24x24 box and drawn with
-//! the same fixed-point coverage convention as the built-in text font: no
-//! floats, no wall clock, no external glyph data and no dependencies. Shapes
-//! mirror the web DOM emitter's icon set so the native and web targets paint
-//! the same symbol for a given name.
+//! Integer point-sampled geometry on the 24x24 box, derived from the same
+//! canonical icon paths shipped in opurom-icon. Every name paints the same
+//! symbol across native, canvas and mini-program backends.
 
 use crate::layout::UNIT;
 
-/// Coordinate box every icon path is authored in.
 pub const ICON_BOX: i64 = 24;
-
-/// Supersampling grid used for icon edge coverage.
 const ICON_AA: i64 = 4;
-
-/// Half the stroke width of a stroked path, in icon units.
 const STROKE_HALF: i64 = 1;
 
-/// One primitive of an icon path, in the 24x24 box.
 #[derive(Clone, Copy)]
 pub enum Shape {
-    /// A closed outline, filled.
     Polygon(&'static [(i64, i64)]),
-    /// An open polyline, stroked.
     Polyline(&'static [(i64, i64)]),
-    /// A circle outline (`filled: false`) or a filled disc.
-    Circle {
-        cx: i64,
-        cy: i64,
-        r: i64,
-        filled: bool,
-    },
+    Circle { cx: i64, cy: i64, r: i64, filled: bool },
 }
 
-/// The primitives that make up one icon.
 pub struct IconShape {
-    /// Filled primitives, drawn as solid ink.
     pub fills: &'static [Shape],
-    /// Stroked primitives, drawn as a 2-unit-wide ribbon.
     pub strokes: &'static [Shape],
 }
 
 const HOME: IconShape = IconShape {
-    fills: &[Shape::Polygon(&[
-        (3, 11),
-        (12, 3),
-        (21, 11),
-        (21, 20),
-        (15, 20),
-        (15, 14),
-        (9, 14),
-        (9, 20),
-        (3, 20),
-    ])],
-    strokes: &[],
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(15,21), (15,13), (15,12), (14,12), (10,12), (9,12), (9,13), (9,21)]),
+        Shape::Polyline(&[(3,10), (3,9), (3,8), (4,8), (11,2), (12,1), (13,2), (20,8), (21,8), (21,9), (21,10), (21,19), (21,20), (21,21), (20,21), (19,21), (5,21), (4,21), (3,21), (3,20), (3,19), (3,10)]),
+    ],
 };
 
 const SETTINGS: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Circle {
-            cx: 12,
-            cy: 12,
-            r: 4,
-            filled: false,
-        },
-        Shape::Polyline(&[(12, 2), (12, 5)]),
-        Shape::Polyline(&[(12, 19), (12, 22)]),
-        Shape::Polyline(&[(2, 12), (5, 12)]),
-        Shape::Polyline(&[(19, 12), (22, 12)]),
-        Shape::Polyline(&[(5, 5), (7, 7)]),
-        Shape::Polyline(&[(17, 17), (19, 19)]),
-        Shape::Polyline(&[(19, 5), (17, 7)]),
-        Shape::Polyline(&[(7, 17), (5, 19)]),
+        Shape::Polyline(&[(20,7), (11,7)]),
+        Shape::Polyline(&[(14,17), (5,17)]),
+        Shape::Polyline(&[(14,17), (15,19), (17,20), (19,19), (20,17), (19,15), (17,14), (15,15), (14,17)]),
+        Shape::Polyline(&[(4,7), (5,9), (7,10), (9,9), (10,7), (9,5), (7,4), (5,5), (4,7)]),
     ],
 };
 
 const STAR: IconShape = IconShape {
-    fills: &[Shape::Polygon(&[
-        (12, 3),
-        (15, 9),
-        (21, 10),
-        (17, 15),
-        (18, 21),
-        (12, 18),
-        (6, 21),
-        (7, 15),
-        (3, 10),
-        (9, 9),
-    ])],
-    strokes: &[],
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(12,2), (15,7), (15,8), (16,9), (16,8), (22,9), (22,10), (18,13), (17,13), (17,14), (17,15), (18,20), (18,21), (13,19), (13,18), (12,18), (11,18), (11,19), (6,21), (6,20), (7,15), (7,14), (7,13), (6,13), (2,10), (2,9), (8,8), (8,9), (9,8), (9,7), (12,2)]),
+    ],
 };
 
 const SEARCH: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Circle {
-            cx: 11,
-            cy: 11,
-            r: 7,
-            filled: false,
-        },
-        Shape::Polyline(&[(20, 20), (16, 16)]),
+        Shape::Polyline(&[(3,11), (5,17), (11,19), (17,17), (19,11), (17,5), (11,3), (5,5), (3,11)]),
+        Shape::Polyline(&[(24,32), (20,28)]),
     ],
 };
 
 const PLUS: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(12, 5), (12, 19)]),
-        Shape::Polyline(&[(5, 12), (19, 12)]),
+        Shape::Polyline(&[(5,12), (19,12)]),
+        Shape::Polyline(&[(12,5), (12,19)]),
     ],
 };
 
 const MINUS: IconShape = IconShape {
     fills: &[],
-    strokes: &[Shape::Polyline(&[(5, 12), (19, 12)])],
+    strokes: &[
+        Shape::Polyline(&[(5,12), (19,12)]),
+    ],
 };
 
 const CHECK: IconShape = IconShape {
     fills: &[],
-    strokes: &[Shape::Polyline(&[(5, 12), (10, 17), (19, 8)])],
+    strokes: &[
+        Shape::Polyline(&[(20,6), (9,17), (4,12)]),
+    ],
 };
 
 const CLOSE: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(6, 6), (18, 18)]),
-        Shape::Polyline(&[(18, 6), (6, 18)]),
+        Shape::Polyline(&[(18,6), (6,18)]),
+        Shape::Polyline(&[(12,24), (24,36)]),
     ],
 };
 
 const ARROW_BACK: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(19, 12), (5, 12)]),
-        Shape::Polyline(&[(11, 6), (5, 12), (11, 18)]),
+        Shape::Polyline(&[(12,19), (5,12), (12,5)]),
+        Shape::Polyline(&[(19,12), (5,12)]),
     ],
 };
 
 const ARROW_FORWARD: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(5, 12), (19, 12)]),
-        Shape::Polyline(&[(13, 6), (19, 12), (13, 18)]),
+        Shape::Polyline(&[(5,12), (19,12)]),
+        Shape::Polyline(&[(31,17), (38,24), (31,31)]),
     ],
 };
 
 const REFRESH: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(20, 12), (20, 10), (19, 8), (18, 6)]),
-        Shape::Polyline(&[(20, 4), (20, 8), (16, 8)]),
+        Shape::Polyline(&[(3,12), (1,8), (3,3), (8,1), (12,3), (14,1), (17,1), (19,3), (19,6), (21,8)]),
+        Shape::Polyline(&[(21,3), (21,8), (16,8)]),
+        Shape::Polyline(&[(21,12), (23,16), (21,21), (16,23), (12,21), (10,23), (7,23), (5,21), (5,18), (3,16)]),
+        Shape::Polyline(&[(8,16), (3,16), (3,21)]),
     ],
 };
 
 const LOCK: IconShape = IconShape {
-    fills: &[Shape::Polygon(&[
-        (7, 11),
-        (8, 8),
-        (12, 3),
-        (16, 8),
-        (17, 8),
-        (17, 11),
-        (20, 11),
-        (20, 20),
-        (4, 20),
-        (4, 11),
-    ])],
-    strokes: &[],
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(5,11), (19,11), (20,11), (21,11), (21,12), (21,13), (21,20), (21,21), (21,22), (20,22), (19,22), (5,22), (4,22), (3,22), (3,21), (3,20), (3,13), (3,12), (3,11), (4,11), (5,11)]),
+        Shape::Polyline(&[(7,11), (7,7), (8,3), (12,2), (16,3), (17,7), (17,11)]),
+    ],
 };
 
 const USER: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Circle {
-            cx: 12,
-            cy: 12,
-            r: 4,
-            filled: false,
-        },
-        Shape::Polyline(&[(4, 21), (6, 18), (10, 15), (14, 15), (18, 18), (20, 21)]),
+        Shape::Polyline(&[(19,21), (19,19), (20,17), (20,16), (18,14), (17,14), (15,15), (9,15), (7,14), (6,14), (4,16), (4,17), (5,19), (5,21)]),
+        Shape::Polyline(&[(8,7), (9,10), (12,11), (15,10), (16,7), (15,4), (12,3), (9,4), (8,7)]),
     ],
 };
 
 const BELL: IconShape = IconShape {
-    fills: &[
-        Shape::Polygon(&[
-            (6, 16),
-            (6, 11),
-            (9, 6),
-            (12, 5),
-            (15, 6),
-            (18, 11),
-            (18, 16),
-            (20, 20),
-            (4, 20),
-        ]),
-        Shape::Circle {
-            cx: 12,
-            cy: 20,
-            r: 2,
-            filled: true,
-        },
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(10,21), (11,22), (12,23), (13,22), (14,21)]),
+        Shape::Polyline(&[(3,15), (3,16), (3,17), (4,17), (20,17), (21,17), (21,16), (21,15), (20,15), (20,14), (19,14), (19,13), (19,12), (18,11), (18,10), (18,8), (16,4), (12,2), (8,4), (6,8), (6,10), (6,11), (5,12), (5,13), (5,14), (4,14), (4,15), (3,15)]),
     ],
-    strokes: &[],
 };
 
 const HEART: IconShape = IconShape {
-    fills: &[Shape::Polygon(&[
-        (12, 20),
-        (8, 14),
-        (6, 11),
-        (8, 8),
-        (10, 7),
-        (12, 9),
-        (14, 7),
-        (16, 8),
-        (18, 11),
-        (16, 14),
-    ])],
-    strokes: &[],
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(19,14), (20,13), (21,12), (21,11), (22,10), (22,9), (23,6), (22,3), (19,2), (17,3), (16,3), (15,3), (14,3), (14,4), (13,4), (12,5), (11,4), (10,4), (10,3), (9,3), (8,3), (5,2), (2,3), (1,6), (2,8), (2,9), (2,10), (3,11), (3,12), (4,13), (5,14), (12,21), (19,14)]),
+    ],
 };
 
 const INFO: IconShape = IconShape {
-    fills: &[Shape::Circle {
-        cx: 12,
-        cy: 8,
-        r: 1,
-        filled: true,
-    }],
+    fills: &[],
     strokes: &[
-        Shape::Circle {
-            cx: 12,
-            cy: 12,
-            r: 8,
-            filled: false,
-        },
-        Shape::Polyline(&[(12, 11), (12, 17)]),
+        Shape::Polyline(&[(2,12), (5,19), (12,22), (19,19), (22,12), (19,5), (12,2), (5,5), (2,12)]),
+        Shape::Polyline(&[(12,16), (12,12)]),
     ],
 };
 
 const WARNING: IconShape = IconShape {
-    fills: &[
-        Shape::Polygon(&[(12, 4), (22, 20), (2, 20)]),
-        Shape::Circle {
-            cx: 12,
-            cy: 18,
-            r: 1,
-            filled: true,
-        },
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(22,18), (14,4), (13,3), (12,2), (11,3), (10,4), (2,18), (1,19), (2,20), (3,21), (4,21), (20,21), (21,21), (22,20), (23,19), (22,18)]),
+        Shape::Polyline(&[(12,9), (12,13)]),
     ],
-    strokes: &[Shape::Polyline(&[(12, 10), (12, 15)])],
 };
 
 const CHEVRON_RIGHT: IconShape = IconShape {
     fills: &[],
-    strokes: &[Shape::Polyline(&[(9, 6), (15, 12), (9, 18)])],
+    strokes: &[
+        Shape::Polyline(&[(9,18), (15,12), (9,6)]),
+    ],
 };
 
 const CHEVRON_DOWN: IconShape = IconShape {
     fills: &[],
-    strokes: &[Shape::Polyline(&[(6, 9), (12, 15), (18, 9)])],
+    strokes: &[
+        Shape::Polyline(&[(6,9), (12,15), (18,9)]),
+    ],
 };
 
 const DOWNLOAD: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(12, 3), (12, 14)]),
-        Shape::Polyline(&[(7, 11), (12, 16), (17, 11)]),
-        Shape::Polyline(&[(5, 20), (19, 20)]),
+        Shape::Polyline(&[(21,15), (21,19), (21,20), (21,21), (20,21), (19,21), (5,21), (4,21), (3,21), (3,20), (3,19), (3,15)]),
+        Shape::Polyline(&[(7,10), (12,15), (17,10)]),
+        Shape::Polyline(&[(12,15), (12,3)]),
     ],
 };
 
 const UPLOAD: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(12, 20), (12, 7)]),
-        Shape::Polyline(&[(7, 10), (12, 5), (17, 10)]),
-        Shape::Polyline(&[(5, 20), (19, 20)]),
+        Shape::Polyline(&[(21,15), (21,19), (21,20), (21,21), (20,21), (19,21), (5,21), (4,21), (3,21), (3,20), (3,19), (3,15)]),
+        Shape::Polyline(&[(17,8), (12,3), (7,8)]),
+        Shape::Polyline(&[(12,3), (12,15)]),
     ],
 };
 
 const PLAY: IconShape = IconShape {
-    fills: &[Shape::Polygon(&[(7, 5), (19, 12), (7, 19)])],
-    strokes: &[],
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(6,3), (20,12), (6,21), (6,3)]),
+    ],
 };
 
 const PAUSE: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(8, 5), (8, 19)]),
-        Shape::Polyline(&[(16, 5), (16, 19)]),
+        Shape::Polyline(&[(15,4), (17,4), (18,4), (18,5), (18,19), (18,20), (17,20), (15,20), (14,20), (14,19), (14,5), (14,4), (15,4)]),
+        Shape::Polyline(&[(7,4), (9,4), (10,4), (10,5), (10,19), (10,20), (9,20), (7,20), (6,20), (6,19), (6,5), (6,4), (7,4)]),
     ],
 };
 
 const EDIT: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(4, 20), (16, 20)]),
-        Shape::Polyline(&[(14, 6), (20, 11), (12, 19), (8, 13)]),
+        Shape::Polyline(&[(21,7), (22,5), (21,3), (19,2), (17,3), (4,16), (3,16), (3,17), (2,21), (2,22), (3,22), (7,21), (8,21), (8,20), (21,7)]),
+        Shape::Polyline(&[(36,12), (40,16)]),
     ],
 };
 
 const DELETE: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(5, 7), (19, 7)]),
-        Shape::Polyline(&[(9, 7), (9, 5), (15, 5), (15, 7)]),
-        Shape::Polyline(&[(10, 7), (10, 20), (14, 20), (14, 7)]),
+        Shape::Polyline(&[(3,6), (21,6)]),
+        Shape::Polyline(&[(19,6), (19,20), (19,21), (18,21), (18,22), (17,22), (7,22), (6,22), (6,21), (5,21), (5,20), (5,6)]),
+        Shape::Polyline(&[(8,6), (8,4), (8,3), (9,3), (9,2), (10,2), (14,2), (15,2), (15,3), (16,3), (16,4), (16,6)]),
     ],
 };
 
 const EYE: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[
-            (2, 12),
-            (6, 8),
-            (10, 7),
-            (14, 7),
-            (18, 8),
-            (22, 12),
-            (18, 16),
-            (14, 17),
-            (10, 17),
-            (6, 16),
-        ]),
-        Shape::Polyline(&[(12, 9), (12, 15)]),
+        Shape::Polyline(&[(2,12), (5,5), (12,2), (19,5), (22,12), (19,19), (12,22), (5,19), (2,12)]),
+        Shape::Polyline(&[(9,12), (10,14), (12,15), (14,14), (15,12), (14,10), (12,9), (10,10), (9,12)]),
     ],
 };
 
 const CALENDAR: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(4, 6), (20, 6), (20, 20), (4, 20)]),
-        Shape::Polyline(&[(4, 10), (20, 10)]),
-        Shape::Polyline(&[(9, 4), (9, 8)]),
-        Shape::Polyline(&[(15, 4), (15, 8)]),
+        Shape::Polyline(&[(8,2), (8,6)]),
+        Shape::Polyline(&[(16,2), (16,6)]),
+        Shape::Polyline(&[(5,4), (19,4), (20,4), (21,4), (21,5), (21,6), (21,20), (21,21), (21,22), (20,22), (19,22), (5,22), (4,22), (3,22), (3,21), (3,20), (3,6), (3,5), (3,4), (4,4), (5,4)]),
+        Shape::Polyline(&[(3,10), (21,10)]),
     ],
 };
 
 const LOCATION: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(12, 21), (7, 14), (7, 10), (12, 5), (17, 10), (17, 14)]),
-        Shape::Circle {
-            cx: 12,
-            cy: 16,
-            r: 3,
-            filled: false,
-        },
+        Shape::Polyline(&[(20,10), (20,12), (19,14), (18,16), (17,17), (16,19), (15,20), (13,21), (13,22), (12,22), (11,22), (11,21), (9,20), (8,19), (7,17), (6,16), (5,14), (4,12), (4,10), (6,4), (12,2), (18,4), (20,10)]),
+        Shape::Polyline(&[(9,10), (10,12), (12,13), (14,12), (15,10), (14,8), (12,7), (10,8), (9,10)]),
     ],
 };
 
 const FOLDER: IconShape = IconShape {
-    fills: &[Shape::Polygon(&[
-        (3, 7),
-        (9, 7),
-        (11, 9),
-        (21, 9),
-        (21, 20),
-        (3, 20),
-    ])],
-    strokes: &[],
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(20,20), (21,20), (22,20), (22,19), (22,18), (22,8), (22,7), (22,6), (21,6), (20,6), (12,6), (11,6), (10,6), (10,5), (10,4), (10,3), (9,3), (8,3), (4,3), (3,3), (2,3), (2,4), (2,5), (2,18), (2,19), (2,20), (3,20), (4,20), (20,20)]),
+    ],
 };
 
 const MAIL: IconShape = IconShape {
     fills: &[],
     strokes: &[
-        Shape::Polyline(&[(3, 6), (21, 6), (21, 18), (3, 18)]),
-        Shape::Polyline(&[(3, 7), (12, 13), (21, 7)]),
+        Shape::Polyline(&[(4,4), (20,4), (21,4), (22,4), (22,5), (22,6), (22,18), (22,19), (22,20), (21,20), (20,20), (4,20), (3,20), (2,20), (2,19), (2,18), (2,6), (2,5), (2,4), (3,4), (4,4)]),
+        Shape::Polyline(&[(26,11), (17,17), (16,18), (15,17), (2,7)]),
     ],
 };
 
 const CHAT: IconShape = IconShape {
-    fills: &[Shape::Polygon(&[
-        (4, 5),
-        (20, 5),
-        (20, 16),
-        (13, 16),
-        (9, 20),
-        (9, 16),
-        (4, 16),
-    ])],
-    strokes: &[],
+    fills: &[],
+    strokes: &[
+        Shape::Polyline(&[(21,15), (21,16), (21,17), (20,17), (19,17), (7,17), (3,21), (3,5), (3,4), (3,3), (4,3), (5,3), (19,3), (20,3), (21,3), (21,4), (21,5), (21,15)]),
+    ],
 };
 
-/// Neutral fallback glyph for an unknown name: a filled disc, so an
-/// unsupported icon still paints a deterministic, clearly visible shape.
+
 const FALLBACK: IconShape = IconShape {
     fills: &[Shape::Circle {
         cx: 12,
