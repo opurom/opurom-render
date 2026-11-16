@@ -495,8 +495,59 @@ impl Canvas {
     }
 }
 
+/// 4x4 coverage of a thick straight segment at one pixel. Sub-sample centres
+/// live in an 8x integer grid (half-subpixel resolution); a squared
+/// point-to-segment distance keeps the whole test in integer arithmetic. The
+/// pen half-width is at least half a pixel so a 1px line stays visible.
+fn line_coverage(x0: i64, y0: i64, x1: i64, y1: i64, x: i64, y: i64, width: i64) -> u8 {
+    let (ax, ay, bx, by) = (x0 * 8, y0 * 8, x1 * 8, y1 * 8);
+    let (dx, dy) = (bx - ax, by - ay);
+    let l2 = dx * dx + dy * dy;
+    let half = (width.max(1) / 2) * 8;
+    let half = half.max(4);
+    let h2 = half * half;
+    let mut hits = 0i64;
+    for sy in 0..EDGE_AA {
+        for sx in 0..EDGE_AA {
+            let px = x * 8 + 2 * sx + 1;
+            let py = y * 8 + 2 * sy + 1;
+            let (apx, apy) = (px - ax, py - ay);
+            let tnum = apx * dx + apy * dy;
+            let hit = if l2 == 0 || tnum <= 0 {
+                apx * apx + apy * apy <= h2
+            } else if tnum >= l2 {
+                let (bpx, bpy) = (px - bx, py - by);
+                bpx * bpx + bpy * bpy <= h2
+            } else {
+                let cross = apx * dy - apy * dx;
+                cross * cross <= h2 * l2
+            };
+            if hit {
+                hits += 1;
+            }
+        }
+    }
+    ((255 * hits + (EDGE_AA * EDGE_AA) / 2) / (EDGE_AA * EDGE_AA)) as u8
+}
+
 /// Integer line with a square pen.
 fn line(canvas: &mut Canvas, x0: i64, y0: i64, x1: i64, y1: i64, c: Rgba, width: i64) {
+    if canvas.edge_aa {
+        // One analytic pass over the segment bounds; the coverage test already
+        // accounts for pen width. Capture never reaches this path.
+        let pad = width.max(1) / 2 + 1;
+        let xlo = x0.min(x1) - pad;
+        let xhi = x0.max(x1) + pad;
+        let ylo = y0.min(y1) - pad;
+        let yhi = y0.max(y1) + pad;
+        for y in ylo..=yhi {
+            for x in xlo..=xhi {
+                let cov = line_coverage(x0, y0, x1, y1, x, y, width);
+                canvas.set_covered(x, y, c, cov);
+            }
+        }
+        return;
+    }
     let dx = (x1 - x0).abs();
     let dy = (y1 - y0).abs();
     let sx = if x0 < x1 { 1 } else { -1 };
@@ -1915,6 +1966,61 @@ fn draw_glyphs_smooth(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_coverage_matches_analytic_4x_subsample_oracle() {
+        // Independent f64 point-to-segment reference: sub-samples sit at
+        // (sx+0.5)/4 inside the pixel, exactly the integer 8x-grid centres.
+        fn reference(x0: i64, y0: i64, x1: i64, y1: i64, x: i64, y: i64, width: i64) -> u8 {
+            let (ax, ay, bx, by) = (x0 as f64, y0 as f64, x1 as f64, y1 as f64);
+            let (dx, dy) = (bx - ax, by - ay);
+            let l2 = dx * dx + dy * dy;
+            let half = ((width.max(1) / 2) as f64).max(0.5);
+            let mut hits = 0i64;
+            for sy in 0..4 {
+                for sx in 0..4 {
+                    let px = x as f64 + (sx as f64 + 0.5) / 4.0;
+                    let py = y as f64 + (sy as f64 + 0.5) / 4.0;
+                    let (apx, apy) = (px - ax, py - ay);
+                    let t = if l2 == 0.0 {
+                        0.0
+                    } else {
+                        ((apx * dx + apy * dy) / l2).clamp(0.0, 1.0)
+                    };
+                    let (qx, qy) = (ax + t * dx, ay + t * dy);
+                    if (px - qx) * (px - qx) + (py - qy) * (py - qy) <= half * half {
+                        hits += 1;
+                    }
+                }
+            }
+            ((255 * hits + 8) / 16) as u8
+        }
+
+        let cases: &[(i64, i64, i64, i64, i64, i64, i64)] = &[
+            (0, 0, 8, 8, 4, 4, 1),
+            (0, 0, 8, 8, 4, 5, 1),
+            (0, 0, 8, 8, 5, 4, 1),
+            (0, 0, 8, 0, 4, 0, 1),
+            (0, 0, 8, 0, 4, -1, 1),
+            (0, 0, 8, 0, 4, 1, 1),
+            (2, 0, 2, 8, 2, 4, 1),
+            (2, 0, 2, 8, 1, 4, 1),
+            (0, 0, 8, 8, 4, 4, 3),
+            (0, 0, 8, 8, 4, 5, 3),
+            (0, 0, 0, 0, 0, 0, 1),
+            (0, 0, 0, 0, 1, 1, 1),
+        ];
+        let mut partial = 0usize;
+        for &(x0, y0, x1, y1, x, y, w) in cases {
+            let got = line_coverage(x0, y0, x1, y1, x, y, w);
+            let want = reference(x0, y0, x1, y1, x, y, w);
+            assert_eq!(got, want, "coverage at ({x},{y}) on ({x0},{y0})->({x1},{y1})");
+            if got > 0 && got < 255 {
+                partial += 1;
+            }
+        }
+        assert!(partial >= 6, "the oracle must exercise partial coverage");
+    }
 
     #[test]
     fn smooth_glyph_softens_edges_without_moving_ink() {
