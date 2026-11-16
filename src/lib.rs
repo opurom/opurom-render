@@ -37,6 +37,7 @@ pub mod font;
 pub mod gestures;
 pub mod icons;
 pub mod image;
+pub mod incremental;
 pub mod interaction;
 pub mod ir;
 pub mod layout;
@@ -68,6 +69,7 @@ pub use icons::{icon_coverage, icon_shape, IconShape, Shape, ICON_NAMES};
 pub use image::{
     CacheStats, Image, ImageFit, CACHE_CAPACITY, MAX_DECODED_BYTES, MAX_IMAGE_DIMENSION,
 };
+pub use incremental::{dep_values, deps, paint_hash, subtree_hash, Hasher, NodeIdentity};
 pub use interaction::{
     is_interactive, NodeState, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
     SUCCESS, WARNING,

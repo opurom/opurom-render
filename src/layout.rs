@@ -289,6 +289,9 @@ pub struct LaidOut {
     /// Resolved tone colour (theme token or measured constant) for the status
     /// dot; `None` when the node has no tone.
     pub tone_color: Option<Rgba>,
+    /// Additive incremental-render metadata (identity + hashes). Excluded from
+    /// `PartialEq` so frame-diff semantics stay byte-identical.
+    pub incremental: crate::incremental::IncrementalMeta,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1213,6 +1216,11 @@ fn place(
         variant: n.props.variant,
         tone: n.props.tone,
         tone_color: n.props.tone.map(|t| pal.tone_color(t)),
+        incremental: crate::incremental::IncrementalMeta {
+            identity: Some(crate::incremental::NodeIdentity::node(n.id)),
+            subtree_hash: crate::incremental::subtree_hash(n, state),
+            paint_hash: crate::incremental::paint_hash(n),
+        },
     });
 
     if n.children.is_empty() || rect.w <= 0 || rect.h <= 0 {
@@ -1831,6 +1839,7 @@ fn place_for(
                     },
                     c.props.margin,
                 );
+                let before = out.len();
                 place(
                     c,
                     child_rect,
@@ -1845,6 +1854,14 @@ fn place_for(
                     anim,
                     out,
                 );
+                // Runtime row identity pairs the template node id with this
+                // element's value, index-independent (inserting a row reuses
+                // surviving rows). Apply it to the row root and its subtree.
+                for laid in &mut out[before..] {
+                    if let Some(id) = laid.incremental.identity.as_mut() {
+                        id.row_key = Some(element.clone());
+                    }
+                }
             }
             row += 1;
         }
