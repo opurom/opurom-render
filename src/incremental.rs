@@ -245,6 +245,7 @@ pub fn subtree_hash(node: &Node, state: &StateView) -> u64 {
     h.int(41, dep_values(node, state) as i64);
     h.int(42, node.children.len() as i64);
     h.int(45, i64::from(node.props.relayout_boundary));
+    h.int(46, i64::from(node.props.fill_height));
     for c in &node.children {
         h.int(43, c.id as i64);
         h.int(44, subtree_hash(c, state) as i64);

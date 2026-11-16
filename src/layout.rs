@@ -1790,6 +1790,24 @@ fn place_grid(
         let row = (i as i64 / cols) as usize;
         row_h[row] = row_h[row].max(natural_h(c, bp, state));
     }
+    // Opt-in fill: when the box is taller than the natural rows, spread the
+    // surplus evenly in i128 so rounding matches on every host; the remainder
+    // goes to the earliest rows. Unset keeps natural rows byte-identical.
+    if n.props.fill_height && rows > 0 {
+        let natural_total: i128 = row_h.iter().map(|&h| h as i128).sum();
+        let surplus = content.h as i128 - natural_total;
+        if surplus > 0 {
+            let rows_i = rows as i128;
+            let each = surplus / rows_i;
+            let mut rem = surplus % rows_i;
+            for h in row_h.iter_mut() {
+                *h = (*h as i128 + each + if rem > 0 { 1 } else { 0 }) as i64;
+                if rem > 0 {
+                    rem -= 1;
+                }
+            }
+        }
+    }
 
     let mut y = content.y;
     for row in 0..rows as usize {

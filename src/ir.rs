@@ -490,6 +490,8 @@ pub struct Props {
     pub columns: Option<i64>,
     /// Column count the compact tier should keep; `None` stacks to one column.
     pub compact_columns: Option<i64>,
+    /// Grid: distribute surplus box height across rows (deterministic i128).
+    pub fill_height: bool,
     pub labels: Vec<String>,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -1365,6 +1367,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         delay: anim_duration_prop(o, "delay", what)?,
         columns: opt_integer(o, "columns", what)?,
         compact_columns: opt_integer(o, "compactColumns", what)?,
+        fill_height: opt_bool(o, "fillHeight", what)?,
         labels: labels_prop(o, "labels", what)?,
         min: opt_signed_integer(o, "min", what)?,
         max: opt_signed_integer(o, "max", what)?,
