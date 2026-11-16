@@ -381,6 +381,45 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
 }
 
 #[test]
+fn cli_commands_accepts_gaussian_and_clamps_radius() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let ir_path = dir.join("capability-command-gaussian.opuir.json");
+    let ppm = dir.join("capability-command-gaussian.ppm");
+    let commands = dir.join("capability-command-gaussian.commands.json");
+    fs::write(
+        &ir_path,
+        ir_of(Some(r#"[{"kind":"gaussian","radius":4}]"#)),
+    )
+    .unwrap();
+    let _ = fs::remove_file(&commands);
+
+    let accepted = ProcessCommand::new(env!("CARGO_BIN_EXE_opurom-render"))
+        .arg(&ir_path)
+        .args(["96", "64"])
+        .arg(&ppm)
+        .args(["--commands", commands.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        accepted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let json = fs::read_to_string(&commands).unwrap();
+    assert!(
+        json.contains("\"kind\":\"effect_gaussian_blur\",\"radius\":4"),
+        "gaussian command missing: {json}"
+    );
+    // Out-of-range radius is rejected at IR validation, not clamped.
+    let rejected = parse_ir(&ir_of(Some(r#"[{"kind":"gaussian","radius":99}]"#)));
+    assert!(rejected.is_err(), "out-of-range gaussian radius accepted");
+    // Determinism: same frame twice, byte-identical.
+    let first = effect_pixels(r#"[{"kind":"gaussian","radius":2}]"#);
+    let second = effect_pixels(r#"[{"kind":"gaussian","radius":2}]"#);
+    assert_eq!(first, second);
+}
+
+#[test]
 fn cli_commands_accepts_visual_effects() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let ir_path = dir.join("capability-command-effect.opuir.json");

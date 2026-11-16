@@ -14,6 +14,14 @@ pub const EFFECT_UNIT: i64 = 1024;
 pub const EFFECT_MAX_RADIUS: i64 = 32;
 /// Shadow offsets are clamped to this absolute bound.
 pub const EFFECT_MAX_OFFSET: i64 = 64;
+/// Discrete-Gaussian radius range, mirroring the GPU kernel's accepted window.
+pub const GAUSSIAN_MIN_RADIUS: i64 = 1;
+pub const GAUSSIAN_MAX_RADIUS: i64 = 8;
+
+/// Frame passes run after every node; local effects run right after their node.
+fn is_frame_pass(kind: VisualEffectKind) -> bool {
+    matches!(kind, VisualEffectKind::Blur | VisualEffectKind::Gaussian)
+}
 
 const LIGHT: Rgba = Rgba::rgb(255, 255, 255);
 const DARK: Rgba = Rgba::rgb(0, 0, 0);
@@ -21,6 +29,8 @@ const DARK: Rgba = Rgba::rgb(0, 0, 0);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VisualEffectKind {
     Blur,
+    /// Whole-frame discrete-Gaussian blur, the GPU `effect_gaussian_blur` pass.
+    Gaussian,
     Shadow,
     Glow,
     Glass,
@@ -31,6 +41,7 @@ impl VisualEffectKind {
     pub fn parse(s: &str) -> Option<VisualEffectKind> {
         Some(match s {
             "blur" => VisualEffectKind::Blur,
+            "gaussian" => VisualEffectKind::Gaussian,
             "shadow" => VisualEffectKind::Shadow,
             "glow" => VisualEffectKind::Glow,
             "glass" => VisualEffectKind::Glass,
@@ -42,6 +53,7 @@ impl VisualEffectKind {
     pub fn name(self) -> &'static str {
         match self {
             VisualEffectKind::Blur => "blur",
+            VisualEffectKind::Gaussian => "gaussian",
             VisualEffectKind::Shadow => "shadow",
             VisualEffectKind::Glow => "glow",
             VisualEffectKind::Glass => "glass",
@@ -86,9 +98,7 @@ impl VisualEffect {
 /// A blur-only node is handled as a final whole-frame pass; the other kinds
 /// need the frame as it was immediately before the node was drawn.
 pub(crate) fn has_local_effects(n: &LaidOut) -> bool {
-    n.visual_effects
-        .iter()
-        .any(|e| e.kind != VisualEffectKind::Blur)
+    n.visual_effects.iter().any(|e| !is_frame_pass(e.kind))
 }
 
 /// Apply local effects after a node's ordinary box, control and text drawing.
@@ -100,7 +110,7 @@ pub(crate) fn apply_node(canvas: &mut Canvas, n: &LaidOut, backdrop: &[u8]) {
     let local: Vec<&VisualEffect> = n
         .visual_effects
         .iter()
-        .filter(|e| e.kind != VisualEffectKind::Blur)
+        .filter(|e| !is_frame_pass(e.kind))
         .collect();
     if local.is_empty() {
         return;
@@ -136,7 +146,7 @@ pub(crate) fn apply_node(canvas: &mut Canvas, n: &LaidOut, backdrop: &[u8]) {
             }
             VisualEffectKind::Glass => glass(canvas, n, backdrop, e),
             VisualEffectKind::Liquid => liquid(canvas, n, e),
-            VisualEffectKind::Blur => {}
+            VisualEffectKind::Blur | VisualEffectKind::Gaussian => {}
         }
     }
 }
@@ -150,16 +160,72 @@ pub(crate) fn apply_frame_blurs(canvas: &mut Canvas, laid: &[LaidOut]) {
     }
     for n in laid {
         for e in &n.visual_effects {
-            if e.kind == VisualEffectKind::Blur {
-                let mut blurred = vec![0u8; canvas.pixels.len()];
-                box_blur_plane::<4>(
-                    &canvas.pixels,
-                    &mut blurred,
-                    canvas.width as usize,
-                    canvas.height as usize,
-                    e.radius(),
-                );
-                canvas.pixels = blurred;
+            match e.kind {
+                VisualEffectKind::Blur => {
+                    let mut blurred = vec![0u8; canvas.pixels.len()];
+                    box_blur_plane::<4>(
+                        &canvas.pixels,
+                        &mut blurred,
+                        canvas.width as usize,
+                        canvas.height as usize,
+                        e.radius(),
+                    );
+                    canvas.pixels = blurred;
+                }
+                VisualEffectKind::Gaussian => {
+                    gaussian_blur_frame(
+                        &mut canvas.pixels,
+                        canvas.width,
+                        canvas.height,
+                        e.radius(),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Whole-frame discrete-Gaussian blur: separable horizontal then vertical 1D
+/// passes with the binomial row `C(2r, 0..=2r)`, clamped edges and half-up
+/// rounding — the exact arithmetic of the GPU `gaussian_blur_cpu` oracle, so
+/// the software frame and the command stream agree byte for byte.
+fn gaussian_blur_frame(pixels: &mut [u8], width: u32, height: u32, radius: i64) {
+    let r = radius.clamp(GAUSSIAN_MIN_RADIUS, GAUSSIAN_MAX_RADIUS);
+    let n = 2 * r;
+    let mut weights = vec![1i64; (n + 1) as usize];
+    for k in 1..=n as usize {
+        weights[k] = weights[k - 1] * (n - k as i64 + 1) / k as i64;
+    }
+    let sum: i64 = weights.iter().sum();
+    let (w, h) = (width as i64, height as i64);
+    let taps = 2 * r;
+    let mut horizontal = vec![0u8; pixels.len()];
+    for y in 0..h {
+        for x in 0..w {
+            for k in 0..4i64 {
+                let mut acc = 0i64;
+                for j in 0..=taps {
+                    let sx = (x + j - r).clamp(0, w - 1);
+                    let idx = ((y * w + sx) * 4 + k) as usize;
+                    acc += i64::from(pixels[idx]) * weights[j as usize];
+                }
+                let out = (acc + sum / 2) / sum;
+                horizontal[((y * w + x) * 4 + k) as usize] = out.clamp(0, 255) as u8;
+            }
+        }
+    }
+    for y in 0..h {
+        for x in 0..w {
+            for k in 0..4i64 {
+                let mut acc = 0i64;
+                for j in 0..=taps {
+                    let sy = (y + j - r).clamp(0, h - 1);
+                    let idx = ((sy * w + x) * 4 + k) as usize;
+                    acc += i64::from(horizontal[idx]) * weights[j as usize];
+                }
+                let out = (acc + sum / 2) / sum;
+                pixels[((y * w + x) * 4 + k) as usize] = out.clamp(0, 255) as u8;
             }
         }
     }
@@ -214,7 +280,7 @@ pub(crate) fn local_commands(frame: EffectFrame, effects: &[VisualEffect]) -> Ve
         shape_radius: frame.shape_radius,
         shape: frame.shape,
     }];
-    for e in effects.iter().filter(|e| e.kind != VisualEffectKind::Blur) {
+    for e in effects.iter().filter(|e| !is_frame_pass(e.kind)) {
         let color = match e.kind {
             VisualEffectKind::Shadow => e.color.unwrap_or(DARK),
             VisualEffectKind::Glow => e.color.unwrap_or(frame.ink),
@@ -253,18 +319,26 @@ pub(crate) fn local_commands(frame: EffectFrame, effects: &[VisualEffect]) -> Ve
                 alpha: e.alpha(),
                 color,
             },
-            VisualEffectKind::Blur => unreachable!("blur is a frame pass"),
+            VisualEffectKind::Blur | VisualEffectKind::Gaussian => {
+                unreachable!("frame passes are whole-frame commands")
+            }
         });
     }
     out
 }
 
-/// Whole-frame blur passes in pre-order layout order, after every node.
+/// Whole-frame blur passes in pre-order layout order, after every node. Box
+/// blurs and Gaussian blurs keep their IR order; each maps to its own command.
 pub(crate) fn frame_blur_commands(laid: &[LaidOut]) -> Vec<Command> {
     laid.iter()
         .flat_map(|n| n.visual_effects.iter())
-        .filter(|e| e.kind == VisualEffectKind::Blur)
-        .map(|e| Command::EffectBlur { radius: e.radius() })
+        .filter(|e| is_frame_pass(e.kind))
+        .map(|e| match e.kind {
+            VisualEffectKind::Gaussian => Command::EffectGaussianBlur {
+                radius: e.radius().clamp(GAUSSIAN_MIN_RADIUS, GAUSSIAN_MAX_RADIUS),
+            },
+            _ => Command::EffectBlur { radius: e.radius() },
+        })
         .collect()
 }
 

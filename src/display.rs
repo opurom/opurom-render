@@ -36,6 +36,16 @@ pub enum Command {
         /// Alpha already reduced from fixed point to the software raster's u8.
         alpha: u8,
     },
+    /// The same two-stop gradient along the rect's horizontal axis.
+    GradientHorizontal {
+        rect: Rect,
+        clip: Rect,
+        radius: i64,
+        top: Rgba,
+        bottom: Rgba,
+        /// Alpha already reduced from fixed point to the software raster's u8.
+        alpha: u8,
+    },
     /// Deterministic particle field: `count` integer dots scattered over the
     /// rect by a seeded pure integer hash, painted in dot order.
     Particles {
@@ -92,6 +102,10 @@ pub enum Command {
     EffectBlur {
         radius: i64,
     },
+    /// Whole-frame discrete-Gaussian blur (the GPU `effect_gaussian_blur`).
+    EffectGaussianBlur {
+        radius: i64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -145,6 +159,16 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
     match *command {
         Command::EffectBackdrop => return Ok(()),
         Command::EffectBlur { radius } => values.push(radius),
+        Command::EffectGaussianBlur { radius } => {
+            let (lo, hi) = (
+                crate::effects::GAUSSIAN_MIN_RADIUS,
+                crate::effects::GAUSSIAN_MAX_RADIUS,
+            );
+            if !(lo..=hi).contains(&radius) {
+                return Err(bad(format!("{what}.radius {radius} must be {lo}..={hi}")));
+            }
+            values.push(radius);
+        }
         Command::EffectMask {
             rect,
             clip,
@@ -238,6 +262,9 @@ impl DisplayList {
                     rect, clip, radius, ..
                 }
                 | Command::Gradient {
+                    rect, clip, radius, ..
+                }
+                | Command::GradientHorizontal {
                     rect, clip, radius, ..
                 } => (*rect, *clip, *radius),
                 Command::Particles { rect, clip, .. } => (*rect, *clip, 0),
@@ -335,6 +362,30 @@ impl DisplayList {
                     write!(&mut out, ",\"alpha\":{alpha}}}")
                         .map_err(|e| bad(format!("cannot format display list: {e}")))?;
                 }
+                Command::GradientHorizontal {
+                    rect,
+                    clip,
+                    radius,
+                    top,
+                    bottom,
+                    alpha,
+                } => {
+                    out.push_str("{\"kind\":\"gradient_horizontal\",");
+                    write_rect(&mut out, "rect", *rect)
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    out.push(',');
+                    write_rect(&mut out, "clip", *clip)
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    write!(&mut out, ",\"radius\":{radius},")
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    write_rgba(&mut out, "top", *top, *alpha)
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    out.push(',');
+                    write_rgba(&mut out, "bottom", *bottom, *alpha)
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    write!(&mut out, ",\"alpha\":{alpha}}}")
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                }
                 Command::Particles {
                     rect,
                     clip,
@@ -359,6 +410,13 @@ impl DisplayList {
                 Command::EffectBlur { radius } => {
                     write!(&mut out, "{{\"kind\":\"effect_blur\",\"radius\":{radius}}}")
                         .map_err(fmt_err)?;
+                }
+                Command::EffectGaussianBlur { radius } => {
+                    write!(
+                        &mut out,
+                        "{{\"kind\":\"effect_gaussian_blur\",\"radius\":{radius}}}"
+                    )
+                    .map_err(fmt_err)?;
                 }
                 Command::EffectMask {
                     rect,
