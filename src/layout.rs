@@ -660,6 +660,57 @@ fn inset(r: Rect, p: i64) -> Rect {
     }
 }
 
+/// Greedy word wrap at `max` built-in glyph columns; overlong words are chunked.
+fn wrap_text_count(text: &str, max: usize, max_lines: Option<usize>) -> usize {
+    let max = max.max(1);
+    let mut lines = 0usize;
+    let mut cur = 0usize;
+    for word in text.split_whitespace() {
+        let mut rest = word.chars().count();
+        while rest > max {
+            if cur > 0 {
+                lines += 1;
+                cur = 0;
+            }
+            lines += 1;
+            rest -= max;
+        }
+        if rest == 0 {
+            continue;
+        }
+        if cur == 0 {
+            cur = rest;
+        } else if cur + 1 + rest <= max {
+            cur += 1 + rest;
+        } else {
+            lines += 1;
+            cur = rest;
+        }
+    }
+    if cur > 0 {
+        lines += 1;
+    }
+    let lines = lines.max(1);
+    match max_lines {
+        Some(limit) => lines.min(limit.max(1)),
+        None => lines,
+    }
+}
+
+/// Overlap of two clip/rect areas; an empty (zero-size) result clips everything.
+fn clip_intersect(a: Rect, b: Rect) -> Rect {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = a.x.saturating_add(a.w).min(b.x.saturating_add(b.w));
+    let y1 = a.y.saturating_add(a.h).min(b.y.saturating_add(b.h));
+    Rect {
+        x: x0,
+        y: y0,
+        w: (x1 - x0).max(0),
+        h: (y1 - y0).max(0),
+    }
+}
+
 /// Compute the full pre-order layout for one viewport. Pure: same inputs, same output.
 pub fn layout(ir: &Ir, state: &StateView, width: u32, height: u32) -> Vec<LaidOut> {
     layout_at(ir, state, width, height, SETTLED_MS)
@@ -1202,6 +1253,20 @@ fn text_bearing(kind: Kind) -> bool {
     )
 }
 
+/// True when a node paints an opaque bounded surface, so its children must be
+/// clipped to its own rect and may not spill onto a neighbouring card.
+///
+/// A `Card`/`Container`/`List`/`Input`/`Dialog` always fills; a `Column`/`Row`
+/// clips only when it declares a `color`, because a transparent layout wrapper
+/// is pass-through and must not hide a sibling's legitimate overflow.
+fn surface_node(n: &Node) -> bool {
+    match n.kind {
+        Kind::Card | Kind::Container | Kind::List | Kind::Input | Kind::Dialog => true,
+        Kind::Column | Kind::Row => n.props.color.is_some(),
+        _ => false,
+    }
+}
+
 /// Generic container layout: children share the main axis in proportion to
 /// their natural size (fluid sizing), honouring explicit `width`/`height`.
 #[allow(clippy::too_many_arguments)]
@@ -1219,6 +1284,17 @@ fn place_children(
 ) {
     let dir = direction(n.kind, bp);
     let content = inset(rect, padding);
+    // An opaque surface clips its children to its own box: a squeezed card must
+    // not paint its content over the next sibling. A transparent wrapper passes
+    // the inherited clip through unchanged.
+    let child_clip = if surface_node(n) {
+        Some(match clip {
+            Some(outer) => clip_intersect(outer, rect),
+            None => rect,
+        })
+    } else {
+        clip
+    };
     let vertical = dir == Direction::Vertical;
     let content_main = if vertical { content.h } else { content.w };
     let cross_avail = if vertical { content.w } else { content.h };
@@ -1242,8 +1318,35 @@ fn place_children(
 
     // Fluid sizing: share the main axis in proportion to natural sizes, in i128
     // so the rounding is exact and identical on every host.
+    //
+    // A vertical stack stretches children to fill a taller box (unchanged), but
+    // never shrinks one below its natural height: when the content is taller than
+    // the box the column keeps natural heights and grows past it, and the
+    // surface/window clip trims the overflow so children never overprint a
+    // neighbour. A horizontal row still shares width purely proportionally.
     let total: i128 = sizes.iter().map(|&s| s as i128).sum();
-    if avail > 0 && count > 0 {
+    let natural_h_floor: Vec<i64> = sizes.clone();
+    if vertical {
+        if avail > 0 && count > 0 && total > 0 {
+            let mut assigned = 0i64;
+            for (s, floor) in sizes.iter_mut().zip(&natural_h_floor) {
+                let share = ((*s as i128 * avail as i128) / total) as i64;
+                *s = share.max(*floor);
+                assigned = assigned.saturating_add(*s);
+            }
+            // Any leftover from the rounding/floor goes to the earliest children.
+            let mut rem = (avail - assigned).max(0);
+            for s in sizes.iter_mut() {
+                if rem == 0 {
+                    break;
+                }
+                *s += 1;
+                rem -= 1;
+            }
+        }
+        // No room, or no natural content: keep natural/zero heights so the clip
+        // trims cleanly instead of overprinting.
+    } else if avail > 0 && count > 0 {
         if total > 0 {
             let mut assigned = 0i64;
             for s in sizes.iter_mut() {
@@ -1290,26 +1393,8 @@ fn place_children(
         } else {
             (c.props.width, c.props.height)
         };
-        let main = if main_override.is_none() && c.kind == Kind::Icon && count > 1 {
-            // A shared Icon keeps its intrinsic size instead of absorbing the
-            // fluid share, so a Row of icons paints 16x16 glyphs rather than
-            // stretched bars; a sole Icon still fills its fixed-size Container.
-            let natural = if vertical {
-                natural_h(c, bp, state)
-            } else {
-                natural_w(c, bp, state)
-            };
-            natural.min(content_main).max(0)
-        } else if vertical && main_override.is_none() && leaf_like(c) && text_bearing(c.kind) {
-            // A vertical stack must not clip a text child below one glyph line:
-            // the raster paints the full glyph band regardless of the rect
-            // height, so a squeezed rect overprints the next sibling. Exceeding
-            // the parent's main extent is preferable to overprinting. Horizontal
-            // rows use height as the cross axis and never take this path.
-            natural_h(c, bp, state).max(sizes[i]).max(0)
-        } else {
-            main_override.unwrap_or(sizes[i]).min(content_main).max(0)
-        };
+        // Cross axis first: a wrapping text's height depends on its resolved
+        // width, so the width must be known before the main-axis height floor.
         let cross = cross_override
             .unwrap_or_else(|| {
                 if c.kind == Kind::Divider {
@@ -1328,6 +1413,57 @@ fn place_children(
             })
             .min(cross_avail)
             .max(0);
+        // Height a text child needs once wrapped at `cross`: every wrapped line
+        // is a full glyph band, so a rect shorter than that overprints its own
+        // lines. Other leaf kinds need one line.
+        let text_floor = if vertical && c.kind == Kind::Text {
+            let scale = font_scale(&c.props, 16);
+            let metrics = node_metrics(c);
+            let max_w = (cross - 4).max(1);
+            let lines = if text_width(&node_text(c, state), scale, metrics) <= cross {
+                1
+            } else {
+                match metrics {
+                    font::FontMetrics::Proportional => font::wrap_width_limited(
+                        &node_text(c, state),
+                        max_w,
+                        scale,
+                        c.props.max_lines,
+                    )
+                    .len(),
+                    font::FontMetrics::Fixed => {
+                        let adv = font::advance(scale).max(1);
+                        let max_chars = (max_w.max(adv) / adv) as usize;
+                        wrap_text_count(&node_text(c, state), max_chars, c.props.max_lines)
+                    }
+                }
+            }
+            .max(1) as i64;
+            (font::GLYPH_H * scale)
+                .saturating_add(lines.saturating_sub(1) * (font::GLYPH_H * scale + 2))
+        } else {
+            0
+        };
+        let main = if main_override.is_none() && c.kind == Kind::Icon && count > 1 {
+            // A shared Icon keeps its intrinsic size instead of absorbing the
+            // fluid share, so a Row of icons paints 16x16 glyphs rather than
+            // stretched bars; a sole Icon still fills its fixed-size Container.
+            let natural = if vertical {
+                natural_h(c, bp, state)
+            } else {
+                natural_w(c, bp, state)
+            };
+            natural.min(content_main).max(0)
+        } else if vertical && main_override.is_none() && leaf_like(c) && text_bearing(c.kind) {
+            // A vertical stack must not clip a text child below one glyph line:
+            // the raster paints the full glyph band regardless of the rect
+            // height, so a squeezed rect overprints the next sibling. Exceeding
+            // the parent's main extent is preferable to overprinting. Horizontal
+            // rows use height as the cross axis and never take this path.
+            natural_h(c, bp, state).max(sizes[i]).max(text_floor).max(0)
+        } else {
+            main_override.unwrap_or(sizes[i]).min(content_main).max(0)
+        };
         let cross_offset = match n.props.align {
             Align::Start => 0,
             Align::Center => (cross_avail - cross) / 2,
@@ -1358,7 +1494,7 @@ fn place_children(
             state,
             n.props.align,
             elapsed_ms,
-            clip,
+            child_clip,
             anim,
             out,
         );
@@ -1431,10 +1567,11 @@ fn place_grid(
 
     let mut y = content.y;
     for row in 0..rows as usize {
-        if y >= content.y + content.h {
-            break;
-        }
-        let h = row_h[row].min((content.y + content.h - y).max(0));
+        // Content-driven: every row keeps its natural height even past the
+        // grid box; the enclosing surface clip trims the overflow. Clamping a
+        // row to the leftover height squeezes its fixed-height cells (badge,
+        // meter) into overlapping slivers.
+        let h = row_h[row];
         let mut x = content.x;
         for col in 0..cols {
             let idx = row * cols as usize + col as usize;
