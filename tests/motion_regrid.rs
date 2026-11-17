@@ -5,8 +5,7 @@
 
 use opurom_render::{digest_hex, parse_ir, Renderer, StateView, SETTLED_MS};
 
-const MOTION_IR: &str =
-    include_str!("../../opurom-mobile/android/app/src/main/assets/motion.opuir.json");
+const MOTION_IR: &str = include_str!("fixtures/motion.opuir.json");
 
 #[test]
 fn motion_frames_at_320x240_never_index_past_framebuffer() {
