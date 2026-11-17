@@ -5,7 +5,10 @@
 use opurom_render::{digest_hex, elevation_level, parse_ir, Renderer, StateView, ELEVATION_TABLE};
 use serde_json::Value;
 
-const TOKENS: &str = "../opurom-ui/theme/material-tokens.json";
+// CI checks out render without the sibling UI repo, so the fixture is the
+// source of truth here; a local sibling is checked for drift only.
+const TOKENS: &str = "tests/fixtures/material-tokens.json";
+const SIBLING_TOKENS: &str = "../opurom-ui/theme/material-tokens.json";
 const COUNTER: &str = "../opurom-examples/golden/counter.opuir.json";
 
 fn alpha_of(hex: &str) -> u8 {
@@ -15,7 +18,11 @@ fn alpha_of(hex: &str) -> u8 {
 
 #[test]
 fn embedded_table_matches_material_tokens_json() {
-    let v: Value = serde_json::from_str(&std::fs::read_to_string(TOKENS).unwrap()).unwrap();
+    let fixture = std::fs::read_to_string(TOKENS).unwrap();
+    if let Ok(sibling) = std::fs::read_to_string(SIBLING_TOKENS) {
+        assert_eq!(sibling, fixture, "{SIBLING_TOKENS} drifted from fixture");
+    }
+    let v: Value = serde_json::from_str(&fixture).unwrap();
     let elev = &v["tokens"]["elevation"];
     for level in 0..=6 {
         let Some(layers) = ELEVATION_TABLE[level] else {
