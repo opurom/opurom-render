@@ -1,0 +1,6 @@
+{
+  "ir": "0.1.0", "app": "Corners", "state": [],
+  "tree": { "id": 0, "kind": "Column", "props": { "padding": 20, "color": "#FFFFFF", "border": "#FFFFFF" }, "events": {},
+    "children": [{ "id": 1, "kind": "Container", "props": { "width": 80, "height": 80, "color": "#000000", "border": "#000000", "radius": 4, "cornerRadii": { "topLeft": 10, "topRight": 20, "bottomRight": 30, "bottomLeft": 40 } }, "events": {}, "children": [] }] },
+  "theme": { "mode": "light", "accent": "#097FEB", "radius": 0 }
+}

@@ -3,6 +3,7 @@
 
 use crate::anim::{default_duration_ms, AnimSpec, AnimTable, AnimValue, Curve};
 use crate::effects::{VisualEffect, VisualEffectKind, EFFECT_UNIT};
+use crate::geometry::{CornerRadii, RoundingRadii};
 use crate::image::ImageFit;
 use crate::interaction::{NodeState, Tone, Variant};
 use crate::ir::{Contrast, Directionality};
@@ -249,6 +250,8 @@ pub struct LaidOut {
     pub rect: Rect,
     pub direction: Direction,
     pub radius: i64,
+    /// Normalized per-corner radii in render order TL, TR, BL, BR.
+    pub radii: RoundingRadii,
     pub fill: Option<Rgba>,
     pub border: Option<Rgba>,
     pub border_w: i64,
@@ -1299,12 +1302,31 @@ fn place(
     glass_lamina(n, pal, text.is_some(), &mut visual_effects);
     let node_state = NodeState::resolve(None, n.props.state, n.props.disabled);
 
+    // IR object keys are CSS-ordered (TL, TR, BR, BL); RoundingRadii is
+    // TL, TR, BL, BR. Map by name, never by key iteration order.
+    let radii = match &n.props.corner_radii {
+        Some(c) => {
+            let scalar = CornerRadii {
+                x: radius,
+                y: radius,
+            };
+            let raw = RoundingRadii {
+                top_left: c.top_left.map_or(scalar, |(x, y)| CornerRadii { x, y }),
+                top_right: c.top_right.map_or(scalar, |(x, y)| CornerRadii { x, y }),
+                bottom_left: c.bottom_left.map_or(scalar, |(x, y)| CornerRadii { x, y }),
+                bottom_right: c.bottom_right.map_or(scalar, |(x, y)| CornerRadii { x, y }),
+            };
+            raw.scaled(rect.w, rect.h)
+        }
+        None => RoundingRadii::all(radius),
+    };
     out.push(LaidOut {
         id: n.id,
         kind: n.kind,
         rect,
         direction: dir,
         radius,
+        radii,
         fill,
         border,
         border_w,

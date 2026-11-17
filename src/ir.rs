@@ -439,6 +439,16 @@ pub enum Align {
 }
 
 /// Known props are typed; unknown props are ignored (IR forward compatibility).
+/// Optional per-corner radii from the named `cornerRadii` object. Keys are
+/// CSS-ordered; each pair is (x, y), absent corners fall back to `radius`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CornerRadiiProp {
+    pub top_left: Option<(i64, i64)>,
+    pub top_right: Option<(i64, i64)>,
+    pub bottom_right: Option<(i64, i64)>,
+    pub bottom_left: Option<(i64, i64)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Props {
     pub gap: i64,
@@ -452,6 +462,7 @@ pub struct Props {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub radius: Option<i64>,
+    pub corner_radii: Option<CornerRadiiProp>,
     /// Semantic design-token colour carried through the IR; resolved against
     /// the theme palette after `theme.mode` is known.
     pub color_role: Option<String>,
@@ -851,6 +862,54 @@ fn opt_bool(o: &Map<String, Value>, key: &str, what: &str) -> Result<bool, IrErr
             .ok_or_else(|| bad(format!("{what}.{key} must be a boolean"))),
         None => Ok(false),
     }
+}
+
+fn corner_pair(v: &Value, what: &str) -> Result<(i64, i64), IrError> {
+    if let Some(n) = v.as_i64() {
+        if n < 0 {
+            return Err(bad(format!("{what} must be non-negative")));
+        }
+        return Ok((n, n));
+    }
+    let arr = v
+        .as_array()
+        .ok_or_else(|| bad(format!("{what} must be a non-negative integer or [x, y]")))?;
+    if arr.len() != 2 {
+        return Err(bad(format!("{what} pair must have exactly two integers")));
+    }
+    let x = integer(&arr[0], what)?;
+    let y = integer(&arr[1], what)?;
+    if x < 0 || y < 0 {
+        return Err(bad(format!("{what} must be non-negative")));
+    }
+    Ok((x, y))
+}
+
+fn corner_radii_prop(
+    o: &Map<String, Value>,
+    what: &str,
+) -> Result<Option<CornerRadiiProp>, IrError> {
+    let Some(v) = o.get("cornerRadii") else {
+        return Ok(None);
+    };
+    let map = v.as_object().ok_or_else(|| {
+        bad(format!(
+            "{what}.cornerRadii must be a named object, not an array"
+        ))
+    })?;
+    let mut out = CornerRadiiProp::default();
+    for (key, value) in map {
+        let label = format!("{what}.cornerRadii.{key}");
+        let pair = corner_pair(value, &label)?;
+        match key.as_str() {
+            "topLeft" => out.top_left = Some(pair),
+            "topRight" => out.top_right = Some(pair),
+            "bottomRight" => out.bottom_right = Some(pair),
+            "bottomLeft" => out.bottom_left = Some(pair),
+            other => return Err(bad(format!("{what}.cornerRadii has unknown key {other:?}"))),
+        }
+    }
+    Ok(Some(out))
 }
 
 fn color_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<Rgba>, IrError> {
@@ -1419,6 +1478,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         width: opt_integer(o, "width", what)?,
         height: opt_integer(o, "height", what)?,
         radius: opt_integer(o, "radius", what)?,
+        corner_radii: corner_radii_prop(o, what)?,
         color_role: color_role_prop(o, "color", what)?,
         color: color_prop(o, "color", what)?,
         text_color: color_prop(o, "textColor", what)?,

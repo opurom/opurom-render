@@ -3,6 +3,7 @@
 //! arithmetic; the frame is opaque.
 
 use crate::display::Command;
+use crate::geometry::{round_rect_contains, CornerRadii, RoundingRadii};
 use crate::icons;
 use crate::image;
 use crate::interaction::{self, NodeState, Variant, FOCUS_RING};
@@ -377,6 +378,100 @@ impl Canvas {
             -1
         };
         cx >= 0 && cy >= 0 && cx * cx + cy * cy > limit
+    }
+
+    /// True when all four corners are the same circular radius; such a shape
+    /// keeps the historical scalar path byte-for-byte.
+    fn uniform_radius(radii: RoundingRadii) -> Option<i64> {
+        let c = radii.top_left;
+        if c.x == c.y && radii.top_right == c && radii.bottom_left == c && radii.bottom_right == c {
+            Some(c.x)
+        } else {
+            None
+        }
+    }
+
+    fn radii_inset(radii: RoundingRadii, amount: i64) -> RoundingRadii {
+        let shrink = |c: CornerRadii| CornerRadii {
+            x: (c.x - amount).max(0),
+            y: (c.y - amount).max(0),
+        };
+        RoundingRadii {
+            top_left: shrink(radii.top_left),
+            top_right: shrink(radii.top_right),
+            bottom_left: shrink(radii.bottom_left),
+            bottom_right: shrink(radii.bottom_right),
+        }
+    }
+
+    fn radii_coverage(r: Rect, x: i64, y: i64, radii: RoundingRadii) -> u8 {
+        let scale = |c: CornerRadii| CornerRadii {
+            x: c.x * CORNER_AA,
+            y: c.y * CORNER_AA,
+        };
+        let big = Rect {
+            x: r.x * CORNER_AA,
+            y: r.y * CORNER_AA,
+            w: r.w * CORNER_AA,
+            h: r.h * CORNER_AA,
+        };
+        let scaled = RoundingRadii {
+            top_left: scale(radii.top_left),
+            top_right: scale(radii.top_right),
+            bottom_left: scale(radii.bottom_left),
+            bottom_right: scale(radii.bottom_right),
+        };
+        let mut hits = 0i64;
+        for sy in 0..CORNER_AA {
+            for sx in 0..CORNER_AA {
+                if round_rect_contains(
+                    x * CORNER_AA + sx,
+                    y * CORNER_AA + sy,
+                    big.x,
+                    big.y,
+                    big.w,
+                    big.h,
+                    scaled,
+                ) {
+                    hits += 1;
+                }
+            }
+        }
+        let n = CORNER_AA * CORNER_AA;
+        ((255 * hits + n / 2) / n) as u8
+    }
+
+    /// Fill with independent per-corner radii. Uniform radii delegate to the
+    /// scalar path so every existing frame stays byte-identical.
+    pub fn fill_rounded_radii(&mut self, r: Rect, c: Rgba, radii: RoundingRadii) {
+        if let Some(rad) = Self::uniform_radius(radii) {
+            self.fill_rounded(r, c, rad);
+            return;
+        }
+        if r.w <= 0 || r.h <= 0 {
+            return;
+        }
+        let clip = self.effective_clip();
+        let x_from = r.x.max(clip.x).max(0);
+        let x_to = (r.x + r.w).min(clip.x + clip.w).min(self.width as i64);
+        let y_from = r.y.max(clip.y).max(0);
+        let y_to = (r.y + r.h).min(clip.y + clip.h).min(self.height as i64);
+        for y in y_from..y_to {
+            for x in x_from..x_to {
+                let cov = if self.edge_aa {
+                    Self::radii_coverage(r, x, y, radii)
+                } else if round_rect_contains(x, y, r.x, r.y, r.w, r.h, radii) {
+                    255
+                } else {
+                    0
+                };
+                if self.edge_aa {
+                    self.set_covered(x, y, c, cov);
+                } else if cov != 0 {
+                    self.set_quiet(x, y, c);
+                }
+            }
+        }
     }
 
     /// Filled rounded rectangle using an integer quarter-circle corner test.
@@ -1032,7 +1127,7 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
             } else if round {
                 canvas.fill_circle(n.rect, with_alpha(border, alpha));
             } else {
-                canvas.fill_rounded(n.rect, with_alpha(border, alpha), n.radius);
+                canvas.fill_rounded_radii(n.rect, with_alpha(border, alpha), n.radii);
             }
         }
         if fill.a > 0 {
@@ -1052,7 +1147,11 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
                     n.effects.gradient_horizontal,
                 ),
                 None if round => canvas.fill_circle(inner, with_alpha(fill, alpha)),
-                None => canvas.fill_rounded(inner, with_alpha(fill, alpha), inner_radius),
+                None => canvas.fill_rounded_radii(
+                    inner,
+                    with_alpha(fill, alpha),
+                    Canvas::radii_inset(n.radii, n.border_w).scaled(inner.w, inner.h),
+                ),
             }
         }
     } else if fill.a > 0 {
@@ -1065,7 +1164,7 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
                 alpha,
                 n.effects.gradient_horizontal,
             ),
-            None => canvas.fill_rounded(n.rect, with_alpha(fill, alpha), n.radius),
+            None => canvas.fill_rounded_radii(n.rect, with_alpha(fill, alpha), n.radii),
         }
     }
 }

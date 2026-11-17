@@ -86,9 +86,9 @@ pub use interaction::{
     RIPPLE_UNCONFIRMED_MS, SUCCESS, WARNING,
 };
 pub use ir::{
-    parse_ir, parse_state_json, Action, Align, Contrast, Directionality, Event, Ir, IrError, Kind,
-    Node, Op, Props, RenderQuality, Role, Route, StateDecl, StateValue, StateView, Theme,
-    ThemeMode, ThemeTokens, ValueType,
+    parse_ir, parse_state_json, Action, Align, Contrast, CornerRadiiProp, Directionality, Event,
+    Ir, IrError, Kind, Node, Op, Props, RenderQuality, Role, Route, StateDecl, StateValue,
+    StateView, Theme, ThemeMode, ThemeTokens, ValueType,
 };
 pub use layout::{
     fluid_grid, layout, layout_animated_at, layout_at, layout_cached_at, Breakpoint, Control,
