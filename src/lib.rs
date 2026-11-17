@@ -75,10 +75,12 @@ pub use incremental::{
     KeyedNode, LayoutCache, NodeIdentity, RecomputeCounters,
 };
 pub use interaction::{
-    is_interactive, press_color, ripple_alpha, ripple_progress, ripple_radius, NodeState,
-    PressPhase, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
-    RIPPLE_DURATION_MS, RIPPLE_FADE_IN_MS, RIPPLE_FADE_OUT_START_MS, RIPPLE_PEAK_ALPHA,
-    RIPPLE_RADIUS_MS, RIPPLE_START_PERCENT, RIPPLE_TOTAL_MS, SUCCESS, WARNING,
+    is_interactive, press_color, ripple_alpha_confirmed, ripple_alpha_held, ripple_frame,
+    ripple_progress, ripple_radius_confirmed, ripple_radius_unconfirmed, NodeState, PressPhase,
+    Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY, RIPPLE_DURATION_MS,
+    RIPPLE_FADE_IN_MS, RIPPLE_FADE_OUT_MS, RIPPLE_FADE_OUT_START_MS, RIPPLE_PEAK_ALPHA,
+    RIPPLE_RADIUS_MS, RIPPLE_START_PERCENT, RIPPLE_TOTAL_MS, RIPPLE_UNCONFIRMED_MS, SUCCESS,
+    WARNING,
 };
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Directionality, Event, Ir, IrError, Kind,
@@ -233,6 +235,56 @@ fn node_has_tap(node: &crate::ir::Node, id: u32) -> bool {
             || node.events.iter().any(|e| e.name == "tap");
     }
     node.children.iter().any(|c| node_has_tap(c, id))
+}
+
+/// Nearest button-semantic node at or above `target`, following the IR tree.
+/// The hit test can land on a Button's Text child; Flutter paints the splash
+/// on the Material box, so the ripple host is the Button ancestor.
+fn ink_host(node: &crate::ir::Node, target: u32, ancestor: Option<u32>) -> Option<u32> {
+    let here = if is_ink_node(node) {
+        Some(node.id)
+    } else {
+        ancestor
+    };
+    if node.id == target {
+        return here;
+    }
+    for c in &node.children {
+        if let Some(host) = ink_host(c, target, here) {
+            return Some(host);
+        }
+    }
+    None
+}
+
+fn is_ink_node(node: &crate::ir::Node) -> bool {
+    node.kind == Kind::Button
+        || node.props.variant == Some(Variant::Fab)
+        || node.props.role == Some(crate::ir::Role::Button)
+}
+
+/// Resolve a press to its ripple host and translate the touch point from the
+/// hit node's coordinates into the host's coordinates.
+fn press_host<'a>(
+    laid: &'a [LaidOut],
+    ir: &Ir,
+    press: &PressPhase,
+) -> Option<(&'a LaidOut, PressPhase)> {
+    let id = ink_host(&ir.tree, press.node_id, None)?;
+    let host = laid.iter().find(|n| n.id == id)?;
+    let hit = laid.iter().find(|n| n.id == press.node_id)?;
+    let touch = press
+        .touch
+        .map(|(tx, ty)| (hit.rect.x + tx - host.rect.x, hit.rect.y + ty - host.rect.y));
+    Some((
+        host,
+        PressPhase {
+            node_id: id,
+            press_start_tick: press.press_start_tick,
+            confirm_tick: press.confirm_tick,
+            touch,
+        },
+    ))
 }
 
 impl Renderer {
@@ -491,8 +543,8 @@ impl Renderer {
             // Union the ripple's full-lifetime disc around the press node so
             // every press frame paints (and clears) the same bounded area.
             if let Some(p) = press {
-                if let Some(n) = laid.iter().find(|n| n.id == p.node_id) {
-                    r = union_rect(r, ripple_disc(n, p.touch, self.width, self.height));
+                if let Some((host, hp)) = press_host(&laid, ir, p) {
+                    r = union_rect(r, ripple_disc(host, hp.touch, self.width, self.height));
                 }
             }
             r
@@ -544,8 +596,10 @@ impl Renderer {
                     );
                 }
                 raster::draw(&mut canvas, n);
-                if let Some(p) = press.filter(|p| p.node_id == n.id) {
-                    canvas.draw_node_ripple(n, p.press_start_tick, elapsed_ms, p.touch, n.accent);
+                if let Some((host, hp)) = press.and_then(|p| press_host(&laid, ir, p)) {
+                    if host.id == n.id {
+                        canvas.draw_node_ripple(n, &hp, elapsed_ms, n.accent);
+                    }
                 }
             }
             canvas.pixels
@@ -642,8 +696,10 @@ impl Renderer {
                 }
             }
             raster::draw(&mut canvas, n);
-            if let Some(p) = press.filter(|p| p.node_id == n.id) {
-                canvas.draw_node_ripple(n, p.press_start_tick, elapsed_ms, p.touch, n.accent);
+            if let Some((host, hp)) = press.and_then(|p| press_host(laid, ir, p)) {
+                if host.id == n.id {
+                    canvas.draw_node_ripple(n, &hp, elapsed_ms, n.accent);
+                }
             }
         }
         effects::apply_frame_blurs(&mut canvas, laid);

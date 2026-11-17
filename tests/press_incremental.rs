@@ -27,6 +27,7 @@ fn incremental_press_matches_full_render_byte_for_byte() {
     let press = PressPhase {
         node_id: target,
         press_start_tick: 0,
+        confirm_tick: None,
         touch: None,
     };
 
@@ -79,6 +80,7 @@ fn press_with_frame_effect_falls_back_to_full_bytes() {
     let press = PressPhase {
         node_id: 1,
         press_start_tick: 0,
+        confirm_tick: None,
         touch: None,
     };
     let (w, h) = (120u32, 120u32);

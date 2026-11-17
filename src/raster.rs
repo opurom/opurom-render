@@ -624,26 +624,18 @@ impl Canvas {
     pub fn draw_node_ripple(
         &mut self,
         n: &LaidOut,
-        press_start_tick: i64,
+        press: &interaction::PressPhase,
         elapsed_ms: i64,
-        touch: Option<(i64, i64)>,
         tint: Rgba,
     ) {
-        let elapsed = elapsed_ms.saturating_sub(press_start_tick);
-        // Flutter InkRipple timing: radius and alpha advance on their own
-        // clocks (ease-out expansion from 30%, delayed fade-out), not a single
-        // lockstep linear progress.
-        if elapsed < 0 || elapsed > interaction::RIPPLE_TOTAL_MS {
-            return;
-        }
         let max_r = (n.rect.w.max(0) / 2).max(n.rect.h.max(0) / 2);
-        let radius = interaction::ripple_radius(elapsed, max_r);
-        let alpha = interaction::ripple_alpha(elapsed, interaction::RIPPLE_PEAK_ALPHA);
-        if alpha <= 0 {
+        let Some((radius, alpha)) =
+            interaction::ripple_frame(press, elapsed_ms, max_r, interaction::RIPPLE_PEAK_ALPHA)
+        else {
             return;
-        }
+        };
         let color = with_alpha(tint, alpha);
-        let (cx, cy) = match touch {
+        let (cx, cy) = match press.touch {
             Some((tx, ty)) => (n.rect.x + tx, n.rect.y + ty),
             None => (n.rect.x + n.rect.w / 2, n.rect.y + n.rect.h / 2),
         };

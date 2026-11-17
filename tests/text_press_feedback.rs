@@ -37,6 +37,7 @@ fn phase() -> PressPhase {
     PressPhase {
         node_id: 1,
         press_start_tick: 0,
+        confirm_tick: None,
         touch: None,
     }
 }

@@ -1,18 +1,18 @@
 //! A3 press feedback (ANIMATION_AND_PHYSICS.md §8): caller-owned `PressPhase`
-//! drives the Active state and the ripple through `render_with_press`. No phase
-//! is byte-identical to `render_at`; authored `disabled` still wins.
+//! drives the Active state and the InkRipple on the nearest Button host. No
+//! phase is byte-identical to `render_at`; authored `disabled` still wins.
 
 use opurom_render::{digest_hex, parse_ir, PressPhase, Renderer, StateView};
 
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
 
-fn box_ir(extra_props: &str) -> String {
+fn button_ir(extra_props: &str) -> String {
     format!(
         r##"{{
         "ir": "0.1.0", "app": "Press", "state": [],
         "tree": {{ "id": 0, "kind": "Column", "props": {{ "padding": 8 }},
             "children": [
-                {{ "id": 1, "kind": "Container", "props": {{
+                {{ "id": 1, "kind": "Button", "props": {{
                     "color": "#102030", "width": 80, "height": 40, "radius": 8 {extra_props} }},
                     "children": [], "events": {{}} }}
             ], "events": {{}} }},
@@ -28,95 +28,98 @@ fn frame(ir_text: &str, elapsed_ms: i64, press: Option<&PressPhase>) -> Vec<u8> 
     r.render_with_press(&ir, &state, elapsed_ms, press).pixels
 }
 
-fn phase(start_tick: i64, touch: Option<(i64, i64)>) -> PressPhase {
+fn phase(start_tick: i64, confirm: Option<i64>, touch: Option<(i64, i64)>) -> PressPhase {
     PressPhase {
         node_id: 1,
         press_start_tick: start_tick,
+        confirm_tick: confirm,
         touch,
     }
 }
 
 #[test]
 fn no_phase_is_byte_identical_to_render_at() {
-    let ir_text = box_ir("");
+    let ir_text = button_ir("");
     let ir = parse_ir(&ir_text).unwrap();
     let state = StateView::from_ir(&ir);
     let mut r = Renderer::new(240, 200);
     let plain = r.render(&ir, &state).pixels;
     let ir2 = parse_ir(&ir_text).unwrap();
-    let mut r2 = Renderer::new(240, 200);
-    let no_phase = r2
-        .render_with_press(&ir2, &StateView::from_ir(&ir2), 0, None)
-        .pixels;
-    assert_eq!(
-        digest_hex(&plain),
-        digest_hex(&no_phase),
-        "render_with_press(None) equals render"
-    );
+    let no_phase = r2_frame(&ir2, &state);
+    assert_eq!(digest_hex(&plain), digest_hex(&no_phase));
+}
+
+fn r2_frame(ir: &opurom_render::Ir, state: &StateView) -> Vec<u8> {
+    Renderer::new(240, 200)
+        .render_with_press(ir, state, 0, None)
+        .pixels
 }
 
 #[test]
 fn press_activates_the_node_and_disabled_still_wins() {
-    let base = box_ir("");
-    let pressed = frame(&base, 0, Some(&phase(0, None)));
+    let base = button_ir("");
+    let pressed = frame(&base, 0, Some(&phase(0, None, None)));
     let idle = frame(&base, 0, None);
-    assert_ne!(
-        digest_hex(&pressed),
-        digest_hex(&idle),
-        "press changes the frame (Active fill + inset)"
-    );
-
-    // Authored `state: disabled` beats the caller press: pressed == disabled idle.
-    let disabled = box_ir(", \"state\": \"disabled\"");
-    let disabled_pressed = frame(&disabled, 0, Some(&phase(0, None)));
-    let disabled_idle = frame(&disabled, 0, None);
+    assert_ne!(digest_hex(&pressed), digest_hex(&idle));
+    let disabled = button_ir(", \"state\": \"disabled\"");
     assert_eq!(
-        digest_hex(&disabled_pressed),
-        digest_hex(&disabled_idle),
-        "authored disabled wins over the press phase"
+        digest_hex(&frame(&disabled, 0, Some(&phase(0, None, None)))),
+        digest_hex(&frame(&disabled, 0, None))
     );
 }
 
 #[test]
-fn ripple_is_time_driven_and_settles_without_a_wall_clock() {
-    let ir_text = box_ir("");
-    // Mid-press the ripple disc is painted; after the 220 ms default it is
-    // fully faded, leaving only the pressed appearance.
-    let mid = frame(&ir_text, 110, Some(&phase(0, None)));
-    let after = frame(&ir_text, 500, Some(&phase(0, None)));
+fn held_ripple_keeps_growing_and_never_fades() {
+    let ir = button_ir("");
+    let early = frame(&ir, 75, Some(&phase(0, None, None)));
+    let mid = frame(&ir, 400, Some(&phase(0, None, None)));
+    let late = frame(&ir, 1200, Some(&phase(0, None, None)));
+    assert_ne!(
+        digest_hex(&early),
+        digest_hex(&mid),
+        "radius grows while held"
+    );
     assert_ne!(
         digest_hex(&mid),
-        digest_hex(&after),
-        "ripple visible at 110ms, gone after 220ms"
+        digest_hex(&late),
+        "1 s expansion continues"
     );
-    // Past the ripple every later tick is identical: only the caller clock
-    // drives the disc, and it has settled.
-    let later = frame(&ir_text, 900, Some(&phase(0, None)));
+    // Past one second Flutter holds the full radius at full alpha: stable.
     assert_eq!(
-        digest_hex(&after),
-        digest_hex(&later),
-        "settled frames stable"
+        digest_hex(&late),
+        digest_hex(&frame(&ir, 2000, Some(&phase(0, None, None))))
     );
-    // At progress zero the disc has not begun, so a just-pressed frame matches
-    // the settled one: both are the pressed box with no visible ripple.
-    let just_pressed = frame(&ir_text, 0, Some(&phase(0, None)));
+}
+
+#[test]
+fn confirmed_ripple_accelerates_then_fades_and_disappears() {
+    let ir = button_ir("");
+    let held = frame(&ir, 300, Some(&phase(0, None, None)));
+    let just_released = frame(&ir, 300, Some(&phase(0, Some(300), None)));
     assert_eq!(
-        digest_hex(&just_pressed),
-        digest_hex(&after),
-        "no disc at progress zero or past settle"
+        digest_hex(&held),
+        digest_hex(&just_released),
+        "release continues from the held radius"
     );
+    let at_525 = frame(&ir, 525, Some(&phase(0, Some(300), None)));
+    assert_ne!(digest_hex(&held), digest_hex(&at_525), "radius accelerates");
+    let at_600 = frame(&ir, 600, Some(&phase(0, Some(300), None)));
+    assert_ne!(
+        digest_hex(&at_525),
+        digest_hex(&at_600),
+        "alpha fades at 225 ms"
+    );
+    let gone = frame(&ir, 700, Some(&phase(0, Some(300), None)));
+    let idle_pressed = frame(&ir, 700, Some(&phase(0, Some(300), None)));
+    assert_eq!(digest_hex(&gone), digest_hex(&idle_pressed));
 }
 
 #[test]
 fn touch_moves_the_ripple_centre() {
-    let ir_text = box_ir("");
-    let centred = frame(&ir_text, 110, Some(&phase(0, None)));
-    let offset = frame(&ir_text, 110, Some(&phase(0, Some((10, 5)))));
-    assert_ne!(
-        digest_hex(&centred),
-        digest_hex(&offset),
-        "an explicit touch point shifts the disc off centre"
-    );
+    let ir = button_ir("");
+    let centred = frame(&ir, 110, Some(&phase(0, None, None)));
+    let offset = frame(&ir, 110, Some(&phase(0, None, Some((10, 5)))));
+    assert_ne!(digest_hex(&centred), digest_hex(&offset));
 }
 
 #[test]

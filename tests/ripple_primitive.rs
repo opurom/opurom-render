@@ -4,92 +4,98 @@
 //! fade-out). Opt-in only; no default path calls it, so goldens stay identical.
 
 use opurom_render::{
-    digest_hex, raster::Canvas, ripple_alpha, ripple_progress, ripple_radius, Rect, Rgba, ONE,
-    RIPPLE_DURATION_MS, RIPPLE_FADE_IN_MS, RIPPLE_FADE_OUT_START_MS, RIPPLE_PEAK_ALPHA,
-    RIPPLE_RADIUS_MS, RIPPLE_START_PERCENT, RIPPLE_TOTAL_MS,
+    digest_hex, raster::Canvas, ripple_alpha_confirmed, ripple_alpha_held, ripple_frame,
+    ripple_radius_confirmed, ripple_radius_unconfirmed, PressPhase, Rect, Rgba, RIPPLE_FADE_IN_MS,
+    RIPPLE_FADE_OUT_MS, RIPPLE_PEAK_ALPHA, RIPPLE_RADIUS_MS, RIPPLE_UNCONFIRMED_MS,
 };
 
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
 
-#[test]
-fn progress_has_exact_endpoints_and_is_monotonic() {
-    let d = RIPPLE_DURATION_MS;
-    assert_eq!(ripple_progress(-5, d), 0, "before press holds zero");
-    assert_eq!(ripple_progress(0, d), 0, "at press zero");
-    assert_eq!(ripple_progress(d, d), ONE, "at duration settles to ONE");
-    assert_eq!(ripple_progress(d + 500, d), ONE, "past duration holds ONE");
-    let mut prev = 0;
-    for t in 0..=d {
-        let p = ripple_progress(t, d);
-        assert!(p >= prev && p <= ONE, "monotonic bounded at t={t}");
-        prev = p;
+fn press(confirm: Option<i64>) -> PressPhase {
+    PressPhase {
+        node_id: 1,
+        press_start_tick: 0,
+        confirm_tick: confirm,
+        touch: None,
     }
 }
 
+/// Flutter reference frames for a 100px target, held down for one second:
+/// radius 30 -> 34.5 -> 56.4 -> 81.2 -> 96.4 -> 105 (target+5), alpha full
+/// after 75 ms and never fading while the pointer stays down.
 #[test]
-fn ripple_follows_flutter_ink_timing() {
-    // Radius starts at 30% of target, eases out to full by 225ms, then holds.
-    let max_r = 100;
-    let start_r = max_r * RIPPLE_START_PERCENT / 100;
-    assert_eq!(
-        ripple_radius(0, max_r),
-        start_r,
-        "starts at 30% like InkRipple"
-    );
-    assert_eq!(
-        ripple_radius(RIPPLE_RADIUS_MS, max_r),
-        max_r,
-        "full at 225ms"
-    );
-    assert_eq!(
-        ripple_radius(RIPPLE_TOTAL_MS, max_r),
-        max_r,
-        "holds after expand"
-    );
+fn held_ripple_matches_flutter_frame_table() {
+    let peak = RIPPLE_PEAK_ALPHA;
+    assert_eq!(ripple_frame(&press(None), 0, 100, peak), None);
+    let cases = [
+        (75i64, 34i64),
+        (225, 56),
+        (400, 81),
+        (600, 96),
+        (1000, 105),
+        (1200, 105),
+    ];
+    for (t, radius) in cases {
+        let frame = ripple_frame(&press(None), t, 100, peak).expect("held frame");
+        assert_eq!(frame.0, radius, "held radius at {t} ms");
+        assert_eq!(frame.1, peak, "held alpha stays full at {t} ms");
+    }
+    assert_eq!(ripple_alpha_held(74, peak), 252);
+    assert_eq!(ripple_alpha_held(75, peak), peak);
+    assert_eq!(ripple_radius_unconfirmed(2000, 100), 105);
+}
+
+/// Flutter confirm at t=300 ms: radius continues from ~68.5%, accelerates to
+/// target+5 by +225 ms, alpha holds to +225 ms, halves at +300 ms, gone at
+/// +375 ms.
+#[test]
+fn confirmed_ripple_matches_flutter_frame_table() {
+    let peak = RIPPLE_PEAK_ALPHA;
+    let confirm = Some(300i64);
+    let cases = [
+        (0i64, Some((68i64, 256i64))),
+        (225, Some((105, 256))),
+        (300, Some((105, 128))),
+        (375, None),
+    ];
+    for (since, expected) in cases {
+        assert_eq!(
+            ripple_frame(&press(confirm), 300 + since, 100, peak),
+            expected,
+            "confirmed frame at +{since} ms"
+        );
+    }
+    // The radius never shrinks and alpha never rises after confirm.
     let mut prev_r = -1;
-    for t in 0..=RIPPLE_TOTAL_MS {
-        let r = ripple_radius(t, max_r);
-        assert!(r >= prev_r && r <= max_r, "radius monotonic at t={t}");
-        prev_r = r;
+    let mut prev_a = i64::MAX;
+    for since in 0..=RIPPLE_FADE_OUT_MS {
+        if let Some((r, a)) = ripple_frame(&press(confirm), 300 + since, 100, peak) {
+            assert!(r >= prev_r && a <= prev_a, "monotonic at +{since} ms");
+            prev_r = r;
+            prev_a = a;
+        }
     }
-    // Alpha fades in over 75ms, holds at peak until fade-out begins, then
-    // decays to zero at the end of the 375ms fade-out.
-    assert_eq!(ripple_alpha(0, RIPPLE_PEAK_ALPHA), 0, "no alpha at press");
+}
+
+/// The three controllers are independent: radius keeps growing past the old
+/// 225 ms aggregate while alpha holds, and the fade window is 225..375 ms.
+#[test]
+fn controllers_are_independent_integer_curves() {
+    assert_eq!(RIPPLE_FADE_IN_MS, 75);
+    assert_eq!(RIPPLE_RADIUS_MS, 225);
+    assert_eq!(RIPPLE_FADE_OUT_MS, 375);
+    assert_eq!(RIPPLE_UNCONFIRMED_MS, 1000);
     assert_eq!(
-        ripple_alpha(RIPPLE_FADE_IN_MS, RIPPLE_PEAK_ALPHA),
-        RIPPLE_PEAK_ALPHA,
-        "full alpha at 75ms"
+        ripple_alpha_confirmed(0, RIPPLE_PEAK_ALPHA),
+        RIPPLE_PEAK_ALPHA
     );
     assert_eq!(
-        ripple_alpha(RIPPLE_FADE_OUT_START_MS, RIPPLE_PEAK_ALPHA),
-        RIPPLE_PEAK_ALPHA,
-        "holds peak until fade-out starts"
+        ripple_alpha_confirmed(225, RIPPLE_PEAK_ALPHA),
+        RIPPLE_PEAK_ALPHA
     );
-    assert_eq!(
-        ripple_alpha(RIPPLE_TOTAL_MS, RIPPLE_PEAK_ALPHA),
-        0,
-        "fully faded at 600ms"
-    );
-    let mut prev = 0;
-    for t in 0..=RIPPLE_FADE_IN_MS {
-        let a = ripple_alpha(t, RIPPLE_PEAK_ALPHA);
-        assert!(a >= prev, "alpha rises during fade-in at t={t}");
-        prev = a;
-    }
-    prev = RIPPLE_PEAK_ALPHA + 1;
-    for t in RIPPLE_FADE_OUT_START_MS..=RIPPLE_TOTAL_MS {
-        let a = ripple_alpha(t, RIPPLE_PEAK_ALPHA);
-        assert!(a <= prev, "alpha falls during fade-out at t={t}");
-        prev = a;
-    }
-    for t in 0..=RIPPLE_TOTAL_MS {
-        let a = ripple_alpha(t, RIPPLE_PEAK_ALPHA);
-        assert!(a >= 0 && a <= RIPPLE_PEAK_ALPHA, "alpha bounded at t={t}");
-    }
-    assert_eq!(
-        RIPPLE_TOTAL_MS, 375,
-        "splash ends with the fade-out controller"
-    );
+    assert_eq!(ripple_alpha_confirmed(300, RIPPLE_PEAK_ALPHA), 128);
+    assert_eq!(ripple_alpha_confirmed(375, RIPPLE_PEAK_ALPHA), 0);
+    assert_eq!(ripple_radius_confirmed(300, 225, 100), 105);
 }
 
 #[test]

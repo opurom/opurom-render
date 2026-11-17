@@ -143,68 +143,147 @@ pub fn press_color(c: Rgba) -> Rgba {
 pub struct PressPhase {
     pub node_id: u32,
     pub press_start_tick: i64,
+    /// `None` means the pointer is still down (unconfirmed ripple); `Some(t)`
+    /// is the caller-clock tick of release. The down tick stays in
+    /// `press_start_tick` so the radius can continue from its held progress.
+    pub confirm_tick: Option<i64>,
     pub touch: Option<(i64, i64)>,
 }
 
-/// Ripple timing, mirroring Flutter's `InkRipple` (packages/flutter/lib/src/
-/// material/ink_ripple.dart). Three independent controllers run off one
-/// caller clock: fade-in, radius expansion and a delayed fade-out. Durations
-/// are the framework's own constants, in milliseconds.
+/// Ripple timing, mirroring Flutter's `InkRipple` three controllers. All
+/// durations are caller-clock milliseconds; no wall clock is consulted.
+/// The unconfirmed radius grows slowly over one second while the pointer is
+/// down; release accelerates it to the end over `RIPPLE_RADIUS_MS`, then the
+/// alpha fades over the last 150 ms of `RIPPLE_FADE_OUT_MS`.
+pub const RIPPLE_UNCONFIRMED_MS: i64 = 1000;
 pub const RIPPLE_FADE_IN_MS: i64 = 75;
 pub const RIPPLE_RADIUS_MS: i64 = 225;
 pub const RIPPLE_FADE_OUT_MS: i64 = 375;
-/// The fade-out controller runs 375ms but its alpha interval only starts at
-/// 225/375 of that span, so the visible fade is the last 150ms. Matches
-/// Flutter's `Interval(_kFadeOutIntervalStart, 1.0)`.
 pub const RIPPLE_FADE_OUT_START_MS: i64 = RIPPLE_RADIUS_MS;
-/// Visible fade-out window: from 225ms to the controller's 375ms end.
 pub const RIPPLE_FADE_WINDOW_MS: i64 = RIPPLE_FADE_OUT_MS - RIPPLE_FADE_OUT_START_MS;
-/// The whole splash is gone when the fade-out controller completes.
-pub const RIPPLE_TOTAL_MS: i64 = RIPPLE_FADE_OUT_MS;
-/// Radius starts at 30% of the target radius, as Flutter's InkRipple does
-/// (initial splash diameter is 60% of the final diameter).
+pub const RIPPLE_TOTAL_MS: i64 = RIPPLE_UNCONFIRMED_MS;
+/// Legacy aggregate duration kept for the original primitive's callers/tests.
+pub const RIPPLE_DURATION_MS: i64 = RIPPLE_FADE_OUT_MS;
+/// Splash diameter starts at 60% of the target, so the radius starts at 30%.
 pub const RIPPLE_START_PERCENT: i64 = 30;
-/// Legacy aggregate duration kept for the original primitive's callers/tests;
-/// the Flutter-accurate path uses the three constants above.
-pub const RIPPLE_DURATION_MS: i64 = RIPPLE_TOTAL_MS;
+/// Flutter ends the radius tween 5 logical pixels past the target radius.
+pub const RIPPLE_END_EXTRA: i64 = 5;
 /// Peak alpha of a fresh ripple, in fixed-point `UNIT` units.
 pub const RIPPLE_PEAK_ALPHA: i64 = 256; // 25% opacity
 
-/// Progress of a phase in `0..=UNIT`: zero before `start`, ONE at/after
-/// `start+span`, ease-out cubic in between. Integer-only and deterministic.
-fn phase_progress(elapsed_ms: i64, start: i64, span: i64) -> i64 {
-    if elapsed_ms <= start {
+/// Parameter units of the integer cubic Bezier used by `Curves.ease`.
+const EASE_UNIT: i64 = 1 << 16;
+
+/// Integer approximation of Flutter `Curves.ease` = Cubic(0.25, 0.1, 0.25, 1).
+/// Inverts the curve's x coordinate by binary search, then reads y. Every
+/// operation is integer fixed point; the result is in `0..=UNIT`.
+fn ease(x: i64) -> i64 {
+    let xt = (x.clamp(0, UNIT) as i128 * EASE_UNIT as i128 / UNIT as i128) as i64;
+    let (p1x, p1y, p2x, p2y) = (EASE_UNIT / 4, EASE_UNIT / 10, EASE_UNIT / 4, EASE_UNIT);
+    let (mut lo, mut hi) = (0i64, EASE_UNIT);
+    for _ in 0..17 {
+        let mid = (lo + hi) / 2;
+        let (bx, _) =
+            crate::curve::cubic_bezier((0, 0), (p1x, p1y), (p2x, p2y), (EASE_UNIT, EASE_UNIT), mid);
+        if bx <= xt {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let (_, y) =
+        crate::curve::cubic_bezier((0, 0), (p1x, p1y), (p2x, p2y), (EASE_UNIT, EASE_UNIT), lo);
+    (y as i128 * UNIT as i128 / EASE_UNIT as i128) as i64
+}
+
+/// Radius endpoint for a target: Flutter draws up to `target + 5`.
+fn ripple_end(max_radius: i64) -> i64 {
+    max_radius.max(0) + RIPPLE_END_EXTRA
+}
+
+/// Radius while the pointer is still down: 30% to target+5 over one second.
+pub fn ripple_radius_unconfirmed(elapsed_ms: i64, max_radius: i64) -> i64 {
+    if elapsed_ms >= RIPPLE_UNCONFIRMED_MS {
+        return ripple_end(max_radius);
+    }
+    let start = max_radius.max(0) * RIPPLE_START_PERCENT / 100;
+    let x = elapsed_ms.max(0) as i128 * UNIT as i128 / RIPPLE_UNCONFIRMED_MS as i128;
+    start + (ripple_end(max_radius) - start) * ease(x as i64) / UNIT
+}
+
+/// Alpha while the pointer is down: fade in over 75 ms, then hold at peak.
+pub fn ripple_alpha_held(elapsed_ms: i64, peak: i64) -> i64 {
+    if elapsed_ms <= 0 {
         return 0;
     }
-    if elapsed_ms >= start + span || span <= 0 {
-        return UNIT;
+    let a = elapsed_ms.min(RIPPLE_FADE_IN_MS) as i128 * peak as i128 / RIPPLE_FADE_IN_MS as i128;
+    a.clamp(0, UNIT as i128) as i64
+}
+
+/// Radius after release: continue from the held controller value, accelerate
+/// to target+5 in 225 ms. `release_ms` is the held duration at release.
+pub fn ripple_radius_confirmed(release_ms: i64, since_ms: i64, max_radius: i64) -> i64 {
+    if since_ms >= RIPPLE_RADIUS_MS {
+        return ripple_end(max_radius);
     }
-    let t = (elapsed_ms - start) as i128 * UNIT as i128 / span as i128;
-    let inv = UNIT as i128 - t;
-    (UNIT as i128 - inv * inv * inv / (UNIT as i128 * UNIT as i128)) as i64
+    let v0 = release_ms.clamp(0, RIPPLE_UNCONFIRMED_MS) as i128 * UNIT as i128
+        / RIPPLE_UNCONFIRMED_MS as i128;
+    let v = v0 + (UNIT as i128 - v0) * since_ms.max(0) as i128 / RIPPLE_RADIUS_MS as i128;
+    let start = max_radius.max(0) * RIPPLE_START_PERCENT / 100;
+    start + (ripple_end(max_radius) - start) * ease(v as i64) / UNIT
 }
 
-/// Radius at `elapsed_ms` since the press: starts at 30% of `max_radius` and
-/// eases out to the full radius over `RIPPLE_RADIUS_MS`. Integer fixed point.
-pub fn ripple_radius(elapsed_ms: i64, max_radius: i64) -> i64 {
-    let p = phase_progress(elapsed_ms, 0, RIPPLE_RADIUS_MS);
-    let start = max_radius * RIPPLE_START_PERCENT / 100;
-    start + (max_radius - start) * p / UNIT
+/// Alpha after release: hold peak for 225 ms, then fade to zero by 375 ms.
+pub fn ripple_alpha_confirmed(since_ms: i64, peak: i64) -> i64 {
+    if since_ms < RIPPLE_FADE_OUT_START_MS {
+        return peak.clamp(0, UNIT);
+    }
+    if since_ms >= RIPPLE_FADE_OUT_MS {
+        return 0;
+    }
+    let left = RIPPLE_FADE_OUT_MS - since_ms;
+    (peak as i128 * left as i128 / RIPPLE_FADE_WINDOW_MS as i128).clamp(0, UNIT as i128) as i64
 }
 
-/// Alpha at `elapsed_ms` since the press: fades in over `RIPPLE_FADE_IN_MS`,
-/// holds at `peak`, then fades out over `RIPPLE_FADE_OUT_MS` beginning at
-/// `RIPPLE_FADE_OUT_START_MS`. Integer fixed point.
-pub fn ripple_alpha(elapsed_ms: i64, peak: i64) -> i64 {
-    let fade_in = phase_progress(elapsed_ms, 0, RIPPLE_FADE_IN_MS);
-    let fade_out = phase_progress(elapsed_ms, RIPPLE_FADE_OUT_START_MS, RIPPLE_FADE_WINDOW_MS);
-    (peak as i128 * fade_in as i128 * (UNIT - fade_out) as i128 / (UNIT as i128 * UNIT as i128))
-        as i64
+/// Resolve one frame of the ripple state machine: `None` means draw nothing.
+pub fn ripple_frame(
+    press: &PressPhase,
+    now_ms: i64,
+    max_radius: i64,
+    peak: i64,
+) -> Option<(i64, i64)> {
+    let down = now_ms - press.press_start_tick;
+    if down < 0 {
+        return None;
+    }
+    let (radius, alpha) = match press.confirm_tick {
+        None => (
+            ripple_radius_unconfirmed(down, max_radius),
+            ripple_alpha_held(down, peak),
+        ),
+        Some(confirm) => {
+            let since = now_ms - confirm;
+            if since < 0 {
+                return None;
+            }
+            if since >= RIPPLE_FADE_OUT_MS {
+                return None;
+            }
+            let release = confirm - press.press_start_tick;
+            (
+                ripple_radius_confirmed(release, since, max_radius),
+                ripple_alpha_confirmed(since, peak),
+            )
+        }
+    };
+    if radius <= 0 || alpha <= 0 {
+        None
+    } else {
+        Some((radius, alpha))
+    }
 }
 
-/// Legacy linear progress retained for the original primitive test. The
-/// Flutter-accurate draw path calls `ripple_radius`/`ripple_alpha` directly
-/// with elapsed time and does not use this function.
+/// Legacy linear progress retained for the original primitive callers.
 pub fn ripple_progress(elapsed_ms: i64, duration_ms: i64) -> i64 {
     let d = duration_ms.max(1);
     (elapsed_ms.clamp(0, d) as i128 * UNIT as i128 / d as i128) as i64
