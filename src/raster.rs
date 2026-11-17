@@ -543,8 +543,13 @@ impl Canvas {
         let limit = rad * rad;
         let x1 = (r.x + r.w).min(self.width as i64);
         let y1 = (r.y + r.h).min(self.height as i64);
-        for y in r.y.max(0)..y1 {
-            for x in r.x.max(0)..x1 {
+        let clip = self.effective_clip();
+        let y_from = r.y.max(clip.y).max(0);
+        let y_to = y1.min(clip.y + clip.h);
+        let x_from = r.x.max(clip.x).max(0);
+        let x_to = x1.min(clip.x + clip.w);
+        for y in y_from..y_to {
+            for x in x_from..x_to {
                 if self.edge_aa {
                     let cov = Self::circle_coverage(cx, cy, limit * EDGE_AA * EDGE_AA, 0, x, y);
                     self.set_covered(x, y, c, cov);
@@ -572,8 +577,13 @@ impl Canvas {
         let inner = inner * inner;
         let x1 = (r.x + r.w).min(self.width as i64);
         let y1 = (r.y + r.h).min(self.height as i64);
-        for y in r.y.max(0)..y1 {
-            for x in r.x.max(0)..x1 {
+        let clip = self.effective_clip();
+        let y_from = r.y.max(clip.y).max(0);
+        let y_to = y1.min(clip.y + clip.h);
+        let x_from = r.x.max(clip.x).max(0);
+        let x_to = x1.min(clip.x + clip.w);
+        for y in y_from..y_to {
+            for x in x_from..x_to {
                 if self.edge_aa {
                     let s = EDGE_AA * EDGE_AA;
                     let cov = Self::circle_coverage(cx, cy, outer * s, inner * s, x, y);
