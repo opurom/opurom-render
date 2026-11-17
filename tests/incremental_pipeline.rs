@@ -258,7 +258,10 @@ fn sliver_scroll_only_dirties_rows_entering_the_window() {
 
 #[test]
 fn gesture_arena_golden_scroll_vs_click_and_drag_vs_long_press() {
-    use opurom_render::{Gesture, GestureEngine, GestureKind, Rect, DRAG_THRESHOLD, LONG_PRESS_MS};
+    use opurom_render::{
+        Gesture, GestureEngine, GestureKind, PointerEvent, PointerKind, Rect, DRAG_THRESHOLD,
+        LONG_PRESS_MS,
+    };
     // Both canonical arena outcomes reduce to a stable (winner, rejected) pair.
     fn fingerprint(engine: &GestureEngine) -> String {
         let w = engine.arena_winner().map(|k| k.name()).unwrap_or("none");
@@ -288,9 +291,20 @@ fn gesture_arena_golden_scroll_vs_click_and_drag_vs_long_press() {
             h: 200,
         },
     );
-    assert_eq!(click.on_down(1, 40, 40, 0), None);
-    assert_eq!(click.on_move(1, 45, 43, 10), None);
-    assert_eq!(click.on_up(1, 45, 43, 30), Some(Gesture::Tap));
+    assert_eq!(
+        click.on_down(1, &PointerEvent::at(PointerKind::Down, 40, 40, 0)),
+        None
+    );
+    assert_eq!(
+        click.on_move(1, &PointerEvent::at(PointerKind::Move, 45, 43, 10)),
+        None
+    );
+    assert_eq!(
+        click.on_up(1, &PointerEvent::at(PointerKind::Up, 45, 43, 30)),
+        None
+    );
+    // The first tap waits for the double-tap window and the tick awards Tap.
+    assert_eq!(click.on_tick(300), Some(Gesture::Tap));
     assert_eq!(fingerprint(&click), "tap|doubleTap,drag,longPress");
 
     let mut scroll = GestureEngine::new();
@@ -303,15 +317,18 @@ fn gesture_arena_golden_scroll_vs_click_and_drag_vs_long_press() {
             h: 200,
         },
     );
-    assert_eq!(scroll.on_down(1, 40, 40, 100), None);
     assert_eq!(
-        scroll.on_move(1, 40, 70, 110),
+        scroll.on_down(1, &PointerEvent::at(PointerKind::Down, 40, 40, 100)),
+        None
+    );
+    assert_eq!(
+        scroll.on_move(1, &PointerEvent::at(PointerKind::Move, 40, 70, 110)),
         Some(Gesture::Drag { dx: 0, dy: 30 })
     );
     assert_eq!(fingerprint(&scroll), "drag|doubleTap,longPress,tap");
 
-    // Golden 2: drag vs long press on the same event — long press outranks
-    // drag by the fixed priority table, drag stays rejected/inert.
+    // Golden 2: long press accepts on its tick before a later drag move, so
+    // drag is rejected and stays inert.
     let mut tie = GestureEngine::new();
     tie.add_node(
         1,
@@ -322,14 +339,22 @@ fn gesture_arena_golden_scroll_vs_click_and_drag_vs_long_press() {
             h: 200,
         },
     );
-    assert_eq!(tie.on_down(1, 10, 10, 0), None);
     assert_eq!(
-        tie.on_move(1, 10 + DRAG_THRESHOLD + 1, 10, LONG_PRESS_MS),
-        Some(Gesture::LongPress)
+        tie.on_down(1, &PointerEvent::at(PointerKind::Down, 10, 10, 0)),
+        None
     );
+    assert_eq!(tie.on_tick(LONG_PRESS_MS), Some(Gesture::LongPress));
     assert_eq!(fingerprint(&tie), "longPress|doubleTap,drag,tap");
     assert_eq!(
-        tie.on_move(1, 10 + DRAG_THRESHOLD + 2, 10, LONG_PRESS_MS + 1),
+        tie.on_move(
+            1,
+            &PointerEvent::at(
+                PointerKind::Move,
+                10 + DRAG_THRESHOLD + 2,
+                10,
+                LONG_PRESS_MS + 1
+            )
+        ),
         None
     );
 }

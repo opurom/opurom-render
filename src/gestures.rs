@@ -1,62 +1,80 @@
 //! Deterministic, headless gesture recognition.
 //!
-//! The engine is a pure integer-only state machine;
-//! `TapGestureRecognizer` (tap), `DoubleTapGestureRecognizer` (double tap),
-//! `MultiTapGestureRecognizer` long tap and `DragGestureRecognizer` (drag).
-//! Every timing and threshold is an integer millisecond or pixel value and no
-//! wall-clock or host query is used, so the same event stream always yields the
-//! same [`Gesture`] on every host.
+//! The engine is a pure integer-only state machine. Every timing and threshold
+//! is an integer millisecond or pixel value and no wall-clock or host query is
+//! used. The host injects [`PointerEvent`]s and ticks with the time it reads
+//! from its own clock; the engine only ever reads the supplied `time_ms`.
 //!
-//! Recognition semantics:
+//! Flutter anchors (flutter 3.50, packages/flutter/lib/src/gestures):
+//! - `constants.dart:29` long press 500ms, `:35` double tap 300ms,
+//!   `:39` min gap 40ms, `:49` double tap slop 100px, `:65` touch slop 18px.
+//! - `arena.dart:157` sweep: the first member wins, all others are rejected;
+//!   `arena.dart:140` hold delays the sweep until `release` (`:211`).
+//! - `tap.dart:348` a tap accepts on lift; there is no down-to-up timeout.
+//! - `long_press.dart:641` deadline expiry accepts; `:661` lift before the
+//!   deadline rejects; `:668` cancel resets; `:679` move past slop cancels.
+//! - `multitap.dart:340-345` the second tap accepts and emits double tap;
+//!   `:355` the 300ms timer resets the pending first tap.
+//! - `hit_test.dart:30` hit testing returns a leaf-to-root path.
 //!
-//! - A **tap** is a `down` followed by an `up` on the same node within
-//!   [`TAP_TIMEOUT_MS`], with the up still inside [`DRAG_THRESHOLD`] of the
-//!   down point. The down point must hit the node's laid-out [`Rect`].
-//! - A **double tap** is a second tap on the same node within
-//!   [`DOUBLE_TAP_INTERVAL_MS`] of the first, at least [`DOUBLE_TAP_MIN_MS`]
-//!   apart and within [`DOUBLE_TAP_SLOP`] of it. The first tap reports
-//!   [`Gesture::Tap`] and the second reports [`Gesture::DoubleTap`]; a caller
-//!   whose node is configured for `doubleTap` dispatches only the second.
-//! - A **long press** fires when a down is still active at
-//!   [`LONG_PRESS_MS`] after the down. The engine has no timer, so the check is
-//!   evaluated lazily on each event while the pointer is down; once it fires the
-//!   active down is consumed and further events on it report nothing.
-//! - A **drag** fires once the pointer moves more than [`DRAG_THRESHOLD`] from
-//!   the down point. Every later move on that down reports
-//!   [`Gesture::Drag`] with the delta from the down point.
-//!
-//! Gesture arena arbitration:
-//!
-//! The four recognizers (tap, double tap, long press, drag — drag being the
-//! recognizer that drives a scroll) compete in one arena per pointer sequence,
-//! opened at `down` and closed when the sequence ends:
-//!
-//! - The **first accept wins**. `drag` accepts on the first `move` past
-//!   [`DRAG_THRESHOLD`]; `longPress` accepts once the elapsed time reaches
-//!   [`LONG_PRESS_MS`]; `tap` and `doubleTap` stay pending to `up` and reject
-//!   themselves the moment the displacement exceeds [`DRAG_THRESHOLD`], since
-//!   they can no longer win.
-//! - Rejecting the losers makes them inert: only the winner emits afterwards.
-//!   A `drag` winner keeps emitting deltas; `longPress`/`tap`/`doubleTap`
-//!   emit once and the sequence is consumed.
-//! - At `up` with no winner, only members whose own conditions hold are
-//!   eligible and the fixed priority table picks among them. A bare `up` never
-//!   accepts a `drag`: a lift without a prior out-of-slop move is a tap or
-//!   nothing.
-//! - When several members become acceptable on the same event, the fixed
-//!   priority resolves it: `longPress` (3) > `drag` (2) > `doubleTap` (1) >
-//!   `tap` (0). This matches the engine's historical evaluation order, so a
-//!   single-recognizer sequence behaves exactly as before the arena existed.
-//!
-//! The winner stays readable through [`GestureEngine::arena_winner`] after the
-//! sequence ends, until the next `down` opens a fresh arena.
-//!
-//! The engine tracks a single active pointer. A second `down` while a pointer
-//! is still down, a `move`/`up` before any `down`, a `move`/`up` on a different
-//! node, and any event for an unregistered node are all ignored and report
-//! `None`.
+//! The five live phases are down -> pending -> triggered -> cancelled -> up:
+//! a down enters pending, a tick at the deadline triggers, leaving the hit
+//! region cancels, re-entering restarts the timer, and a lift closes the
+//! sequence. A cancelled long press can never fire.
 
 use crate::layout::Rect;
+
+/// The pointer signal carried by a [`PointerEvent`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerKind {
+    Down,
+    Move,
+    Up,
+    Cancel,
+}
+
+/// One host-supplied pointer signal. Local and global positions are kept
+/// separate so a scrolled or transformed host can move the pointer without
+/// the recognizer losing its node-local frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PointerEvent {
+    pub kind: PointerKind,
+    pub pointer_id: u32,
+    pub time_ms: i64,
+    pub local_x: i64,
+    pub local_y: i64,
+    pub global_x: i64,
+    pub global_y: i64,
+}
+
+impl PointerEvent {
+    /// Full constructor; callers supply every field explicitly.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        kind: PointerKind,
+        pointer_id: u32,
+        time_ms: i64,
+        local_x: i64,
+        local_y: i64,
+        global_x: i64,
+        global_y: i64,
+    ) -> PointerEvent {
+        PointerEvent {
+            kind,
+            pointer_id,
+            time_ms,
+            local_x,
+            local_y,
+            global_x,
+            global_y,
+        }
+    }
+
+    /// Pointer 0 with local == global, for untransformed single-pointer hosts.
+    pub fn at(kind: PointerKind, x: i64, y: i64, t: i64) -> PointerEvent {
+        PointerEvent::new(kind, 0, t, x, y, x, y)
+    }
+}
 
 /// How the node's `gesture` prop selects which recognized gesture it accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +106,16 @@ impl GestureKind {
             GestureKind::Drag => "drag",
         }
     }
+
+    /// A node with no explicit gesture prop competes with every recognizer.
+    const fn all() -> [GestureKind; 4] {
+        [
+            GestureKind::Tap,
+            GestureKind::DoubleTap,
+            GestureKind::LongPress,
+            GestureKind::Drag,
+        ]
+    }
 }
 
 /// A gesture recognized by [`GestureEngine`].
@@ -103,88 +131,141 @@ pub enum Gesture {
     },
 }
 
-/// Maximum time from a down to its up for the pair to be a tap.
-pub const TAP_TIMEOUT_MS: i64 = 150;
-/// Time a pointer must stay down before a long press fires.
+/// Time a pointer must stay down before a long press fires (`constants.dart:29`).
 pub const LONG_PRESS_MS: i64 = 500;
-/// Maximum time between the two taps of a double tap.
+/// Maximum time between the two taps of a double tap (`constants.dart:35`).
 pub const DOUBLE_TAP_INTERVAL_MS: i64 = 300;
-/// Minimum time between the two taps of a double tap.
+/// Minimum time between the two taps of a double tap (`constants.dart:39`).
 pub const DOUBLE_TAP_MIN_MS: i64 = 40;
-/// Maximum distance between the two taps of a double tap, in logical px.
+/// Maximum distance between the two taps of a double tap (`constants.dart:49`).
 pub const DOUBLE_TAP_SLOP: i64 = 100;
-/// Distance past which a move becomes a drag, in logical px.
+/// Distance past which a move becomes a drag (`constants.dart:65`).
 pub const DRAG_THRESHOLD: i64 = 18;
 
-/// Fixed arbitration priority of one arena member: when several members become
-/// acceptable on the same event, the highest value wins. The order mirrors the
-/// engine's historical evaluation order (long press, then drag, then double
-/// tap, then tap), so arena arbitration never changes a single-recognizer
-/// sequence's output.
-const fn arena_priority(kind: GestureKind) -> u8 {
-    match kind {
-        GestureKind::LongPress => 3,
-        GestureKind::Drag => 2,
-        GestureKind::DoubleTap => 1,
-        GestureKind::Tap => 0,
-    }
+/// The five live states of one pointer sequence. `Idle` is the resting state
+/// between sequences and is not part of the loop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Phase {
+    #[default]
+    Idle,
+    Down,
+    Pending,
+    Triggered,
+    Cancelled,
+    Up,
 }
 
-/// The arbitration state of one pointer sequence: which of the four members
-/// has won, and which members are ruled out. Opened at `down`, decided at the
-/// first accept or at `up`; the winner stays readable until the next `down`.
+/// One arena member: a recognizer on one node of the hit path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Member {
+    node: u32,
+    kind: GestureKind,
+}
+
+/// The pointer arena. Members join in hit-path order (leaf to root), as in
+/// `GestureArenaManager.add` (`arena.dart:71`). The first explicit accept wins;
+/// otherwise the sweep at lift or timer release accepts the first surviving
+/// member (`arena.dart:157-171`).
 #[derive(Clone, Debug, Default)]
 struct Arena {
-    winner: Option<GestureKind>,
-    rejected: [bool; 4],
+    members: Vec<Member>,
+    rejected: Vec<bool>,
+    winner: Option<Member>,
+    held: bool,
+    pending_sweep: bool,
 }
 
 impl Arena {
-    /// Index of one member's slot in the fixed four-member table.
-    const fn slot(kind: GestureKind) -> usize {
-        match kind {
-            GestureKind::Tap => 0,
-            GestureKind::DoubleTap => 1,
-            GestureKind::LongPress => 2,
-            GestureKind::Drag => 3,
-        }
+    fn open(&mut self, members: Vec<Member>) {
+        *self = Arena {
+            rejected: vec![false; members.len()],
+            members,
+            ..Arena::default()
+        };
     }
 
-    /// Open a fresh arena for a new pointer sequence.
-    fn open(&mut self) {
-        *self = Arena::default();
+    fn is_rejected(&self, kind: GestureKind) -> bool {
+        self.members
+            .iter()
+            .zip(&self.rejected)
+            .any(|(m, r)| *r && m.kind == kind)
     }
 
-    /// Rule one member out; it can never win this sequence.
-    fn reject(&mut self, kind: GestureKind) {
-        self.rejected[Arena::slot(kind)] = true;
-    }
-
-    /// Accept one member: the first accept wins, every other member is
-    /// rejected at once.
-    fn accept(&mut self, kind: GestureKind) {
-        if self.winner.is_none() {
-            self.winner = Some(kind);
-            for other in [
-                GestureKind::Tap,
-                GestureKind::DoubleTap,
-                GestureKind::LongPress,
-                GestureKind::Drag,
-            ] {
-                if other != kind {
-                    self.reject(other);
-                }
+    fn reject(&mut self, node: u32, kind: GestureKind) {
+        for (m, r) in self.members.iter().zip(&mut self.rejected) {
+            if m.node == node && m.kind == kind {
+                *r = true;
             }
         }
     }
 
-    /// The member that won the current sequence, readable after it ends.
-    fn winner(&self) -> Option<GestureKind> {
+    fn unreject(&mut self, node: u32, kind: GestureKind) {
+        for (m, r) in self.members.iter().zip(&mut self.rejected) {
+            if m.node == node && m.kind == kind {
+                *r = false;
+            }
+        }
+    }
+
+    fn has(&self, node: u32, kind: GestureKind) -> bool {
+        self.members
+            .iter()
+            .any(|m| m.node == node && m.kind == kind)
+    }
+
+    /// First explicit accept wins and rejects every other member.
+    fn accept(&mut self, node: u32, kind: GestureKind) -> bool {
+        if self.winner.is_some() {
+            return false;
+        }
+        let Some(member) = self
+            .members
+            .iter()
+            .find(|m| m.node == node && m.kind == kind)
+            .copied()
+        else {
+            return false;
+        };
+        self.winner = Some(member);
+        for (i, m) in self.members.iter().enumerate() {
+            if m != &member {
+                self.rejected[i] = true;
+            }
+        }
+        true
+    }
+
+    fn winner(&self) -> Option<Member> {
         self.winner
     }
 
-    fn is_rejected(&self, kind: GestureKind) -> bool {
-        self.rejected[Arena::slot(kind)]
+    /// Delay the sweep while a double-tap window is open (`arena.dart:140`).
+    fn hold(&mut self) {
+        self.held = true;
+    }
+
+    fn release(&mut self) -> Option<Member> {
+        if !self.held {
+            return None;
+        }
+        self.held = false;
+        self.pending_sweep = false;
+        self.sweep()
+    }
+
+    /// First surviving member wins (`arena.dart:157-171`).
+    fn sweep(&mut self) -> Option<Member> {
+        if self.winner.is_some() {
+            return self.winner;
+        }
+        if self.held {
+            self.pending_sweep = true;
+            return None;
+        }
+        let first = (0..self.members.len()).find(|i| !self.rejected[*i])?;
+        let member = self.members[first];
+        self.accept(member.node, member.kind);
+        Some(member)
     }
 }
 
@@ -192,9 +273,14 @@ impl Arena {
 #[derive(Clone, Copy, Debug)]
 struct Down {
     node: u32,
-    x: i64,
-    y: i64,
+    pointer_id: u32,
+    local_x: i64,
+    local_y: i64,
+    global_x: i64,
+    global_y: i64,
     t: i64,
+    /// Restarted when the pointer leaves and re-enters the hit region.
+    origin_t: i64,
 }
 
 /// The most recent completed tap that may start a double tap.
@@ -206,14 +292,20 @@ struct TapMark {
     t: i64,
 }
 
+#[derive(Clone, Debug)]
+struct NodeEntry {
+    id: u32,
+    rect: Rect,
+    parent: Option<u32>,
+    gesture: Option<GestureKind>,
+}
+
 /// Pure, deterministic gesture recognizer.
-///
-/// Register nodes in draw order (the order returned by `layout`); the last
-/// registered node containing a point is the top-most one.
 #[derive(Clone, Debug, Default)]
 pub struct GestureEngine {
-    nodes: Vec<(u32, Rect)>,
+    nodes: Vec<NodeEntry>,
     down: Option<Down>,
+    phase: Phase,
     last_tap: Option<TapMark>,
     arena: Arena,
 }
@@ -223,195 +315,360 @@ impl GestureEngine {
         GestureEngine::default()
     }
 
-    /// Registers a node's laid-out rect in draw order. Re-registering an id is
-    /// a no-op so a stale rect cannot create a duplicate entry.
+    /// Registers a node in draw order (the order returned by `layout`).
+    /// A node without a gesture prop competes with all four recognizers.
     pub fn add_node(&mut self, id: u32, rect: Rect) {
-        if self.nodes.iter().any(|(node, _)| *node == id) {
+        self.add_node_with(id, rect, None, None);
+    }
+
+    /// Registers a node with its parent id and optional IR gesture prop.
+    /// Re-registering an id is a no-op so a stale rect cannot duplicate an entry.
+    pub fn add_node_with(
+        &mut self,
+        id: u32,
+        rect: Rect,
+        parent: Option<u32>,
+        gesture: Option<GestureKind>,
+    ) {
+        if self.nodes.iter().any(|n| n.id == id) {
             return;
         }
-        self.nodes.push((id, rect));
+        self.nodes.push(NodeEntry {
+            id,
+            rect,
+            parent,
+            gesture,
+        });
     }
 
-    /// Returns the top-most registered node whose rect contains `(x, y)`.
+    /// Top-most registered node containing `(x, y)` (legacy single-hit API).
     pub fn hit_test(&self, x: i64, y: i64) -> Option<u32> {
-        self.nodes
+        self.hit_test_path(x, y).first().copied()
+    }
+
+    /// Leaf-to-root path of registered nodes containing `(x, y)`
+    /// (`hit_test.dart:30`). The leaf is first; event dispatch consumes on the
+    /// first node that produces a gesture.
+    pub fn hit_test_path(&self, x: i64, y: i64) -> Vec<u32> {
+        let Some(leaf) = self
+            .nodes
             .iter()
             .rev()
-            .find(|(_, rect)| hit(rect, x, y))
-            .map(|(node, _)| *node)
+            .find(|n| hit(&n.rect, x, y))
+            .map(|n| n.id)
+        else {
+            return Vec::new();
+        };
+        let mut path = vec![leaf];
+        let mut cursor = Some(leaf);
+        while let Some(id) = cursor {
+            let parent = self
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .and_then(|n| n.parent);
+            let Some(pid) = parent else { break };
+            let Some(parent_node) = self.nodes.iter().find(|n| n.id == pid) else {
+                break;
+            };
+            if hit(&parent_node.rect, x, y) {
+                path.push(pid);
+                cursor = Some(pid);
+            } else {
+                break;
+            }
+        }
+        path
     }
 
-    /// Starts a gesture on `node_id` at `(x, y)` at time `t`.
-    ///
-    /// Returns `None`: when a pointer is already down, the node is unknown, or
-    /// the point does not hit the node's laid-out rect.
-    pub fn on_down(&mut self, node_id: u32, x: i64, y: i64, t: i64) -> Option<Gesture> {
-        if self.down.is_some() {
-            return None;
+    /// Dispatches one event along the hit path; the first node that yields a
+    /// gesture consumes the event and stops propagation.
+    pub fn dispatch(&mut self, event: &PointerEvent) -> Option<(u32, Gesture)> {
+        let path = self.hit_test_path(event.global_x, event.global_y);
+        let node = path.first().copied()?;
+        let gesture = match event.kind {
+            PointerKind::Down => self.on_down(node, event),
+            PointerKind::Move => self.on_move(node, event),
+            PointerKind::Up => self.on_up(node, event),
+            PointerKind::Cancel => self.on_cancel(node, event),
+        }?;
+        Some((node, gesture))
+    }
+
+    /// The next host tick the engine needs: the long-press deadline or the
+    /// double-tap window end, whichever comes first. `None` when idle.
+    pub fn next_deadline_ms(&self) -> Option<i64> {
+        let mut deadline = None;
+        if let Some(down) = self.down {
+            if self.phase == Phase::Pending
+                && self.arena.has(down.node, GestureKind::LongPress)
+                && !self.arena.is_rejected(GestureKind::LongPress)
+            {
+                deadline = Some(down.origin_t.saturating_add(LONG_PRESS_MS));
+            }
         }
-        let Some((_, rect)) = self.find(node_id) else {
-            return None;
-        };
-        if !hit(&rect, x, y) {
-            return None;
-        }
-        // A new down outside the double-tap window (or too close for touch
-        // noise) starts a fresh series.
         if let Some(mark) = self.last_tap {
-            let gap = t.saturating_sub(mark.t);
-            if gap > DOUBLE_TAP_INTERVAL_MS
+            let tap_deadline = mark.t.saturating_add(DOUBLE_TAP_INTERVAL_MS);
+            deadline = Some(deadline.map_or(tap_deadline, |d| d.min(tap_deadline)));
+        }
+        deadline
+    }
+
+    /// Starts a sequence. The pointer id and both coordinate frames are kept
+    /// verbatim; only events from this pointer can continue the sequence.
+    pub fn on_down(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
+        if event.kind != PointerKind::Down || self.down.is_some() {
+            return None;
+        }
+        let entry = self.nodes.iter().find(|n| n.id == node_id)?;
+        if !hit(&entry.rect, event.local_x, event.local_y) {
+            return None;
+        }
+        if let Some(mark) = self.last_tap {
+            let gap = event.time_ms.saturating_sub(mark.t);
+            if mark.node != node_id
+                || gap > DOUBLE_TAP_INTERVAL_MS
                 || gap < DOUBLE_TAP_MIN_MS
-                || !within(x, y, mark.x, mark.y, DOUBLE_TAP_SLOP)
+                || !within(
+                    event.local_x,
+                    event.local_y,
+                    mark.x,
+                    mark.y,
+                    DOUBLE_TAP_SLOP,
+                )
             {
                 self.last_tap = None;
             }
         }
+        let path = self.hit_test_path(event.global_x, event.global_y);
+        let mut members = Vec::new();
+        for id in path {
+            let node = self.nodes.iter().find(|n| n.id == id)?;
+            match node.gesture {
+                Some(kind) => members.push(Member { node: id, kind }),
+                None => {
+                    for kind in GestureKind::all() {
+                        members.push(Member { node: id, kind });
+                    }
+                }
+            }
+        }
+        self.arena.open(members);
         self.down = Some(Down {
             node: node_id,
-            x,
-            y,
-            t,
+            pointer_id: event.pointer_id,
+            local_x: event.local_x,
+            local_y: event.local_y,
+            global_x: event.global_x,
+            global_y: event.global_y,
+            t: event.time_ms,
+            origin_t: event.time_ms,
         });
-        // Every recognizer joins a fresh arena for this pointer sequence.
-        self.arena.open();
+        self.phase = Phase::Down;
+        self.phase = Phase::Pending;
         None
     }
 
-    /// Moves the active pointer to `(x, y)` at time `t`.
-    ///
-    /// Returns `None` before a down, on a different node, while a long press
-    /// has consumed the down, or while the move is still within the drag
-    /// threshold. Otherwise returns [`Gesture::LongPress`] at the threshold or
-    /// [`Gesture::Drag`] with the delta from the down point.
-    pub fn on_move(&mut self, node_id: u32, x: i64, y: i64, t: i64) -> Option<Gesture> {
-        let Some(down) = self.down else {
-            return None;
-        };
-        if down.node != node_id {
+    /// Moves the active pointer. Leaving the node rect cancels the long-press
+    /// timer; re-entering restarts it at the re-entry time. Crossing the drag
+    /// slop accepts drag and rejects the other members.
+    pub fn on_move(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
+        if event.kind != PointerKind::Move {
             return None;
         }
-        // A decided arena lets only the drag winner keep emitting deltas; a
-        // long press or tap winner already consumed the sequence.
+        let Some(down) = self.down else { return None };
+        if down.node != node_id || down.pointer_id != event.pointer_id {
+            return None;
+        }
         if let Some(winner) = self.arena.winner() {
-            if winner == GestureKind::Drag {
+            if winner.kind == GestureKind::Drag {
                 return Some(Gesture::Drag {
-                    dx: x.saturating_sub(down.x),
-                    dy: y.saturating_sub(down.y),
+                    dx: event.local_x.saturating_sub(down.local_x),
+                    dy: event.local_y.saturating_sub(down.local_y),
                 });
             }
             return None;
         }
-        let displaced = !within(x, y, down.x, down.y, DRAG_THRESHOLD);
+        let rect = self.nodes.iter().find(|n| n.id == node_id)?.rect;
+        let inside = hit(&rect, event.local_x, event.local_y);
+        if inside {
+            if self.phase == Phase::Cancelled {
+                self.phase = Phase::Pending;
+                if let Some(d) = self.down.as_mut() {
+                    d.origin_t = event.time_ms;
+                }
+                for kind in GestureKind::all() {
+                    self.arena.unreject(node_id, kind);
+                }
+            }
+        } else {
+            self.phase = Phase::Cancelled;
+            for kind in GestureKind::all() {
+                self.arena.reject(node_id, kind);
+            }
+            return None;
+        }
+        let displaced = !within(
+            event.local_x,
+            event.local_y,
+            down.local_x,
+            down.local_y,
+            DRAG_THRESHOLD,
+        );
         if displaced {
-            // Past the slop the tap members can no longer win this sequence.
-            self.arena.reject(GestureKind::Tap);
-            self.arena.reject(GestureKind::DoubleTap);
-        }
-        // Same-event accept tie resolved by the fixed priority table.
-        let accepted = [
-            (t.saturating_sub(down.t) >= LONG_PRESS_MS).then_some(GestureKind::LongPress),
-            displaced.then_some(GestureKind::Drag),
-        ]
-        .into_iter()
-        .flatten()
-        .max_by_key(|kind| arena_priority(*kind));
-        match accepted {
-            Some(GestureKind::LongPress) => {
-                self.arena.accept(GestureKind::LongPress);
-                Some(Gesture::LongPress)
+            self.arena.reject(node_id, GestureKind::Tap);
+            self.arena.reject(node_id, GestureKind::DoubleTap);
+            if self.arena.accept(node_id, GestureKind::Drag) {
+                return Some(Gesture::Drag {
+                    dx: event.local_x.saturating_sub(down.local_x),
+                    dy: event.local_y.saturating_sub(down.local_y),
+                });
             }
-            Some(GestureKind::Drag) => {
-                self.arena.accept(GestureKind::Drag);
-                Some(Gesture::Drag {
-                    dx: x.saturating_sub(down.x),
-                    dy: y.saturating_sub(down.y),
-                })
-            }
-            _ => None,
         }
+        None
     }
 
-    /// Lifts the active pointer at `(x, y)` at time `t`.
-    ///
-    /// Returns `None` before a down, on a different node, after a long press
-    /// or drag has consumed the down, or when the pair is neither a tap nor a
-    /// double tap. A completed tap reports [`Gesture::Tap`]; a second qualifying
-    /// tap reports [`Gesture::DoubleTap`].
-    pub fn on_up(&mut self, node_id: u32, x: i64, y: i64, t: i64) -> Option<Gesture> {
-        let Some(down) = self.down else {
-            return None;
-        };
-        // Events for another node are malformed input: ignore them and keep the
-        // active down, so a later up on the right node still completes the tap.
-        if down.node != node_id {
+    /// Lifts the active pointer. A first tap holds the arena for the
+    /// double-tap window; a second qualifying tap accepts double tap;
+    /// otherwise the sweep accepts the first surviving member.
+    pub fn on_up(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
+        if event.kind != PointerKind::Up {
             return None;
         }
-        // A decided arena ends the sequence silently at the lift.
+        let Some(down) = self.down else { return None };
+        if down.node != node_id || down.pointer_id != event.pointer_id {
+            return None;
+        }
         if self.arena.winner().is_some() {
             self.down = None;
+            self.phase = Phase::Up;
             return None;
         }
-        let elapsed = t.saturating_sub(down.t);
-        let tap_ok = within(x, y, down.x, down.y, DRAG_THRESHOLD) && elapsed <= TAP_TIMEOUT_MS;
+        let tap_ok = self.phase != Phase::Cancelled
+            && within(
+                event.local_x,
+                event.local_y,
+                down.local_x,
+                down.local_y,
+                DRAG_THRESHOLD,
+            );
         let double_ok = tap_ok
             && self.last_tap.is_some_and(|mark| {
-                let gap = t.saturating_sub(mark.t);
+                let gap = down.t.saturating_sub(mark.t);
                 gap >= DOUBLE_TAP_MIN_MS
                     && gap <= DOUBLE_TAP_INTERVAL_MS
-                    && within(x, y, mark.x, mark.y, DOUBLE_TAP_SLOP)
                     && mark.node == node_id
+                    && within(
+                        event.local_x,
+                        event.local_y,
+                        mark.x,
+                        mark.y,
+                        DOUBLE_TAP_SLOP,
+                    )
             });
-        // Nobody accepted during the sequence: the lift itself decides among
-        // the members whose own conditions hold, by the fixed priority table.
-        // A bare lift never accepts a drag.
-        let winner = [
-            (elapsed >= LONG_PRESS_MS).then_some(GestureKind::LongPress),
-            double_ok.then_some(GestureKind::DoubleTap),
-            tap_ok.then_some(GestureKind::Tap),
-        ]
-        .into_iter()
-        .flatten()
-        .max_by_key(|kind| arena_priority(*kind));
         self.down = None;
-        match winner {
-            Some(GestureKind::LongPress) => {
-                self.arena.accept(GestureKind::LongPress);
-                Some(Gesture::LongPress)
-            }
-            Some(GestureKind::DoubleTap) => {
-                self.last_tap = None;
-                self.arena.accept(GestureKind::DoubleTap);
-                Some(Gesture::DoubleTap)
-            }
-            Some(GestureKind::Tap) => {
-                self.last_tap = Some(TapMark {
-                    node: node_id,
-                    x,
-                    y,
-                    t,
-                });
-                self.arena.accept(GestureKind::Tap);
-                Some(Gesture::Tap)
-            }
-            _ => None,
+        self.phase = Phase::Up;
+        if double_ok {
+            self.arena.accept(node_id, GestureKind::DoubleTap);
+            self.last_tap = None;
+            let _ = self.arena.release();
+            return Some(Gesture::DoubleTap);
+        }
+        if tap_ok
+            && self.last_tap.is_none()
+            && self.arena.has(node_id, GestureKind::DoubleTap)
+            && !self.arena.is_rejected(GestureKind::DoubleTap)
+        {
+            // Wait for the 300ms window; a tick awards the tap by sweep.
+            self.last_tap = Some(TapMark {
+                node: node_id,
+                x: event.local_x,
+                y: event.local_y,
+                t: down.t,
+            });
+            self.arena.hold();
+            return None;
+        }
+        self.arena.sweep().and_then(|m| gesture_of(m.kind))
+    }
+
+    /// Cancels the sequence without emitting a gesture (`long_press.dart:668`).
+    pub fn on_cancel(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
+        if event.kind != PointerKind::Cancel {
+            return None;
+        }
+        let Some(down) = self.down else { return None };
+        if down.node != node_id || down.pointer_id != event.pointer_id {
+            return None;
+        }
+        for kind in GestureKind::all() {
+            self.arena.reject(node_id, kind);
+        }
+        self.down = None;
+        self.phase = Phase::Cancelled;
+        None
+    }
+
+    /// Routes an event by its `kind`, using the caller's node id.
+    pub fn on_event(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
+        match event.kind {
+            PointerKind::Down => self.on_down(node_id, event),
+            PointerKind::Move => self.on_move(node_id, event),
+            PointerKind::Up => self.on_up(node_id, event),
+            PointerKind::Cancel => self.on_cancel(node_id, event),
         }
     }
 
-    /// The arena winner of the current (or just-ended) pointer sequence, until
-    /// the next `down` opens a fresh arena. `None` while undecided or when the
-    /// sequence ended with no winner.
-    pub fn arena_winner(&self) -> Option<GestureKind> {
-        self.arena.winner()
+    /// Host-injected timer. At the long-press deadline the recognizer accepts
+    /// (`long_press.dart:641`); at the double-tap deadline the held arena is
+    /// released and the sweep awards the plain tap (`multitap.dart:355`).
+    pub fn on_tick(&mut self, t: i64) -> Option<Gesture> {
+        if let Some(down) = self.down {
+            if self.phase == Phase::Pending
+                && t.saturating_sub(down.origin_t) >= LONG_PRESS_MS
+                && self.arena.has(down.node, GestureKind::LongPress)
+                && !self.arena.is_rejected(GestureKind::LongPress)
+            {
+                let node = down.node;
+                if self.arena.accept(node, GestureKind::LongPress) {
+                    self.phase = Phase::Triggered;
+                    return Some(Gesture::LongPress);
+                }
+            }
+            return None;
+        }
+        if let Some(mark) = self.last_tap {
+            if t.saturating_sub(mark.t) >= DOUBLE_TAP_INTERVAL_MS {
+                self.last_tap = None;
+                self.phase = Phase::Up;
+                return self.arena.release().and_then(|m| gesture_of(m.kind));
+            }
+        }
+        None
     }
 
-    /// Whether `kind` has been ruled out of the current arena by an accept or
-    /// by crossing the drag slop.
+    /// Current gesture phase.
+    pub fn phase(&self) -> Phase {
+        self.phase
+    }
+
+    /// Winner of the current (or just-ended) sequence.
+    pub fn arena_winner(&self) -> Option<GestureKind> {
+        self.arena.winner().map(|m| m.kind)
+    }
+
+    /// Whether a recognizer was ruled out in the current arena.
     pub fn arena_rejected(&self, kind: GestureKind) -> bool {
         self.arena.is_rejected(kind)
     }
+}
 
-    fn find(&self, id: u32) -> Option<(u32, Rect)> {
-        self.nodes.iter().find(|(node, _)| *node == id).copied()
+fn gesture_of(kind: GestureKind) -> Option<Gesture> {
+    match kind {
+        GestureKind::Tap => Some(Gesture::Tap),
+        GestureKind::DoubleTap => Some(Gesture::DoubleTap),
+        GestureKind::LongPress => Some(Gesture::LongPress),
+        GestureKind::Drag => None,
     }
 }
 
@@ -448,157 +705,188 @@ mod tests {
         Rect { x, y, w, h }
     }
 
-    /// A 200x200 node at the origin; one engine is enough for most cases.
     fn engine() -> GestureEngine {
         let mut engine = GestureEngine::new();
         engine.add_node(1, rect(0, 0, 200, 200));
         engine
     }
 
-    #[test]
-    fn tap_fires_once_on_down_up_on_the_same_node() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 10, 10, 0), None);
-        assert_eq!(engine.on_up(1, 10, 10, 10), Some(Gesture::Tap));
-        // The down is consumed: a second up reports nothing.
-        assert_eq!(engine.on_up(1, 10, 10, 20), None);
-    }
-
-    #[test]
-    fn double_tap_sequence_reports_tap_then_double_tap() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 10, 10, 0), None);
-        assert_eq!(engine.on_up(1, 10, 10, 10), Some(Gesture::Tap));
-        assert_eq!(engine.on_down(1, 10, 10, 60), None);
-        assert_eq!(engine.on_up(1, 10, 10, 80), Some(Gesture::DoubleTap));
-        // A third tap starts a fresh series.
-        assert_eq!(engine.on_down(1, 10, 10, 200), None);
-        assert_eq!(engine.on_up(1, 10, 10, 210), Some(Gesture::Tap));
-    }
-
-    #[test]
-    fn double_tap_does_not_merge_across_the_interval() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 10, 10, 0), None);
-        assert_eq!(engine.on_up(1, 10, 10, 10), Some(Gesture::Tap));
-        // The second down lands past the double-tap interval.
-        assert_eq!(engine.on_down(1, 10, 10, 400), None);
-        assert_eq!(engine.on_up(1, 10, 10, 410), Some(Gesture::Tap));
-    }
-
-    #[test]
-    fn long_press_fires_at_threshold_and_not_before() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 10, 10, 0), None);
-        assert_eq!(engine.on_move(1, 10, 10, LONG_PRESS_MS - 1), None);
+    fn down(e: &mut GestureEngine, node: u32, x: i64, y: i64, t: i64) {
         assert_eq!(
-            engine.on_move(1, 10, 10, LONG_PRESS_MS),
-            Some(Gesture::LongPress)
-        );
-        // It fires once and ignores repeats.
-        assert_eq!(engine.on_move(1, 10, 10, LONG_PRESS_MS + 1), None);
-        assert_eq!(engine.on_up(1, 10, 10, LONG_PRESS_MS + 2), None);
-    }
-
-    #[test]
-    fn long_press_fires_on_lift_after_the_threshold() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 10, 10, 0), None);
-        assert_eq!(
-            engine.on_up(1, 10, 10, LONG_PRESS_MS),
-            Some(Gesture::LongPress)
+            e.on_down(node, &PointerEvent::at(PointerKind::Down, x, y, t)),
+            None
         );
     }
 
+    fn move_to(e: &mut GestureEngine, node: u32, x: i64, y: i64, t: i64) -> Option<Gesture> {
+        e.on_move(node, &PointerEvent::at(PointerKind::Move, x, y, t))
+    }
+
+    fn up(e: &mut GestureEngine, node: u32, x: i64, y: i64, t: i64) -> Option<Gesture> {
+        e.on_up(node, &PointerEvent::at(PointerKind::Up, x, y, t))
+    }
+
     #[test]
-    fn drag_computes_the_delta_from_the_down_point() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 100, 100, 0), None);
-        // Still inside the slop: no drag yet.
-        assert_eq!(engine.on_move(1, 110, 100, 10), None);
+    fn tap_has_no_down_to_up_timeout() {
+        let mut e = engine();
+        down(&mut e, 1, 10, 10, 0);
+        // 5000ms lift is still a tap: Flutter has no TAP_TIMEOUT_MS.
+        assert_eq!(up(&mut e, 1, 10, 10, 5000), None);
+        assert_eq!(e.on_tick(DOUBLE_TAP_INTERVAL_MS), Some(Gesture::Tap));
+    }
+
+    #[test]
+    fn drag_reports_delta_from_the_down_point() {
+        let mut e = engine();
+        down(&mut e, 1, 100, 100, 0);
+        assert_eq!(move_to(&mut e, 1, 110, 100, 10), None);
         assert_eq!(
-            engine.on_move(1, 140, 90, 20),
+            move_to(&mut e, 1, 140, 90, 20),
             Some(Gesture::Drag { dx: 40, dy: -10 })
         );
-        // Later moves keep reporting the delta from the original down point.
         assert_eq!(
-            engine.on_move(1, 150, 120, 30),
+            move_to(&mut e, 1, 150, 120, 30),
             Some(Gesture::Drag { dx: 50, dy: 20 })
         );
-        // The lift ends the drag without a second recognition.
-        assert_eq!(engine.on_up(1, 150, 120, 40), None);
+        assert_eq!(up(&mut e, 1, 150, 120, 40), None);
     }
 
     #[test]
-    fn move_before_down_is_ignored() {
-        let mut engine = engine();
-        assert_eq!(engine.on_move(1, 50, 50, 10), None);
-        assert_eq!(engine.on_down(1, 50, 50, 20), None);
-        assert_eq!(engine.on_up(1, 50, 50, 30), Some(Gesture::Tap));
+    fn unknown_node_and_orphan_events_are_ignored() {
+        let mut e = engine();
+        assert_eq!(
+            e.on_down(99, &PointerEvent::at(PointerKind::Down, 10, 10, 0)),
+            None
+        );
+        assert_eq!(move_to(&mut e, 1, 50, 50, 10), None);
+        assert_eq!(up(&mut e, 1, 50, 50, 20), None);
+        down(&mut e, 1, 50, 50, 30);
+        assert_eq!(
+            e.on_up(2, &PointerEvent::at(PointerKind::Up, 50, 50, 40)),
+            None
+        );
+        assert_eq!(up(&mut e, 1, 50, 50, 50), None);
+        assert_eq!(e.on_tick(30 + DOUBLE_TAP_INTERVAL_MS), Some(Gesture::Tap));
     }
 
     #[test]
-    fn up_before_down_is_ignored() {
-        let mut engine = engine();
-        assert_eq!(engine.on_up(1, 50, 50, 10), None);
-        // The engine is still idle and a later down/up still taps.
-        assert_eq!(engine.on_down(1, 50, 50, 20), None);
-        assert_eq!(engine.on_up(1, 50, 50, 30), Some(Gesture::Tap));
+    fn extreme_coordinates_and_times_never_panic() {
+        let mut e = engine();
+        down(&mut e, 1, 50, 50, 0);
+        assert_eq!(move_to(&mut e, 1, i64::MAX, i64::MIN, 10), None);
+        let mut e = engine();
+        down(&mut e, 1, 50, 50, i64::MAX);
+        assert_eq!(up(&mut e, 1, 50, 50, i64::MIN), None);
+        assert_eq!(e.next_deadline_ms(), Some(i64::MAX));
+    }
+
+    // ---- four requested acceptance scenarios ----
+
+    #[test]
+    fn long_press_fires_on_tick_and_cancel_restarts_the_timer() {
+        let mut e = engine();
+        down(&mut e, 1, 100, 100, 0);
+        assert_eq!(e.phase(), Phase::Pending);
+        assert_eq!(e.next_deadline_ms(), Some(LONG_PRESS_MS));
+        assert_eq!(e.on_tick(LONG_PRESS_MS - 1), None);
+        assert_eq!(e.on_tick(LONG_PRESS_MS), Some(Gesture::LongPress));
+        assert_eq!(e.phase(), Phase::Triggered);
+        assert_eq!(e.arena_winner(), Some(GestureKind::LongPress));
+        assert_eq!(up(&mut e, 1, 100, 100, LONG_PRESS_MS + 1), None);
+
+        // Moving outside the node cancels; re-entering restarts at re-entry.
+        let mut e = engine();
+        down(&mut e, 1, 100, 100, 0);
+        assert_eq!(move_to(&mut e, 1, 300, 100, 100), None);
+        assert_eq!(e.phase(), Phase::Cancelled);
+        assert_eq!(e.on_tick(LONG_PRESS_MS), None);
+        assert_eq!(move_to(&mut e, 1, 100, 100, 700), None);
+        assert_eq!(e.phase(), Phase::Pending);
+        assert_eq!(e.next_deadline_ms(), Some(700 + LONG_PRESS_MS));
+        assert_eq!(e.on_tick(700 + LONG_PRESS_MS - 1), None);
+        assert_eq!(e.on_tick(700 + LONG_PRESS_MS), Some(Gesture::LongPress));
     }
 
     #[test]
-    fn events_on_a_different_node_are_ignored() {
-        let mut engine = GestureEngine::new();
-        engine.add_node(1, rect(0, 0, 100, 100));
-        engine.add_node(2, rect(0, 0, 100, 100));
-        assert_eq!(engine.on_down(1, 10, 10, 0), None);
-        assert_eq!(engine.on_move(2, 10, 10, 10), None);
-        assert_eq!(engine.on_up(2, 10, 10, 20), None);
-        // The original down is still live and can still tap.
-        assert_eq!(engine.on_up(1, 10, 10, 30), Some(Gesture::Tap));
+    fn double_tap_window_emits_double_or_downgrades_to_tap() {
+        let mut e = engine();
+        down(&mut e, 1, 20, 20, 0);
+        assert_eq!(up(&mut e, 1, 20, 20, 10), None);
+        assert_eq!(e.next_deadline_ms(), Some(DOUBLE_TAP_INTERVAL_MS));
+        down(&mut e, 1, 21, 21, 60);
+        assert_eq!(up(&mut e, 1, 21, 21, 80), Some(Gesture::DoubleTap));
+        assert_eq!(e.arena_winner(), Some(GestureKind::DoubleTap));
+
+        // No second tap: the tick releases the held arena and awards Tap.
+        let mut e = engine();
+        down(&mut e, 1, 20, 20, 0);
+        assert_eq!(up(&mut e, 1, 20, 20, 10), None);
+        assert_eq!(e.on_tick(DOUBLE_TAP_INTERVAL_MS - 1), None);
+        assert_eq!(e.on_tick(DOUBLE_TAP_INTERVAL_MS), Some(Gesture::Tap));
+        assert_eq!(e.arena_winner(), Some(GestureKind::Tap));
+
+        // Second tap past the window starts a fresh series.
+        let mut e = engine();
+        down(&mut e, 1, 20, 20, 0);
+        assert_eq!(up(&mut e, 1, 20, 20, 10), None);
+        assert_eq!(e.on_tick(DOUBLE_TAP_INTERVAL_MS), Some(Gesture::Tap));
+        down(&mut e, 1, 20, 20, 400);
+        assert_eq!(up(&mut e, 1, 20, 20, 410), None);
+        assert_eq!(e.on_tick(710), Some(Gesture::Tap));
     }
 
     #[test]
-    fn unknown_node_ids_are_ignored() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(99, 10, 10, 0), None);
-        assert_eq!(engine.on_move(99, 10, 10, 10), None);
-        assert_eq!(engine.on_up(99, 10, 10, 20), None);
+    fn conflicts_resolve_by_first_accept_then_sweep() {
+        // Scroll + click: drag accepts past slop, tap never fires.
+        let mut e = engine();
+        down(&mut e, 1, 40, 40, 0);
+        assert_eq!(move_to(&mut e, 1, 45, 43, 10), None);
+        assert_eq!(up(&mut e, 1, 45, 43, 30), None);
+        assert_eq!(e.on_tick(DOUBLE_TAP_INTERVAL_MS), Some(Gesture::Tap));
+        let mut e = engine();
+        down(&mut e, 1, 40, 40, 0);
+        assert_eq!(
+            move_to(&mut e, 1, 40, 70, 10),
+            Some(Gesture::Drag { dx: 0, dy: 30 })
+        );
+        assert!(e.arena_rejected(GestureKind::Tap));
+        assert_eq!(up(&mut e, 1, 40, 70, 20), None);
+
+        // Long press + drag: the tick accepts first, later drag moves are inert.
+        let mut e = engine();
+        down(&mut e, 1, 40, 40, 0);
+        assert_eq!(e.on_tick(LONG_PRESS_MS), Some(Gesture::LongPress));
+        assert!(e.arena_rejected(GestureKind::Drag));
+        assert_eq!(move_to(&mut e, 1, 90, 40, LONG_PRESS_MS + 1), None);
+
+        // Single + double: the second tap accepts before the sweep.
+        let mut e = engine();
+        down(&mut e, 1, 20, 20, 0);
+        assert_eq!(up(&mut e, 1, 20, 20, 10), None);
+        down(&mut e, 1, 22, 20, 60);
+        assert_eq!(up(&mut e, 1, 22, 20, 90), Some(Gesture::DoubleTap));
+        assert!(e.arena_rejected(GestureKind::Tap));
     }
 
     #[test]
-    fn a_down_outside_the_node_rect_is_ignored() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 1000, 1000, 0), None);
-        assert_eq!(engine.on_up(1, 1000, 1000, 10), None);
-    }
-
-    #[test]
-    fn two_nodes_at_the_same_point_resolve_to_the_top_most() {
-        let mut engine = GestureEngine::new();
-        engine.add_node(1, rect(0, 0, 100, 100));
-        engine.add_node(2, rect(0, 0, 100, 100));
-        assert_eq!(engine.hit_test(50, 50), Some(2));
-        // Outside both rects there is no hit.
-        assert_eq!(engine.hit_test(150, 50), None);
-        // Only the bottom node covers this point.
-        assert_eq!(engine.hit_test(150, 150), None);
-    }
-
-    #[test]
-    fn hit_helper_matches_inclusive_lower_and_exclusive_upper_edges() {
-        assert!(hit(&rect(10, 10, 20, 20), 10, 10));
-        assert!(hit(&rect(10, 10, 20, 20), 29, 29));
-        assert!(!hit(&rect(10, 10, 20, 20), 9, 10));
-        assert!(!hit(&rect(10, 10, 20, 20), 10, 30));
-        assert!(!hit(&rect(10, 10, 20, 20), 30, 10));
-        // Degenerate and extreme rects never panic.
-        assert!(!hit(&rect(10, 10, 0, 0), 10, 10));
-        assert!(!hit(
-            &rect(i64::MIN, i64::MIN, i64::MAX, i64::MAX),
-            i64::MAX,
-            i64::MAX
-        ));
+    fn hit_path_bubbles_leaf_to_root_and_consumption_stops() {
+        let mut e = GestureEngine::new();
+        e.add_node_with(1, rect(0, 0, 200, 200), None, Some(GestureKind::Drag));
+        e.add_node_with(2, rect(20, 20, 60, 60), Some(1), Some(GestureKind::Tap));
+        assert_eq!(e.hit_test(30, 30), Some(2));
+        assert_eq!(e.hit_test_path(30, 30), vec![2, 1]);
+        let event = PointerEvent::at(PointerKind::Down, 30, 30, 0);
+        assert_eq!(e.dispatch(&event), None);
+        // The leaf tap wins the sweep; the parent drag member is rejected.
+        let event = PointerEvent::at(PointerKind::Up, 30, 30, 10);
+        assert_eq!(e.dispatch(&event), Some((2, Gesture::Tap)));
+        assert_eq!(e.arena_winner(), Some(GestureKind::Tap));
+        assert!(e.arena_rejected(GestureKind::Drag));
+        // A move far away finds no leaf and does not reach the parent.
+        assert_eq!(
+            e.dispatch(&PointerEvent::at(PointerKind::Move, 190, 190, 20)),
+            None
+        );
     }
 
     #[test]
@@ -616,135 +904,16 @@ mod tests {
         assert_eq!(GestureKind::parse("swipe"), None);
     }
 
-    /// Gate 1: press on a button, move past the drag slop, release. The drag
-    /// member accepts first, the tap members are rejected, and the lift of a
-    /// decided sequence emits nothing.
     #[test]
-    fn drag_accepts_past_slop_and_tap_never_fires() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 20, 20, 0), None);
-        // Inside the slop: no member accepts yet.
-        assert_eq!(engine.on_move(1, 30, 20, 10), None);
-        assert_eq!(engine.arena_winner(), None);
-        // Past the slop: drag is the first accept.
-        assert_eq!(
-            engine.on_move(1, 60, 20, 20),
-            Some(Gesture::Drag { dx: 40, dy: 0 })
-        );
-        assert_eq!(engine.arena_winner(), Some(GestureKind::Drag));
-        assert!(engine.arena_rejected(GestureKind::Tap));
-        assert!(engine.arena_rejected(GestureKind::LongPress));
-        // The decided sequence ends silently at the lift: no tap.
-        assert_eq!(engine.on_up(1, 60, 20, 40), None);
-        assert_eq!(engine.on_up(1, 20, 20, 50), None);
-    }
-
-    /// Gate 2: a plain press-and-lift with no displacement lets the tap member
-    /// win at the lift, and drag/long press are rejected.
-    #[test]
-    fn tap_wins_a_lift_with_no_displacement() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 20, 20, 0), None);
-        assert_eq!(engine.on_up(1, 21, 21, 20), Some(Gesture::Tap));
-        assert_eq!(engine.arena_winner(), Some(GestureKind::Tap));
-        assert!(engine.arena_rejected(GestureKind::Drag));
-    }
-
-    /// Gate 3: inside a scroll region a drag-capable node still resolves a
-    /// click by threshold: a lift within the slop is a tap, a move past it is
-    /// a drag.
-    #[test]
-    fn scroll_region_click_is_resolved_by_the_threshold() {
-        // The scroll region: a node whose recognizers include drag.
-        let mut engine = engine();
-        // Click: small jitter, then lift, stays inside the slop.
-        assert_eq!(engine.on_down(1, 40, 40, 0), None);
-        assert_eq!(engine.on_move(1, 45, 43, 10), None);
-        assert_eq!(engine.on_up(1, 45, 43, 30), Some(Gesture::Tap));
-        // Drag: a move crosses the slop, the drag member wins for the sequence.
-        assert_eq!(engine.on_down(1, 40, 40, 100), None);
-        assert_eq!(
-            engine.on_move(1, 40, 70, 110),
-            Some(Gesture::Drag { dx: 0, dy: 30 })
-        );
-        assert_eq!(engine.arena_winner(), Some(GestureKind::Drag));
-        assert_eq!(engine.on_up(1, 40, 70, 130), None);
-    }
-
-    /// Gate 4: with nobody accepting during the sequence the lift decides by
-    /// the fixed priority — a held pointer resolves to long press, a second
-    /// qualifying tap resolves to double tap over plain tap.
-    #[test]
-    fn lift_without_an_accept_is_resolved_by_priority() {
-        let mut engine = engine();
-        // Held past LONG_PRESS_MS with no moves: long press outranks tap.
-        assert_eq!(engine.on_down(1, 10, 10, 0), None);
-        assert_eq!(
-            engine.on_up(1, 10, 10, LONG_PRESS_MS),
-            Some(Gesture::LongPress)
-        );
-        assert_eq!(engine.arena_winner(), Some(GestureKind::LongPress));
-        // A second qualifying tap: at that lift tap and doubleTap are both
-        // eligible and doubleTap has the higher priority.
-        let mut pair = GestureEngine::new();
-        pair.add_node(1, rect(0, 0, 200, 200));
-        assert_eq!(pair.on_down(1, 10, 10, 0), None);
-        assert_eq!(pair.on_up(1, 10, 10, 10), Some(Gesture::Tap));
-        assert_eq!(pair.on_down(1, 10, 10, 60), None);
-        assert_eq!(pair.on_up(1, 10, 10, 80), Some(Gesture::DoubleTap));
-        assert_eq!(pair.arena_winner(), Some(GestureKind::DoubleTap));
-        assert!(pair.arena_rejected(GestureKind::Tap));
-        // Nobody eligible: a lift past the tap timeout with no long press
-        // (early, then time jumps past the window on a fresh sequence) leaves
-        // the arena without a winner.
-        let mut undecided = GestureEngine::new();
-        undecided.add_node(1, rect(0, 0, 200, 200));
-        assert_eq!(undecided.on_down(1, 10, 10, 0), None);
-        assert_eq!(undecided.on_move(1, 14, 10, 10), None);
-        assert_eq!(undecided.on_up(1, 14, 10, TAP_TIMEOUT_MS + 1), None);
-        assert_eq!(undecided.arena_winner(), None);
-    }
-
-    /// A same-event tie on one move resolves by the fixed priority table:
-    /// elapsed past LONG_PRESS_MS and displacement past the slop arrive
-    /// together, long press (3) outranks drag (2), and drag stays inert.
-    #[test]
-    fn same_event_tie_follows_the_fixed_priority() {
-        let mut engine = engine();
-        assert_eq!(engine.on_down(1, 10, 10, 0), None);
-        assert_eq!(
-            engine.on_move(1, 10 + DRAG_THRESHOLD + 1, 10, LONG_PRESS_MS),
-            Some(Gesture::LongPress)
-        );
-        assert_eq!(engine.arena_winner(), Some(GestureKind::LongPress));
-        assert!(engine.arena_rejected(GestureKind::Drag));
-        // The drag member lost: later moves report nothing.
-        assert_eq!(
-            engine.on_move(1, 10 + DRAG_THRESHOLD + 2, 10, LONG_PRESS_MS + 1),
-            None
-        );
-        assert_eq!(engine.on_up(1, 10, 10, LONG_PRESS_MS + 2), None);
-    }
-
-    #[test]
-    fn extreme_coordinates_and_times_never_panic() {
-        let mut engine = GestureEngine::new();
-        engine.add_node(1, rect(0, 0, 100, 100));
-        assert_eq!(engine.on_down(1, 50, 50, 0), None);
-        // A huge move saturates the delta instead of overflowing.
-        assert_eq!(
-            engine.on_move(1, i64::MAX, i64::MIN, 10),
-            Some(Gesture::Drag {
-                dx: i64::MAX - 50,
-                dy: i64::MIN
-            })
-        );
-        assert_eq!(engine.on_up(1, i64::MAX, i64::MIN, 20), None);
-
-        // Time going backwards saturates to zero and still resolves deterministically.
-        let mut engine = GestureEngine::new();
-        engine.add_node(1, rect(0, 0, 100, 100));
-        assert_eq!(engine.on_down(1, 10, 10, i64::MAX), None);
-        assert_eq!(engine.on_up(1, 10, 10, i64::MIN), Some(Gesture::Tap));
+    fn hit_helper_handles_degenerate_and_extreme_rects() {
+        assert!(hit(&rect(10, 10, 20, 20), 10, 10));
+        assert!(hit(&rect(10, 10, 20, 20), 29, 29));
+        assert!(!hit(&rect(10, 10, 20, 20), 30, 10));
+        assert!(!hit(&rect(10, 10, 0, 0), 10, 10));
+        assert!(!hit(
+            &rect(i64::MIN, i64::MIN, i64::MAX, i64::MAX),
+            i64::MAX,
+            i64::MAX
+        ));
     }
 }
