@@ -48,6 +48,7 @@ pub mod particles;
 pub mod perf;
 pub mod primitives;
 pub mod raster;
+pub mod scroll_physics;
 pub mod svg;
 pub mod text_span;
 
