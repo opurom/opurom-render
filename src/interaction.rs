@@ -5,6 +5,7 @@
 //! always wins. Business states (`loading`/`success`/`error`) mask interaction
 //! feedback; their paint comes from the token constants below.
 
+use crate::anim::AnimValue;
 use crate::{Kind, LaidOut, Rgba};
 
 /// Thickness of the focus ring painted outside a focused node's rect.
@@ -496,6 +497,146 @@ pub fn is_interactive(kind: Kind) -> bool {
             | Kind::Tooltip
             | Kind::Extended(_)
     )
+}
+
+/// Transition paint is presentation state, not layout identity: a settled
+/// animated node must still compare equal to the same node without `animate`.
+#[derive(Clone, Debug, Default, Eq)]
+pub struct StatePaintSlot(pub Option<StatePaint>);
+
+impl PartialEq for StatePaintSlot {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl StatePaintSlot {
+    pub fn as_ref(&self) -> Option<&StatePaint> {
+        self.0.as_ref()
+    }
+}
+
+/// Snapshot of every raster paint field that `style_node` transforms.
+/// Kept as `AnimValue` slots so the state-paint channel reuses the existing
+/// fixed-point scalar/RGBA interpolation without touching `AnimProps`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatePaint {
+    pub values: Vec<AnimValue>,
+}
+
+const SP_FILL: usize = 0;
+const SP_BORDER: usize = 1;
+const SP_TEXT: usize = 2;
+const SP_ACCENT: usize = 3;
+const SP_ON_ACCENT: usize = 4;
+const SP_TONE: usize = 5;
+const SP_GRAD_A: usize = 6;
+const SP_GRAD_B: usize = 7;
+const SP_OPACITY: usize = 8;
+const SP_VISUAL_BASE: usize = 9;
+
+fn color_value(c: Option<Rgba>) -> AnimValue {
+    AnimValue::Color(c.unwrap_or(Rgba {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    }))
+}
+
+impl StatePaint {
+    /// Capture the styled paint of one laid-out node.
+    pub fn capture(n: &LaidOut) -> StatePaint {
+        let mut values = vec![
+            color_value(n.fill),
+            color_value(n.border),
+            color_value(n.text_color),
+            AnimValue::Color(n.accent),
+            AnimValue::Color(n.on_accent),
+            color_value(n.tone_color),
+            color_value(n.effects.gradient.map(|g| g.0)),
+            color_value(n.effects.gradient.map(|g| g.1)),
+            AnimValue::scalar(n.effects.opacity),
+        ];
+        for effect in &n.visual_effects {
+            values.push(color_value(effect.color));
+            values.push(AnimValue::scalar(effect.alpha));
+        }
+        if let Some(particles) = n.particles {
+            values.push(color_value(particles.color));
+            values.push(AnimValue::scalar(particles.alpha));
+        }
+        StatePaint { values }
+    }
+
+    /// Interpolate two snapshots at curve progress `t` (`ONE` == target).
+    pub fn lerp(from: &StatePaint, to: &StatePaint, t: i64) -> StatePaint {
+        let values = from
+            .values
+            .iter()
+            .zip(&to.values)
+            .map(|(from_value, target_value)| AnimValue::lerp(*from_value, *target_value, t))
+            .collect();
+        StatePaint { values }
+    }
+
+    fn value(&self, i: usize) -> Option<AnimValue> {
+        self.values.get(i).copied()
+    }
+
+    fn color(&self, i: usize) -> Option<Rgba> {
+        self.value(i).and_then(|v| v.as_color())
+    }
+
+    fn scalar(&self, i: usize, fallback: i64) -> i64 {
+        self.value(i)
+            .and_then(|v| v.as_scalar())
+            .unwrap_or(fallback)
+    }
+
+    /// Apply this snapshot's paint to a node without changing its state or
+    /// geometry. Presence flags come from the node itself so a state cannot
+    /// invent a border, gradient or particle field it did not declare.
+    pub fn apply(&self, n: &mut LaidOut) {
+        if n.fill.is_some() {
+            n.fill = self.color(SP_FILL);
+        }
+        if n.border.is_some() {
+            n.border = self.color(SP_BORDER);
+        }
+        if n.text_color.is_some() {
+            n.text_color = self.color(SP_TEXT);
+        }
+        if let Some(c) = self.color(SP_ACCENT) {
+            n.accent = c;
+        }
+        if let Some(c) = self.color(SP_ON_ACCENT) {
+            n.on_accent = c;
+        }
+        if n.tone_color.is_some() {
+            n.tone_color = self.color(SP_TONE);
+        }
+        if let (Some(a), Some(b)) = (self.color(SP_GRAD_A), self.color(SP_GRAD_B)) {
+            if n.effects.gradient.is_some() {
+                n.effects.gradient = Some((a, b));
+            }
+        }
+        n.effects.opacity = self.scalar(SP_OPACITY, n.effects.opacity);
+        for (i, effect) in n.visual_effects.iter_mut().enumerate() {
+            let base = SP_VISUAL_BASE + i * 2;
+            if effect.color.is_some() {
+                effect.color = self.color(base);
+            }
+            effect.alpha = self.scalar(base + 1, effect.alpha);
+        }
+        if let Some(particles) = n.particles.as_mut() {
+            let base = SP_VISUAL_BASE + n.visual_effects.len() * 2;
+            if particles.color.is_some() {
+                particles.color = self.color(base);
+            }
+            particles.alpha = self.scalar(base + 1, particles.alpha);
+        }
+    }
 }
 
 /// Apply one resolved state to every colour and opacity the raster can read.

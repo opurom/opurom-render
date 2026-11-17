@@ -10,6 +10,7 @@
 //! number of columns, fade blends channels in fixed point, and scale draws a
 //! nearest-neighbour copy of the incoming page over the outgoing page.
 
+use crate::interaction::{NodeState, StatePaint};
 use crate::{DirtyRect, Frame, Ir, Renderer, Rgba, StateView};
 use std::collections::BTreeMap;
 
@@ -244,6 +245,22 @@ impl AnimValue {
     }
 }
 
+/// State-paint transition: the visible paint at the last settled state, the
+/// new target paint, and the schedule shared with the node's implicit prop
+/// animation. `state` identifies the target so a prop-only change never starts
+/// a state transition by accident.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatePaintTrack {
+    pub from: StatePaint,
+    pub to: StatePaint,
+    pub state: NodeState,
+    pub contract: AnimSpec,
+    pub start_ms: i64,
+    /// False for the first observation of a state; true only while an actual
+    /// state transition is driving the paint.
+    pub active: bool,
+}
+
 /// Per-node implicit-animation state: the prop values the next change animates
 /// from, plus the schedule and the tick the current animation started at. The
 /// renderer installs one entry per animated node when the node is first laid
@@ -259,6 +276,8 @@ pub struct AnimEntry {
     pub contract: AnimSpec,
     /// Animation-clock tick at which the current animation started.
     pub start_ms: i64,
+    /// Optional dedicated state-paint transition (phase 1 Option B).
+    pub state_paint: Option<StatePaintTrack>,
 }
 
 impl AnimEntry {
@@ -330,6 +349,7 @@ impl AnimTable {
         } else {
             contract
         };
+        let state_paint = self.entries.get(&node).and_then(|e| e.state_paint.clone());
         self.entries.insert(
             node,
             AnimEntry {
@@ -337,8 +357,72 @@ impl AnimTable {
                 to,
                 contract,
                 start_ms,
+                state_paint,
             },
         );
+    }
+
+    /// Interpolate a node's state-paint channel at `elapsed_ms`. Returns
+    /// `None` for nodes without a transition (the default path).
+    pub fn state_paint_at(&self, node: u32, elapsed_ms: i64) -> Option<StatePaint> {
+        self.entries.get(&node).and_then(|e| {
+            e.state_paint.as_ref().and_then(|track| {
+                if !track.active {
+                    return None;
+                }
+                let p = track.contract.progress_at(elapsed_ms - track.start_ms);
+                Some(StatePaint::lerp(&track.from, &track.to, p))
+            })
+        })
+    }
+
+    /// Start or update a node's state-paint transition. A first observation
+    /// installs `from == to` so the first layout never animates. A changed
+    /// target state restarts from the currently blended paint, so a mid-flight
+    /// interruption is continuous. Prop-only changes update `to` without
+    /// restarting the schedule.
+    pub fn set_state_paint(
+        &mut self,
+        node: u32,
+        target: StatePaint,
+        state: NodeState,
+        contract: AnimSpec,
+        elapsed_ms: i64,
+    ) {
+        let Some(entry) = self.entries.get_mut(&node) else {
+            return;
+        };
+        match entry.state_paint.as_mut() {
+            None => {
+                entry.state_paint = Some(StatePaintTrack {
+                    from: target.clone(),
+                    to: target,
+                    state,
+                    contract: AnimSpec::new(crate::anim::Curve::None, 0, 0),
+                    start_ms: elapsed_ms,
+                    active: false,
+                });
+            }
+            Some(track) if track.state != state => {
+                let p = track.contract.progress_at(elapsed_ms - track.start_ms);
+                let current = StatePaint::lerp(&track.from, &track.to, p);
+                track.from = current;
+                track.to = target;
+                track.state = state;
+                track.contract = contract;
+                track.start_ms = elapsed_ms;
+                track.active = true;
+            }
+            Some(track) if track.state == state && track.to == target => {
+                // Nothing changed; keep the running schedule.
+            }
+            Some(_) => {
+                // A prop-only change belongs to AnimProps, not the state
+                // channel. Dropping the channel returns raster to the original
+                // discrete style_node path for this node.
+                entry.state_paint = None;
+            }
+        }
     }
 
     /// Clear every entry (for example when the tree is rebuilt).

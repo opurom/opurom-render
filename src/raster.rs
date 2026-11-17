@@ -1228,9 +1228,17 @@ fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
 /// because `layout()` emits pre-order. Local effects use a frame snapshot
 /// taken before this node; whole-frame blur passes run after all nodes.
 pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
-    // A default-state node uses the original layout verbatim, so the frozen
-    // frames and display-list commands stay byte-identical.
-    let styled = (n.state != NodeState::Default).then(|| interaction::style_node(n));
+    // A node with an active state-paint transition carries its blended paint
+    // from layout. Everything else uses the original discrete transform, and
+    // default-state nodes keep the unmodified LaidOut byte-for-byte.
+    let styled = match n.state_paint.as_ref() {
+        Some(paint) => {
+            let mut blended = n.clone();
+            paint.apply(&mut blended);
+            Some(blended)
+        }
+        None => (n.state != NodeState::Default).then(|| interaction::style_node(n)),
+    };
     let n = styled.as_ref().unwrap_or(n);
     // An outer clip (the incremental dirty region) narrows the node's own
     // clip. With no outer clip the intersection is the node clip, so the full

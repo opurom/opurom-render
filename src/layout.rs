@@ -296,6 +296,9 @@ pub struct LaidOut {
     pub on_accent: Rgba,
     /// Resolved interaction state, design-system variant and semantic tone.
     pub state: NodeState,
+    /// Blended state paint during a state transition; `None` on the default
+    /// path, where `raster::draw` applies the discrete transform as before.
+    pub state_paint: crate::interaction::StatePaintSlot,
     pub variant: Option<Variant>,
     pub tone: Option<Tone>,
     /// Resolved tone colour (theme token or measured constant) for the status
@@ -1361,6 +1364,86 @@ fn place(
     glass_lamina(n, pal, text.is_some(), &mut visual_effects);
     let node_state = NodeState::resolve(None, n.props.state, n.props.disabled);
 
+    // Option B state-paint channel: every animated node gets a track, but it
+    // is inactive until a real state change. Inactive tracks contribute no
+    // paint, so entry prop animations and the default path are untouched.
+    let mut state_paint = None;
+    if n.props.animate != crate::anim::Curve::None {
+        let target_fill = match base_fill {
+            Some(c) if n.props.glass => Some(lerp_color(c, pal.accent, UNIT / 4)),
+            f => f,
+        };
+        let target_opacity = n.props.opacity.unwrap_or(UNIT);
+        let target_visual_effects = {
+            let mut v = n.props.effects.clone();
+            glass_lamina(n, pal, text.is_some(), &mut v);
+            v
+        };
+        let mut target_effects = effects;
+        target_effects.shadow = n.props.shadow.unwrap_or(0).clamp(0, 8);
+        target_effects.opacity = target_opacity;
+        let target_node = LaidOut {
+            id: n.id,
+            kind: n.kind,
+            rect,
+            direction: dir,
+            radius,
+            radii: RoundingRadii::all(radius),
+            fill: target_fill,
+            border,
+            border_w,
+            text: text.clone(),
+            icon_name: icon_name.clone(),
+            icon_shape: icon_shape.clone(),
+            text_color,
+            text_scale: scale,
+            text_align,
+            font_metrics: node_metrics(n),
+            max_lines: None,
+            image_src: None,
+            image_fit: n.props.fit,
+            effects: target_effects,
+            visual_effects: target_visual_effects,
+            particles: n.props.particles,
+            control: None,
+            clip: None,
+            text_origin: None,
+            text_weight: None,
+            text_letter_spacing: None,
+            text_font_px: None,
+            text_baseline: None,
+            text_line_height: None,
+            phase: elapsed_ms,
+            accent: pal.accent,
+            on_accent: pal.on_accent,
+            state: node_state,
+            variant: n.props.variant,
+            tone: n.props.tone,
+            tone_color: n.props.tone.map(|t| pal.tone_color(t)),
+            state_paint: crate::interaction::StatePaintSlot(None),
+            incremental: crate::incremental::IncrementalMeta {
+                identity: None,
+                subtree_hash: 0,
+                paint_hash: 0,
+            },
+        };
+        let styled = if node_state == NodeState::Default {
+            target_node
+        } else {
+            crate::interaction::style_node(&target_node)
+        };
+        let target = crate::interaction::StatePaint::capture(&styled);
+        let contract = AnimSpec::new(
+            n.props.animate,
+            n.props
+                .duration
+                .unwrap_or_else(|| default_duration_ms(n.props.animate)),
+            n.props.delay.unwrap_or(0),
+        );
+        anim.set_state_paint(n.id, target, node_state, contract, elapsed_ms);
+        state_paint = anim.state_paint_at(n.id, elapsed_ms);
+    }
+
     // IR object keys are CSS-ordered (TL, TR, BR, BL); RoundingRadii is
     // TL, TR, BL, BR. Map by name, never by key iteration order.
     let radii = match &n.props.corner_radii {
@@ -1422,6 +1505,7 @@ fn place(
         accent: pal.accent,
         on_accent: pal.on_accent,
         state: node_state,
+        state_paint: crate::interaction::StatePaintSlot(state_paint),
         variant: n.props.variant,
         tone: n.props.tone,
         tone_color: n.props.tone.map(|t| pal.tone_color(t)),
