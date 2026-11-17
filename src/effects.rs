@@ -617,7 +617,13 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
         if box_r.w <= 0 || box_r.h <= 0 {
             continue;
         }
-        let sigma = blur.max(0) / 2; // blur radius = 2*sigma (CSS/Skia)
+        // Flutter convertRadiusToSigma, painting.dart:8720-8721:
+        // sigma = round(blur * 0.57735 + 0.5), 0 when blur <= 0.
+        let sigma = if blur > 0 {
+            (blur * 57735) / 100000 + 1
+        } else {
+            0
+        };
         let pad = sigma.saturating_mul(3).max(1);
         let bounds = clipped_area(canvas.width, canvas.height, clip, box_r, pad);
         if bounds.w <= 0 || bounds.h <= 0 {
@@ -641,7 +647,12 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
                 {
                     continue;
                 }
-                if !Canvas::outside_round(box_r, x, y, lrad) {
+                if x >= box_r.x
+                    && y >= box_r.y
+                    && x < box_r.x.saturating_add(box_r.w)
+                    && y < box_r.y.saturating_add(box_r.h)
+                    && !Canvas::outside_round(box_r, x, y, lrad)
+                {
                     mask[iy * bw + ix] = 255;
                 }
             }
