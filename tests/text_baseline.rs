@@ -69,12 +69,13 @@ fn mixed_script_run_has_one_baseline() {
 }
 
 #[test]
-fn line_height_multiplier_changes_box_baseline_stays() {
+fn line_height_multiplier_changes_box_and_baseline() {
     let two = span(json!({"value":"Hi","fontPx":24,"lineHeight":2.0}), true);
     assert!(two.contains("\"h\":48"), "2.0 * 24 = 48: {two}");
+    // Proportional leading split: round(48 * 928/(928+244)) = 38.
     assert!(
-        two.contains("\"baseline\":22"),
-        "baseline independent of lineHeight: {two}"
+        two.contains("\"baseline\":38"),
+        "baseline scales with lineHeight: {two}"
     );
     // kTextHeightNone (0) uses the metrics box (ascent+descent+leading).
     let none = span(json!({"value":"Hi","fontPx":24,"lineHeight":0}), true);

@@ -2,10 +2,8 @@
 //!
 //! The metrics gate compares render's integer baseline/box (produced by the
 //! real parse_ir -> layout -> text_spans path) with the signed Flutter oracle
-//! pixels. Baseline is compared on lineHeight-unset rows, where render's
-//! ascent-based baseline and Flutter's baseline describe the same quantity
-//! (layout.rs:837 keeps the baseline independent of lineHeight by design).
-//! Box height is compared on every row.
+//! pixels. Both baseline and box height are compared on every signed case,
+//! including lineHeight 1.0/1.5/2.0 after the leading-distribution fix.
 
 use opurom_render::{layout, parse_ir, text_spans, StateView};
 use serde_json::{json, Value};
@@ -148,17 +146,15 @@ pub fn check(metrics: &PerEm, case_list: &[Case], tolerance: f64) -> CheckResult
                 want: case.height_px,
             });
         }
-        if case.line_height.is_none() {
-            baseline_checked += 1;
-            if (baseline_px - case.baseline_px).abs() > tolerance {
-                violations.push(Violation {
-                    font_px: case.font_px,
-                    sample: case.sample.clone(),
-                    field: "baseline_px",
-                    got: baseline_px,
-                    want: case.baseline_px,
-                });
-            }
+        baseline_checked += 1;
+        if (baseline_px - case.baseline_px).abs() > tolerance {
+            violations.push(Violation {
+                font_px: case.font_px,
+                sample: case.sample.clone(),
+                field: "baseline_px",
+                got: baseline_px,
+                want: case.baseline_px,
+            });
         }
     }
     CheckResult {

@@ -52,12 +52,44 @@ fn signed_metrics_gate_passes_every_case() {
     );
     let result = check(&per_em(&f), &signed, tolerance_px(&f));
     assert_eq!(result.checked, signed.len(), "no case may be skipped");
-    assert_eq!(result.baseline_checked, 28, "7 sizes x 4 strings, unset");
+    assert_eq!(
+        result.baseline_checked, 112,
+        "baseline checked on every case"
+    );
     assert!(
         result.violations.is_empty(),
         "signed gate turned red: {:?}",
         result.violations
     );
+}
+
+#[test]
+fn baseline_error_by_line_height_class_is_within_one_px() {
+    let f = metrics_fixture();
+    let metrics = per_em(&f);
+    let tolerance = tolerance_px(&f);
+    let mut worst: Vec<(String, f64)> = Vec::new();
+    for case in cases(&f) {
+        let (_, got) = computed(&metrics, &case);
+        let err = (got - case.baseline_px).abs();
+        let class = match case.line_height {
+            None => "unset".to_string(),
+            Some(v) => format!("{v}"),
+        };
+        if let Some(row) = worst.iter_mut().find(|(name, _)| name == &class) {
+            row.1 = row.1.max(err);
+        } else {
+            worst.push((class, err));
+        }
+    }
+    assert_eq!(worst.len(), 4, "four lineHeight classes");
+    for (class, err) in &worst {
+        println!("baseline class {class}: max err {err:.6} px");
+        assert!(
+            *err <= tolerance,
+            "class {class} max err {err} > {tolerance}"
+        );
+    }
 }
 
 #[test]
@@ -98,7 +130,7 @@ fn mutation_plus_two_is_detected_once() {
     let signed: Vec<Case> = cases(&f)
         .into_iter()
         .map(|mut c| {
-            if c.font_px == 48 && c.sample == "Hg" && c.line_height.is_none() {
+            if c.font_px == 48 && c.sample == "Hg" && c.line_height == Some(1.5) {
                 c.baseline_px += 2.0;
             }
             c
@@ -119,8 +151,8 @@ fn mutation_plus_two_is_detected_once() {
     assert_eq!(result.violations[0].field, "baseline_px");
     assert_eq!(result.violations[0].font_px, 48);
     assert_eq!(result.violations[0].sample, "Hg");
-    assert_eq!(result.violations[0].got, 45.0);
-    assert_eq!(result.violations[0].want, 46.28125);
+    assert_eq!(result.violations[0].got, 57.0);
+    assert_eq!(result.violations[0].want, 59.0);
 }
 
 #[test]

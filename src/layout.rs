@@ -831,10 +831,28 @@ fn apply_text_baselines(out: &mut [LaidOut], theme: &Theme) {
         if line_box > 0 {
             n.rect.h = line_box;
         }
-        // Single baseline for the whole run, at line top plus the ascent share
-        // of leading. Ideographic resolves through the same baseline for now
-        // (Flutter forces alphabetic; documented limit in the spec proposal).
-        n.text_baseline = Some(n.rect.y + ascent + leading / 2);
+        // A positive lineHeight overrides the metrics box: Flutter's
+        // proportional leading distribution splits (line_box - unscaled
+        // ascent+descent) by the ascent/descent ratio, so the baseline scales
+        // with lineHeight (TEXT_BASELINE_PROPOSAL.md §3.2). All intermediate
+        // math is i128 fixed-point with 1024 == 1 em; the unset/0 path below
+        // keeps its byte-identical old geometry.
+        n.text_baseline = Some(match n.text_line_height {
+            Some(v) if v > 0 && m.ascent + m.descent > 0 => {
+                let denom = (m.ascent + m.descent) as i128;
+                let line_units = line_box as i128 * 1024;
+                let natural_units = denom * px as i128;
+                let leading_units = (line_units - natural_units) * m.ascent as i128 / denom;
+                let scaled = m.ascent as i128 * px as i128 + leading_units;
+                let rounded = if scaled >= 0 {
+                    (scaled + 512) / 1024
+                } else {
+                    -((-scaled + 512) / 1024)
+                };
+                n.rect.y + rounded as i64
+            }
+            _ => n.rect.y + ascent + leading / 2,
+        });
     }
 }
 
