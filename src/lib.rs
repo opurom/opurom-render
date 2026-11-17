@@ -451,6 +451,7 @@ impl Renderer {
             canvas.emit(command);
         }
         DisplayList {
+            unsupported: canvas.take_unsupported(),
             width: self.width,
             height: self.height,
             background: pal.stage,
@@ -618,7 +619,7 @@ impl Renderer {
                     && node_has_tap(&ir.tree, n.id)
                 {
                     let c = n.text_color.unwrap_or(n.accent);
-                    canvas.fill_rounded(
+                    canvas.fill_rounded_radii(
                         n.rect,
                         Rgba {
                             r: c.r,
@@ -626,7 +627,7 @@ impl Renderer {
                             b: c.b,
                             a: 26,
                         },
-                        n.radius,
+                        n.radii,
                     );
                 }
                 raster::draw(&mut canvas, n);
@@ -730,7 +731,7 @@ impl Renderer {
                     b: c.b,
                     a: 26, // 10% state layer on primary
                 };
-                canvas.fill_rounded(n.rect, layer, n.radius);
+                canvas.fill_rounded_radii(n.rect, layer, n.radii);
             }
             raster::draw(&mut canvas, n);
             if let Some((h, hp)) = host.as_ref() {

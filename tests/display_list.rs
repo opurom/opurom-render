@@ -71,6 +71,7 @@ fn gradient_commands_keep_stop_and_draw_order() {
         h: 2,
     };
     let list = DisplayList {
+        unsupported: None,
         width: 4,
         height: 2,
         background: Rgba::rgb(0, 0, 0),
@@ -115,6 +116,7 @@ fn gradient_commands_keep_stop_and_draw_order() {
 #[test]
 fn empty_display_list_serializes_as_empty_commands() {
     let list = DisplayList {
+        unsupported: None,
         width: 2,
         height: 1,
         background: Rgba::rgb(7, 8, 9),
@@ -230,6 +232,7 @@ fn software_bounds_clipping_matches_recorded_command() {
     }
 
     let list = DisplayList {
+        unsupported: None,
         width: 4,
         height: 2,
         background: Rgba::rgb(0, 0, 0),

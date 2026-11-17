@@ -249,6 +249,7 @@ fn committed_fixture_emits_all_five_effects_and_is_deterministic() {
 #[test]
 fn empty_display_list_and_malformed_effect_commands_are_bounded() {
     let empty = DisplayList {
+        unsupported: None,
         width: 2,
         height: 1,
         background: Rgba::rgb(1, 2, 3),

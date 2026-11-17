@@ -75,6 +75,7 @@ pub struct Canvas {
     /// `draw_shadow` rechecks the node state and shadow strength.
     press_elevate: Option<u32>,
     capture: bool,
+    capture_unsupported: Option<String>,
     commands: Vec<Command>,
 }
 
@@ -104,6 +105,7 @@ impl Canvas {
             elevation_shadows: false,
             press_elevate: None,
             capture: false,
+            capture_unsupported: None,
             commands: Vec::new(),
         }
     }
@@ -240,6 +242,7 @@ impl Canvas {
             elevation_shadows: false,
             press_elevate: None,
             capture: false,
+            capture_unsupported: None,
             commands: Vec::new(),
         }
     }
@@ -250,6 +253,16 @@ impl Canvas {
 
     pub(crate) fn is_capturing(&self) -> bool {
         self.capture
+    }
+
+    pub(crate) fn reject_capture(&mut self, reason: &str) {
+        if self.capture_unsupported.is_none() {
+            self.capture_unsupported = Some(reason.to_string());
+        }
+    }
+
+    pub(crate) fn take_unsupported(&mut self) -> Option<String> {
+        self.capture_unsupported.take()
     }
 
     pub(crate) fn effective_clip(&self) -> Rect {
@@ -382,7 +395,7 @@ impl Canvas {
 
     /// True when all four corners are the same circular radius; such a shape
     /// keeps the historical scalar path byte-for-byte.
-    fn uniform_radius(radii: RoundingRadii) -> Option<i64> {
+    pub(crate) fn uniform_radius(radii: RoundingRadii) -> Option<i64> {
         let c = radii.top_left;
         if c.x == c.y && radii.top_right == c && radii.bottom_left == c && radii.bottom_right == c {
             Some(c.x)
@@ -446,6 +459,18 @@ impl Canvas {
     pub fn fill_rounded_radii(&mut self, r: Rect, c: Rgba, radii: RoundingRadii) {
         if let Some(rad) = Self::uniform_radius(radii) {
             self.fill_rounded(r, c, rad);
+            return;
+        }
+        if self.capture {
+            // The display list carries four independent radii in the GPU wire
+            // order, so record the shape instead of dropping it.
+            let clip = self.effective_clip();
+            self.emit(Command::RoundRectPerCorner {
+                rect: r,
+                clip,
+                radii: Self::gpu_radii(radii),
+                color: c,
+            });
             return;
         }
         if r.w <= 0 || r.h <= 0 {
@@ -518,6 +543,115 @@ impl Canvas {
     /// Two-stop gradient inside a rounded rectangle, sweeping vertically by
     /// default or along the horizontal axis when asked. The per-pixel maths is
     /// identical on both axes, so the recorded command reproduces the frame.
+    /// Corner radii in the GPU wire order (top-left, top-right, bottom-left,
+    /// bottom-right), each component clamped to [`GPU_RADIUS_LIMIT`]. The
+    /// software raster clamps to a wider limit, so both agree for every radius
+    /// a layout can produce.
+    pub(crate) fn gpu_radii(radii: RoundingRadii) -> [[i64; 2]; 4] {
+        let clamp = |c: CornerRadii| {
+            [
+                c.x.clamp(0, crate::display::GPU_RADIUS_LIMIT),
+                c.y.clamp(0, crate::display::GPU_RADIUS_LIMIT),
+            ]
+        };
+        [
+            clamp(radii.top_left),
+            clamp(radii.top_right),
+            clamp(radii.bottom_left),
+            clamp(radii.bottom_right),
+        ]
+    }
+
+    /// Border-only rounded outline with independent per-corner radii.
+    pub fn stroke_rounded_radii(&mut self, r: Rect, width: i64, c: Rgba, radii: RoundingRadii) {
+        if r.w <= 0 || r.h <= 0 {
+            return;
+        }
+        let w = width.max(1).min(r.w.min(r.h) / 2);
+        if let Some(rad) = Self::uniform_radius(radii) {
+            draw_outline(self, r, w, c, false);
+            let _ = rad;
+            return;
+        }
+        if self.capture {
+            self.reject_capture("per-corner radii are not yet supported by the display list");
+            return;
+        }
+        let inner = inset(r, w);
+        let inner_radii = Self::radii_inset(radii, w).scaled(inner.w, inner.h);
+        let clip = self.effective_clip();
+        let x0 = r.x.max(clip.x).max(0);
+        let y0 = r.y.max(clip.y).max(0);
+        let x1 = (r.x + r.w).min(clip.x + clip.w).min(self.width as i64);
+        let y1 = (r.y + r.h).min(clip.y + clip.h).min(self.height as i64);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if !round_rect_contains(x, y, r.x, r.y, r.w, r.h, radii) {
+                    continue;
+                }
+                if inner.w > 0
+                    && inner.h > 0
+                    && round_rect_contains(x, y, inner.x, inner.y, inner.w, inner.h, inner_radii)
+                {
+                    continue;
+                }
+                self.set_quiet(x, y, c);
+            }
+        }
+    }
+
+    /// Gradient fill with independent per-corner radii.
+    pub fn fill_rounded_gradient_radii(
+        &mut self,
+        r: Rect,
+        top: Rgba,
+        bottom: Rgba,
+        radii: RoundingRadii,
+        alpha: i64,
+        horizontal: bool,
+    ) {
+        if let Some(rad) = Self::uniform_radius(radii) {
+            self.fill_rounded_gradient(r, top, bottom, rad, alpha, horizontal);
+            return;
+        }
+        if self.capture {
+            self.reject_capture(
+                "per-corner radii with a gradient are not yet supported by the display list",
+            );
+            return;
+        }
+        let x1 = (r.x + r.w).min(self.width as i64);
+        let y1 = (r.y + r.h).min(self.height as i64);
+        let alpha_u8 = ((alpha.clamp(0, UNIT) * 255) / UNIT) as u8;
+        let last = if horizontal { r.w - 1 } else { r.h - 1 };
+        for y in r.y..y1 {
+            for x in r.x..x1 {
+                let cov = if self.edge_aa {
+                    Self::radii_coverage(r, x, y, radii)
+                } else if round_rect_contains(x, y, r.x, r.y, r.w, r.h, radii) {
+                    255
+                } else {
+                    0
+                };
+                if cov == 0 {
+                    continue;
+                }
+                let t = if horizontal {
+                    (x - r.x) as i128 * UNIT as i128 / last.max(1) as i128
+                } else {
+                    (y - r.y) as i128 * UNIT as i128 / last.max(1) as i128
+                };
+                let mut c = crate::layout::lerp_color(top, bottom, t as i64);
+                c.a = ((c.a as i64 * alpha_u8 as i64 + 127) / 255) as u8;
+                if self.edge_aa {
+                    self.set_covered(x, y, c, cov);
+                } else {
+                    self.set_quiet(x, y, c);
+                }
+            }
+        }
+    }
+
     pub fn fill_rounded_gradient(
         &mut self,
         r: Rect,
@@ -909,7 +1043,25 @@ fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
             w: n.rect.w + grow * 2,
             h: n.rect.h + grow * 2,
         };
-        canvas.fill_rounded(r, with_alpha(Rgba::rgb(0, 0, 0), alpha), n.radius + grow);
+        let grown = RoundingRadii {
+            top_left: CornerRadii {
+                x: n.radii.top_left.x + grow,
+                y: n.radii.top_left.y + grow,
+            },
+            top_right: CornerRadii {
+                x: n.radii.top_right.x + grow,
+                y: n.radii.top_right.y + grow,
+            },
+            bottom_left: CornerRadii {
+                x: n.radii.bottom_left.x + grow,
+                y: n.radii.bottom_left.y + grow,
+            },
+            bottom_right: CornerRadii {
+                x: n.radii.bottom_right.x + grow,
+                y: n.radii.bottom_right.y + grow,
+            },
+        };
+        canvas.fill_rounded_radii(r, with_alpha(Rgba::rgb(0, 0, 0), alpha), grown);
     }
 }
 
@@ -1117,13 +1269,21 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
         a: 0,
     });
     let alpha = n.effects.opacity;
-    let inner_radius = (n.radius - n.border_w).max(0);
     // A radio button and a FAB are circles, not rounded squares.
     let round = n.kind == Kind::Radio || n.variant == Some(Variant::Fab);
     if n.border_w > 0 {
         if let Some(border) = n.border {
             if fill.a == 0 {
-                draw_outline(canvas, n.rect, n.border_w, with_alpha(border, alpha), round);
+                if round {
+                    draw_outline(canvas, n.rect, n.border_w, with_alpha(border, alpha), true);
+                } else {
+                    canvas.stroke_rounded_radii(
+                        n.rect,
+                        n.border_w,
+                        with_alpha(border, alpha),
+                        n.radii,
+                    );
+                }
             } else if round {
                 canvas.fill_circle(n.rect, with_alpha(border, alpha));
             } else {
@@ -1138,11 +1298,11 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
                     let mid = crate::layout::lerp_color(a, b, UNIT / 2);
                     canvas.fill_circle(inner, with_alpha(mid, alpha))
                 }
-                Some((a, b)) => canvas.fill_rounded_gradient(
+                Some((a, b)) => canvas.fill_rounded_gradient_radii(
                     inner,
                     a,
                     b,
-                    inner_radius,
+                    Canvas::radii_inset(n.radii, n.border_w).scaled(inner.w, inner.h),
                     alpha,
                     n.effects.gradient_horizontal,
                 ),
@@ -1156,11 +1316,11 @@ fn draw_box(canvas: &mut Canvas, n: &LaidOut) {
         }
     } else if fill.a > 0 {
         match n.effects.gradient {
-            Some((a, b)) => canvas.fill_rounded_gradient(
+            Some((a, b)) => canvas.fill_rounded_gradient_radii(
                 n.rect,
                 a,
                 b,
-                n.radius,
+                n.radii,
                 alpha,
                 n.effects.gradient_horizontal,
             ),
@@ -1196,6 +1356,12 @@ fn image_radius(n: &LaidOut, inner: Rect) -> i64 {
         .min(inner.w.min(inner.h).max(0) / 2)
 }
 
+/// Per-corner radii of the image content box, inset by the border width.
+fn image_radii(n: &LaidOut, inner: Rect) -> RoundingRadii {
+    let inset = Canvas::radii_inset(n.radii, n.border_w);
+    inset.scaled(inner.w, inner.h)
+}
+
 /// Draw the cached PNG into the inner border rect with integer nearest-neighbour
 /// sampling. Missing or invalid resources get a deterministic rounded X.
 fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
@@ -1225,6 +1391,7 @@ fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
         return;
     }
     let bounds = image_bounds(canvas, inner);
+    let image_radii = image_radii(n, inner);
     let radius = image_radius(n, inner);
     let opacity = n.effects.opacity.clamp(0, UNIT);
     for y in bounds.y..bounds.y.saturating_add(bounds.h) {
@@ -1240,13 +1407,17 @@ fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
                 continue;
             }
             let coverage = if canvas.edge_aa {
-                let cov = Canvas::round_coverage(inner, x, y, radius);
+                let cov = if Canvas::uniform_radius(image_radii).is_some() {
+                    Canvas::round_coverage(inner, x, y, radius)
+                } else {
+                    Canvas::radii_coverage(inner, x, y, image_radii)
+                };
                 if cov == 0 {
                     continue;
                 }
                 cov
             } else {
-                if Canvas::outside_round(inner, x, y, radius) {
+                if !round_rect_contains(x, y, inner.x, inner.y, inner.w, inner.h, image_radii) {
                     continue;
                 }
                 255
@@ -1284,7 +1455,7 @@ fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
 /// Neutral rounded box with a diagonal cross for missing/unreadable PNGs.
 fn draw_image_placeholder(canvas: &mut Canvas, n: &LaidOut, inner: Rect) {
     let bounds = image_bounds(canvas, inner);
-    let radius = image_radius(n, inner);
+    let image_radii = image_radii(n, inner);
     let bg = with_alpha(Rgba::rgb(0x86, 0x8e, 0x98), n.effects.opacity);
     let cross = with_alpha(Rgba::rgb(0xf1, 0xf3, 0xf5), n.effects.opacity);
     let w = inner.w as i128;
@@ -1293,7 +1464,7 @@ fn draw_image_placeholder(canvas: &mut Canvas, n: &LaidOut, inner: Rect) {
     for y in bounds.y..bounds.y.saturating_add(bounds.h) {
         let v = (y - inner.y) as i128;
         for x in bounds.x..bounds.x.saturating_add(bounds.w) {
-            if Canvas::outside_round(inner, x, y, radius) {
+            if !round_rect_contains(x, y, inner.x, inner.y, inner.w, inner.h, image_radii) {
                 continue;
             }
             let u = (x - inner.x) as i128;
@@ -1901,7 +2072,11 @@ fn draw_control(canvas: &mut Canvas, n: &LaidOut) {
                 w: n.rect.w,
                 h: (n.rect.h - tail_h).max(1),
             };
-            canvas.fill_rounded(body, bubble, n.radius.min(body.h / 2).max(0));
+            canvas.fill_rounded_radii(
+                body,
+                bubble,
+                Canvas::radii_inset(n.radii, 0).scaled(body.w, body.h),
+            );
             let tw = (n.rect.w / 6).max(4);
             triangle_down(
                 canvas,

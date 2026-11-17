@@ -487,6 +487,11 @@ fn inside_shape(n: &LaidOut, x: i64, y: i64, rad: i64) -> bool {
     {
         return false;
     }
+    if Canvas::uniform_radius(n.radii).is_none() {
+        return crate::geometry::round_rect_contains(
+            x, y, n.rect.x, n.rect.y, n.rect.w, n.rect.h, n.radii,
+        );
+    }
     !Canvas::outside_round(n.rect, x, y, rad)
 }
 

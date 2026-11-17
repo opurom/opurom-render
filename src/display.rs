@@ -13,6 +13,10 @@ pub const MAX_DIMENSION: u32 = 4096;
 pub const MAX_COMMANDS: usize = 1_000_000;
 pub const COORD_BIAS: i64 = 1 << 30;
 pub const COORD_LIMIT: i64 = 500_000_000;
+/// Largest corner radius the GPU protocol accepts. The shader evaluates
+/// `(qx*ry)^2 + (qy*rx)^2 <= (rx*ry)^2` in 64-bit integers, so `rx*ry` must
+/// stay below 2^30.
+pub const GPU_RADIUS_LIMIT: i64 = 1 << 15;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -35,6 +39,15 @@ pub enum Command {
         bottom: Rgba,
         /// Alpha already reduced from fixed point to the software raster's u8.
         alpha: u8,
+    },
+    /// Rounded rectangle with four independent corner radii. The radii array
+    /// order is top-left, top-right, bottom-left, bottom-right (the GPU
+    /// contract), each pair clamped to [`GPU_RADIUS_LIMIT`].
+    RoundRectPerCorner {
+        rect: Rect,
+        clip: Rect,
+        radii: [[i64; 2]; 4],
+        color: Rgba,
     },
     /// The same two-stop gradient along the rect's horizontal axis.
     GradientHorizontal {
@@ -114,6 +127,9 @@ pub struct DisplayList {
     pub height: u32,
     pub background: Rgba,
     pub commands: Vec<Command>,
+    /// Unsupported geometry encountered while recording. Carried out of band
+    /// so the JSON wire format is unchanged; `to_json` reports it as an error.
+    pub unsupported: Option<String>,
 }
 
 fn bad(message: impl Into<String>) -> IrError {
@@ -239,6 +255,9 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
 
 impl DisplayList {
     pub fn to_json(&self) -> Result<String, IrError> {
+        if let Some(reason) = &self.unsupported {
+            return Err(bad(reason.clone()));
+        }
         if self.width == 0
             || self.height == 0
             || self.width > MAX_DIMENSION
@@ -258,6 +277,7 @@ impl DisplayList {
         for (index, command) in self.commands.iter().enumerate() {
             let (rect, clip, radius) = match command {
                 Command::Solid { rect, clip, .. } => (*rect, *clip, 0),
+                Command::RoundRectPerCorner { rect, clip, .. } => (*rect, *clip, 0),
                 Command::Rounded {
                     rect, clip, radius, ..
                 }
@@ -276,6 +296,21 @@ impl DisplayList {
             validate_rect(rect, &format!("commands[{index}].rect"), true)?;
             validate_rect(clip, &format!("commands[{index}].clip"), false)?;
             validate_coord(radius, &format!("commands[{index}].radius"))?;
+            if let Command::RoundRectPerCorner { radii, .. } = command {
+                for (corner, pair) in radii.iter().enumerate() {
+                    for (axis, value) in pair.iter().enumerate() {
+                        validate_coord(
+                            *value,
+                            &format!("commands[{index}].radii[{corner}][{axis}]"),
+                        )?;
+                        if *value < 0 || *value > GPU_RADIUS_LIMIT {
+                            return Err(bad(format!(
+                                "commands[{index}].radii[{corner}][{axis}] must be 0..={GPU_RADIUS_LIMIT}"
+                            )));
+                        }
+                    }
+                }
+            }
             if let Command::Particles {
                 count,
                 seed,
@@ -334,6 +369,31 @@ impl DisplayList {
                         .map_err(|e| bad(format!("cannot format display list: {e}")))?;
                     write!(&mut out, ",\"radius\":{radius},")
                         .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    write_rgba(&mut out, "color", *color, color.a)
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    out.push('}');
+                }
+                Command::RoundRectPerCorner {
+                    rect,
+                    clip,
+                    radii,
+                    color,
+                } => {
+                    out.push_str("{\"kind\":\"round_rect_per_corner\",");
+                    write_rect(&mut out, "rect", *rect)
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    out.push(',');
+                    write_rect(&mut out, "clip", *clip)
+                        .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    out.push_str(",\"radii\":[");
+                    for (i, pair) in radii.iter().enumerate() {
+                        if i > 0 {
+                            out.push(',');
+                        }
+                        write!(&mut out, "[{},{}]", pair[0], pair[1])
+                            .map_err(|e| bad(format!("cannot format display list: {e}")))?;
+                    }
+                    out.push_str("],");
                     write_rgba(&mut out, "color", *color, color.a)
                         .map_err(|e| bad(format!("cannot format display list: {e}")))?;
                     out.push('}');

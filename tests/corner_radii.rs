@@ -114,3 +114,70 @@ fn radii_from_json(json: &str) -> RoundingRadii {
     let laid = layout(&parsed, &StateView::from_ir(&parsed), 120, 120);
     laid.iter().find(|n| n.id == 1).unwrap().radii
 }
+
+#[test]
+fn per_corner_display_list_json_uses_gpu_corner_order() {
+    let parsed = parse_ir(&ir(
+        r#"{"topLeft":10,"topRight":20,"bottomRight":30,"bottomLeft":5}"#,
+    ))
+    .unwrap();
+    let list =
+        opurom_render::Renderer::new(120, 120).display_list(&parsed, &StateView::from_ir(&parsed));
+    let json = list.to_json().unwrap();
+    assert!(
+        json.contains("\"kind\":\"round_rect_per_corner\""),
+        "{json}"
+    );
+    // GPU order is TL, TR, BL, BR; the IR writes BR before BL.
+    assert!(
+        json.contains("\"radii\":[[10,10],[20,20],[5,5],[30,30]]"),
+        "{json}"
+    );
+}
+
+#[test]
+fn oversized_radii_are_clamped_for_gpu() {
+    let parsed = parse_ir(&ir(r#"{"topLeft":40000}"#)).unwrap();
+    let list =
+        opurom_render::Renderer::new(120, 120).display_list(&parsed, &StateView::from_ir(&parsed));
+    let json = list.to_json().unwrap();
+    // Normalization scales the oversized radius down to the 80px box first,
+    // so the wire value stays within the GPU limit without a clamp change.
+    assert!(!json.contains("[40000,40000]"), "{json}");
+    assert!(
+        json.contains("\"kind\":\"round_rect_per_corner\""),
+        "{json}"
+    );
+}
+
+#[test]
+fn border_and_gradient_respect_per_corner_radii() {
+    let parsed = parse_ir(&ir(r#"{"topLeft":40}"#)).unwrap();
+    let state = StateView::from_ir(&parsed);
+    let paint = |gradient: bool, border_only: bool| {
+        let laid = layout(&parsed, &state, 120, 120);
+        let mut node = laid.iter().find(|n| n.id == 1).unwrap().clone();
+        if gradient {
+            node.effects.gradient = Some((
+                opurom_render::Rgba::rgb(255, 255, 255),
+                opurom_render::Rgba::rgb(0, 0, 0),
+            ));
+        }
+        if border_only {
+            node.fill = None;
+            node.border_w = 2;
+        }
+        let mut canvas = Canvas::new(120, 120, Rgba::rgb(255, 255, 255));
+        draw(&mut canvas, &node);
+        canvas.pixels
+    };
+    for (gradient, border_only) in [(true, false), (false, true)] {
+        let p = paint(gradient, border_only);
+        let at = |x: usize, y: usize| p[(y * 120 + x) * 4];
+        assert_ne!(
+            at(21, 21),
+            at(98, 98),
+            "gradient={gradient} border={border_only}"
+        );
+    }
+}
