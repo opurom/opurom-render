@@ -141,6 +141,9 @@ pub const DOUBLE_TAP_MIN_MS: i64 = 40;
 pub const DOUBLE_TAP_SLOP: i64 = 100;
 /// Distance past which a move becomes a drag (`constants.dart:65`).
 pub const DRAG_THRESHOLD: i64 = 18;
+/// Minimum interactive target in canvas px. Flutter's `kMinInteractiveDimension`
+/// (`material/constants.dart:27`) resolved to the IR design domain, not dp.
+pub const MIN_HIT_SIZE: i64 = 48;
 
 /// The five live states of one pointer sequence. `Idle` is the resting state
 /// between sequences and is not part of the loop.
@@ -295,7 +298,7 @@ struct TapMark {
 #[derive(Clone, Debug)]
 struct NodeEntry {
     id: u32,
-    rect: Rect,
+    hit_rect: Rect,
     parent: Option<u32>,
     gesture: Option<GestureKind>,
 }
@@ -333,9 +336,11 @@ impl GestureEngine {
         if self.nodes.iter().any(|n| n.id == id) {
             return;
         }
+        // Drag-only surfaces are scroll areas, not tap targets; keep their rect.
+        let hit_rect = tap_hit_rect(rect, gesture == Some(GestureKind::Drag));
         self.nodes.push(NodeEntry {
             id,
-            rect,
+            hit_rect,
             parent,
             gesture,
         });
@@ -354,7 +359,7 @@ impl GestureEngine {
             .nodes
             .iter()
             .rev()
-            .find(|n| hit(&n.rect, x, y))
+            .find(|n| hit(&n.hit_rect, x, y))
             .map(|n| n.id)
         else {
             return Vec::new();
@@ -371,7 +376,7 @@ impl GestureEngine {
             let Some(parent_node) = self.nodes.iter().find(|n| n.id == pid) else {
                 break;
             };
-            if hit(&parent_node.rect, x, y) {
+            if hit(&parent_node.hit_rect, x, y) {
                 path.push(pid);
                 cursor = Some(pid);
             } else {
@@ -421,7 +426,7 @@ impl GestureEngine {
             return None;
         }
         let entry = self.nodes.iter().find(|n| n.id == node_id)?;
-        if !hit(&entry.rect, event.local_x, event.local_y) {
+        if !hit(&entry.hit_rect, event.local_x, event.local_y) {
             return None;
         }
         if let Some(mark) = self.last_tap {
@@ -489,7 +494,7 @@ impl GestureEngine {
             }
             return None;
         }
-        let rect = self.nodes.iter().find(|n| n.id == node_id)?.rect;
+        let rect = self.nodes.iter().find(|n| n.id == node_id)?.hit_rect;
         let inside = hit(&rect, event.local_x, event.local_y);
         if inside {
             if self.phase == Phase::Cancelled {
@@ -669,6 +674,32 @@ fn gesture_of(kind: GestureKind) -> Option<Gesture> {
         GestureKind::DoubleTap => Some(Gesture::DoubleTap),
         GestureKind::LongPress => Some(Gesture::LongPress),
         GestureKind::Drag => None,
+    }
+}
+
+/// Point-in-rect hit rectangle for a laid-out node. Drag-only surfaces keep
+/// their visual rect; every other node gets a centred target of at least
+/// [`MIN_HIT_SIZE`] per canvas-px axis. Idempotent for rects already >= minimum;
+/// painting and ripple never consume the returned rect.
+pub fn tap_hit_rect(rect: Rect, is_drag_only: bool) -> Rect {
+    if is_drag_only {
+        return rect;
+    }
+    let w = if rect.w > 0 {
+        rect.w.max(MIN_HIT_SIZE)
+    } else {
+        rect.w
+    };
+    let h = if rect.h > 0 {
+        rect.h.max(MIN_HIT_SIZE)
+    } else {
+        rect.h
+    };
+    Rect {
+        x: rect.x.saturating_add((rect.w - w) / 2),
+        y: rect.y.saturating_add((rect.h - h) / 2),
+        w,
+        h,
     }
 }
 
@@ -927,5 +958,54 @@ mod tests {
             i64::MAX,
             i64::MAX
         ));
+    }
+
+    #[test]
+    fn minimum_hit_rect_expands_small_tap_targets_only() {
+        let visual = rect(528, 1188, 24, 24);
+        assert_eq!(tap_hit_rect(visual, false), rect(516, 1176, 48, 48));
+        assert_eq!(tap_hit_rect(visual, true), visual);
+        assert_eq!(
+            tap_hit_rect(rect(0, 0, 200, 48), false),
+            rect(0, 0, 200, 48)
+        );
+        let mut e = GestureEngine::new();
+        e.add_node_with(7, visual, None, Some(GestureKind::Tap));
+        // 20 px past the visual edge is inside the 48 px target, not the box.
+        assert!(!hit(&visual, 560, 1200));
+        assert_eq!(e.hit_test(540, 1200), Some(7));
+        assert_eq!(e.hit_test(560, 1200), Some(7));
+        assert_eq!(e.hit_test(565, 1200), None);
+        assert_eq!(
+            e.dispatch(&PointerEvent::at(PointerKind::Down, 560, 1200, 0)),
+            None
+        );
+        assert_eq!(
+            e.dispatch(&PointerEvent::at(PointerKind::Up, 560, 1200, 10)),
+            Some((7, Gesture::Tap))
+        );
+
+        // Already >= 48 on both axes: identity, no new hits outside the rect.
+        let mut big = GestureEngine::new();
+        big.add_node_with(8, rect(0, 0, 200, 48), None, Some(GestureKind::Tap));
+        assert_eq!(big.hit_test(199, 47), Some(8));
+        assert_eq!(big.hit_test(210, 24), None);
+
+        // A drag-only surface is a scroll area, not a tap target.
+        let mut drag = GestureEngine::new();
+        drag.add_node_with(9, visual, None, Some(GestureKind::Drag));
+        assert_eq!(drag.hit_test(560, 1200), None);
+    }
+
+    #[test]
+    fn expanded_hit_rects_keep_topmost_draw_order() {
+        let mut e = GestureEngine::new();
+        e.add_node_with(1, rect(10, 10, 24, 24), None, Some(GestureKind::Tap));
+        e.add_node_with(2, rect(20, 20, 24, 24), Some(1), Some(GestureKind::Tap));
+        // Both expanded targets cover (40,30); the later node is drawn on top.
+        assert_eq!(e.hit_test(40, 30), Some(2));
+        assert_eq!(e.hit_test_path(40, 30), vec![2, 1]);
+        // Outside the top node's expansion the lower node still wins.
+        assert_eq!(e.hit_test_path(0, 20), vec![1]);
     }
 }
