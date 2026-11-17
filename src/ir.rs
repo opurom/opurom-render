@@ -500,6 +500,8 @@ pub struct Props {
     pub weight: Option<String>,
     pub letter_spacing: Option<i64>,
     pub font_px: Option<i64>,
+    /// Grid: distribute surplus box height across rows (deterministic i128).
+    pub fill_height: bool,
     pub labels: Vec<String>,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -532,6 +534,9 @@ pub struct Props {
     pub effects: Vec<VisualEffect>,
     // Optional deterministic particle field.
     pub particles: Option<Particles>,
+    // Incremental-render boundaries (additive, opt-in).
+    pub repaint_boundary: bool,
+    pub relayout_boundary: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1408,6 +1413,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
             Some(0) => return Err(bad(format!("{what}.fontPx must be a positive integer"))),
             other => other,
         },
+        fill_height: opt_bool(o, "fillHeight", what)?,
         labels: labels_prop(o, "labels", what)?,
         min: opt_signed_integer(o, "min", what)?,
         max: opt_signed_integer(o, "max", what)?,
@@ -1424,6 +1430,8 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         rows: opt_integer(o, "rows", what)?,
         effects: effects_prop(o, what)?,
         particles: particles_prop(o, what)?,
+        repaint_boundary: opt_bool(o, "repaintBoundary", what)?,
+        relayout_boundary: opt_bool(o, "relayoutBoundary", what)?,
         source,
         item,
     })
