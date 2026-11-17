@@ -618,10 +618,16 @@ impl Canvas {
             None => (n.rect.x + n.rect.w / 2, n.rect.y + n.rect.h / 2),
         };
         let outer = self.clip;
-        self.clip = match (outer, n.clip) {
-            (Some(a), Some(b)) => Some(intersect(a, b)),
-            (Some(a), None) => Some(a),
-            (None, b) => b,
+        // Flutter's InkRipple clips the expanding disc to the Material box
+        // (referenceBox / rectCallback). Intersect with the node's own rect so
+        // the splash never spills outside the button and stays a small layer.
+        let node_clip = match n.clip {
+            Some(c) => intersect(c, n.rect),
+            None => n.rect,
+        };
+        self.clip = match (outer, node_clip) {
+            (Some(a), b) => Some(intersect(a, b)),
+            (None, b) => Some(b),
         };
         self.draw_ripple(cx, cy, radius, color);
         self.clip = outer;

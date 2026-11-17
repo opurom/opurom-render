@@ -205,6 +205,12 @@ pub struct Renderer {
     /// outside its node box, so the next frame must re-rasterize fully even if
     /// the node boxes are unchanged (otherwise the ripple leaves a residue).
     prev_had_press: bool,
+    /// Hint for `finish_frame`: a known superset of the changed pixels. When
+    /// set, the full-frame pixel diff is skipped and this rect is emitted as
+    /// the dirty list. Incremental/press paths know their own dirty region;
+    /// re-scanning 10 MB every frame just to rediscover it was the dominant
+    /// per-frame cost. Cleared after one frame.
+    dirty_hint: Option<crate::layout::Rect>,
     /// Nodes and pixels the most recent incremental render recomputed.
     redrawn_nodes: usize,
     redraw_pixels: u64,
@@ -243,6 +249,7 @@ impl Renderer {
             prev_size: None,
             prev_laid: None,
             prev_had_press: false,
+            dirty_hint: None,
             redrawn_nodes: 0,
             redraw_pixels: 0,
             anim: RefCell::new(AnimTable::new()),
@@ -436,19 +443,138 @@ impl Renderer {
         self.finish_frame(laid, pixels)
     }
 
+    /// Incremental press frame: identical pixels to `render_with_press`, but
+    /// only re-rasterizes the dirty region (the press node's state colour and
+    /// the ripple disc) over the previous buffer. A ripple paints outside the
+    /// node box, so its full-lifetime disc is unioned into the region; this
+    /// also clears the previous frame's disc. Falls back to the full path
+    /// whenever incremental reuse is unsafe.
+    pub fn render_with_press_incremental(
+        &mut self,
+        ir: &Ir,
+        state: &StateView,
+        elapsed_ms: i64,
+        press: Option<&PressPhase>,
+    ) -> Frame {
+        let mut laid = crate::layout::layout_animated_at(
+            ir,
+            state,
+            self.width,
+            self.height,
+            elapsed_ms,
+            &mut self.anim.borrow_mut(),
+        );
+        if let Some(p) = press {
+            if let Some(n) = laid.iter_mut().find(|n| n.id == p.node_id) {
+                if n.state != NodeState::Disabled {
+                    n.state = NodeState::Active;
+                }
+            }
+        }
+        let pal = Palette::from_theme(&ir.theme);
+        let reusable = self.prev.is_some()
+            && self.prev_laid.is_some()
+            && self.prev_size == Some((self.width, self.height));
+        let region = if reusable {
+            let mut r = changed_region(
+                &laid,
+                self.prev_laid.as_ref().unwrap(),
+                self.width,
+                self.height,
+            );
+            // Union the ripple's full-lifetime disc around the press node so
+            // every press frame paints (and clears) the same bounded area.
+            if let Some(p) = press {
+                if let Some(n) = laid.iter().find(|n| n.id == p.node_id) {
+                    r = union_rect(r, ripple_disc(n, p.touch, self.width, self.height));
+                }
+            }
+            r
+        } else {
+            Rect {
+                x: 0,
+                y: 0,
+                w: self.width as i64,
+                h: self.height as i64,
+            }
+        };
+
+        let pixels = if region.w <= 0 || region.h <= 0 {
+            self.prev
+                .clone()
+                .unwrap_or_else(|| self.raster_laid_press(&laid, ir, press, elapsed_ms))
+        } else {
+            let mut canvas = raster::Canvas::from_pixels(
+                self.width,
+                self.height,
+                self.prev
+                    .clone()
+                    .unwrap_or_else(|| vec![0u8; (self.width * self.height * 4) as usize]),
+            );
+            canvas.set_edge_aa(self.edge_aa);
+            canvas.set_suppress_text(self.suppress_text);
+            canvas.set_render_quality(ir.render_quality.as_ref());
+            canvas.clip = Some(region);
+            canvas.fill_rect(region, pal.stage);
+            for n in &laid {
+                if !rect_intersects(n.rect, region) {
+                    continue;
+                }
+                if press.map_or(false, |p| p.node_id == n.id)
+                    && n.kind == crate::Kind::Text
+                    && n.state == NodeState::Active
+                    && node_has_tap(&ir.tree, n.id)
+                {
+                    let c = n.text_color.unwrap_or(n.accent);
+                    canvas.fill_rounded(
+                        n.rect,
+                        Rgba {
+                            r: c.r,
+                            g: c.g,
+                            b: c.b,
+                            a: 26,
+                        },
+                        n.radius,
+                    );
+                }
+                raster::draw(&mut canvas, n);
+                if let Some(p) = press.filter(|p| p.node_id == n.id) {
+                    canvas.draw_node_ripple(n, p.press_start_tick, elapsed_ms, p.touch, n.accent);
+                }
+            }
+            canvas.pixels
+        };
+        self.prev_had_press = press.is_some();
+        self.dirty_hint = Some(region);
+        self.finish_frame(laid, pixels)
+    }
+
     /// Post-layout bookkeeping shared by every full render: diff against the
     /// buffered frame, then commit the new buffer and node list.
     fn finish_frame(&mut self, laid: Vec<LaidOut>, pixels: Vec<u8>) -> Frame {
-        let dirty = match (self.prev.as_deref(), self.prev_size) {
-            (Some(prev), Some((pw, ph))) => {
-                diff_resize_rects(prev, pw, ph, &pixels, self.width, self.height)
+        let dirty = if let Some(r) = self.dirty_hint.take() {
+            if r.w <= 0 || r.h <= 0 {
+                Vec::new()
+            } else {
+                vec![DirtyRect {
+                    x: r.x.max(0) as u32,
+                    y: r.y.max(0) as u32,
+                    w: r.w.max(0) as u32,
+                    h: r.h.max(0) as u32,
+                }]
             }
-            _ => vec![DirtyRect {
-                x: 0,
-                y: 0,
-                w: self.width,
-                h: self.height,
-            }],
+        } else {
+            match (self.prev.as_deref(), self.prev_size) {
+                (Some(prev), Some((pw, ph))) => {
+                    diff_resize_rects(prev, pw, ph, &pixels, self.width, self.height)
+                }
+                _ => vec![DirtyRect {
+                    x: 0,
+                    y: 0,
+                    w: self.width,
+                    h: self.height,
+                }],
+            }
         };
         self.prev = Some(pixels.clone());
         self.prev_size = Some((self.width, self.height));
@@ -618,6 +744,65 @@ fn layout_is_incremental_safe(laid: &[LaidOut]) -> bool {
         .all(|n| n.visual_effects.is_empty() && n.particles.is_none())
 }
 
+/// Union of two rectangles, accounting for the zero-sized empty rect.
+fn union_rect(a: crate::layout::Rect, b: crate::layout::Rect) -> crate::layout::Rect {
+    use crate::layout::Rect;
+    if b.w <= 0 || b.h <= 0 {
+        return a;
+    }
+    if a.w <= 0 || a.h <= 0 {
+        return b;
+    }
+    let x0 = a.x.min(b.x);
+    let y0 = a.y.min(b.y);
+    let x1 = (a.x + a.w).max(b.x + b.w);
+    let y1 = (a.y + a.h).max(b.y + b.h);
+    Rect {
+        x: x0,
+        y: y0,
+        w: x1 - x0,
+        h: y1 - y0,
+    }
+}
+
+/// Bounding box a node's ripple can cover across its whole lifetime: the disc
+/// centred at the touch point (or node centre) with the maximum radius the
+/// raster uses. Clamped to the viewport, with margin so the previous frame's
+/// disc is fully repainted and cleared.
+fn ripple_disc(
+    n: &LaidOut,
+    touch: Option<(i64, i64)>,
+    width: u32,
+    height: u32,
+) -> crate::layout::Rect {
+    use crate::layout::Rect;
+    let (cx, cy) = match touch {
+        Some((tx, ty)) => (n.rect.x + tx, n.rect.y + ty),
+        None => (n.rect.x + n.rect.w / 2, n.rect.y + n.rect.h / 2),
+    };
+    let r = (n.rect.w.max(0) / 2).max(n.rect.h.max(0) / 2);
+    // The raster clips the ripple to the node box (Flutter InkRipple), so the
+    // dirty region is the disc intersected with the box, not the whole disc.
+    // A small margin covers anti-aliasing at the clipped edge.
+    const MARGIN: i64 = 2;
+    let x0 = (cx - r - MARGIN).max(n.rect.x).max(0).min(width as i64);
+    let y0 = (cy - r - MARGIN).max(n.rect.y).max(0).min(height as i64);
+    let x1 = (cx + r + MARGIN)
+        .min(n.rect.x + n.rect.w)
+        .max(0)
+        .min(width as i64);
+    let y1 = (cy + r + MARGIN)
+        .min(n.rect.y + n.rect.h)
+        .max(0)
+        .min(height as i64);
+    Rect {
+        x: x0,
+        y: y0,
+        w: x1 - x0,
+        h: y1 - y0,
+    }
+}
+
 /// Union of the new and previous bounding boxes of every node whose layout
 /// differs, expanded by the shadow margin and clamped to the viewport. An empty
 /// rect means no node changed.
@@ -640,7 +825,23 @@ fn changed_region(
         y1 = y1.max(r.y + r.h + MARGIN);
     };
     for n in laid {
-        let unchanged = prev_laid.iter().any(|p| p.id == n.id && p == n);
+        // `phase` carries the animation clock. For every node except a spinner
+        // it does not affect drawing, so a clock-only change must not mark the
+        // node dirty (that would defeat the entire incremental path on every
+        // tick). Spinners rotate with phase and stay clock-sensitive.
+        let unchanged = prev_laid.iter().any(|p| {
+            if p.id != n.id {
+                return false;
+            }
+            if n.control == Some(Control::Spinner) {
+                return p == n;
+            }
+            let mut a = n.clone();
+            let mut b = p.clone();
+            a.phase = 0;
+            b.phase = 0;
+            a == b
+        });
         if !unchanged {
             grow(n.rect);
         }
