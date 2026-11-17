@@ -10,6 +10,7 @@ use opurom_render::{
     WINDOW_FRAMES,
 };
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fs, path::Path, path::PathBuf};
 
 /// An IR whose particle field and effect passes visibly shrink per tier.
@@ -61,10 +62,16 @@ fn digest(ir: &Path, ppm: &Path, args: &[&str]) -> String {
 }
 
 fn fixtures() -> (PathBuf, PathBuf) {
-    // Concurrent cargo test processes share CARGO_TARGET_TMPDIR; a
-    // process-unique prefix keeps this run's IR and PPM private.
+    // Tests in one binary run in parallel and share CARGO_TARGET_TMPDIR. A
+    // per-call counter makes every IR/PPM path unique, so a concurrent write
+    // cannot truncate the file another test's CLI is reading.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let tag = format!("auto-degrade-{}-", std::process::id());
+    let tag = format!(
+        "auto-degrade-{}-{}-",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
     let ir = dir.join(format!("{tag}fixture.opuir.json"));
     fs::write(&ir, PERF_IR).unwrap();
     (ir, dir.join(format!("{tag}frame.ppm")))
