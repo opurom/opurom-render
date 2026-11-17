@@ -93,10 +93,14 @@ const AAA_MIN_RADIUS: i64 = 4;
 
 impl Canvas {
     pub fn new(width: u32, height: u32, bg: Rgba) -> Canvas {
-        let n = width as usize * height as usize * 4;
-        let mut pixels = Vec::with_capacity(n);
-        for _ in 0..width as usize * height as usize {
-            pixels.extend_from_slice(&[bg.r, bg.g, bg.b, 255]);
+        let w = width as usize;
+        let h = height as usize;
+        let mut pixels = vec![0u8; w * h * 4];
+        if w > 0 && h > 0 {
+            let row: Vec<u8> = [bg.r, bg.g, bg.b, 255].repeat(w);
+            for y in 0..h {
+                pixels[y * w * 4..(y + 1) * w * 4].copy_from_slice(&row);
+            }
         }
         Canvas {
             width,
