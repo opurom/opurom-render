@@ -141,6 +141,19 @@ pub enum Gesture {
         dx: i64,
         dy: i64,
     },
+    /// A long press that was accepted and then moved. The four offsets follow
+    /// `LongPressMoveUpdateDetails` (`long_press.dart:176-196`): `dx`/`dy` are
+    /// global `offsetFromOrigin`, `ldx`/`ldy` local `localOffsetFromOrigin`.
+    LongPressMoveUpdate {
+        global_x: i64,
+        global_y: i64,
+        local_x: i64,
+        local_y: i64,
+        dx: i64,
+        dy: i64,
+        ldx: i64,
+        ldy: i64,
+    },
     /// A two-finger scale. `scale` is fixed point, 1024 == 1.0, computed as
     /// current span / initial span (`scale.dart:455,463`). `focal_x`/`focal_y`
     /// are the current midpoint of the two pointers (`scale.dart:641`).
@@ -448,6 +461,9 @@ pub struct GestureEngine {
     nodes: Vec<NodeEntry>,
     down: Option<Down>,
     scale: Option<ScaleTrack>,
+    /// Opt-in long-press drag updates; off keeps the legacy post-trigger moves
+    /// silent, so existing arena fingerprints stay byte-identical.
+    long_press_move_update: bool,
     phase: Phase,
     last_tap: Option<TapMark>,
     arena: Arena,
@@ -456,6 +472,12 @@ pub struct GestureEngine {
 impl GestureEngine {
     pub fn new() -> GestureEngine {
         GestureEngine::default()
+    }
+
+    /// Opt in to post-long-press move updates. The default engine stays silent
+    /// after `LongPress` so existing consumers see no new gesture stream.
+    pub fn enable_long_press_move_update(&mut self) {
+        self.long_press_move_update = true;
     }
 
     /// Registers a node in draw order (the order returned by `layout`).
@@ -661,6 +683,26 @@ impl GestureEngine {
         let Some(down) = self.down else { return None };
         if down.node != node_id || down.pointer_id != event.pointer_id {
             return None;
+        }
+        if self.long_press_move_update
+            && self.phase == Phase::Triggered
+            && self
+                .arena
+                .winner()
+                .is_some_and(|w| w.kind == GestureKind::LongPress)
+        {
+            // long_press.dart:783-800: every accepted move reports the current
+            // position and its offset from the down origin, in both frames.
+            return Some(Gesture::LongPressMoveUpdate {
+                global_x: event.global_x,
+                global_y: event.global_y,
+                local_x: event.local_x,
+                local_y: event.local_y,
+                dx: event.global_x.saturating_sub(down.global_x),
+                dy: event.global_y.saturating_sub(down.global_y),
+                ldx: event.local_x.saturating_sub(down.local_x),
+                ldy: event.local_y.saturating_sub(down.local_y),
+            });
         }
         if let Some(winner) = self.arena.winner() {
             if winner.kind == GestureKind::Drag {

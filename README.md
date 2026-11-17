@@ -285,7 +285,7 @@ Interactive nodes accept a `gesture` prop that names the gesture they accept:
 | --- | --- |
 | `tap` | `down` then `up` on the same node within 150 ms, with the up within 18 px of the down. The first tap reports `Tap`; a second tap within 300 ms and at least 40 ms later, within 100 px, reports `DoubleTap`. |
 | `doubleTap` | Same sequence as `tap`; the caller dispatches only the `DoubleTap` result. |
-| `longPress` | A down held for 500 ms. The engine has no timer, so the threshold is checked lazily on each event while the pointer is down; it fires once and then ignores the rest of that down. |
+| `longPress` | A down held for 500 ms. The engine has no timer, so the threshold is checked lazily on each tick while the pointer is down; it fires once. With `GestureEngine::enable_long_press_move_update()`, each later move reports `LongPressMoveUpdate` with global/local positions and offsets from the down point; without it the rest of that down stays silent. |
 | `drag` | A move past 18 px from the down point reports `Drag { dx, dy }`, the delta from the down point. |
 | `scale` | Two pointers on the same node form a scale candidate. A span change past 18 px or a focal move past 36 px reports `Scale { scale, focal_x, focal_y }` (`scale` is fixed point, 1024 == 1.0) on every move of either pointer. A single pointer never scales. |
 
