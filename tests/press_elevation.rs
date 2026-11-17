@@ -14,7 +14,7 @@ fn node_ir(shadow: i64, state: Option<&str>) -> String {
         r##"{{
         "ir": "0.1.0", "app": "PressElev", "state": [],
         "tree": {{ "id": 0, "kind": "Column", "props": {{ "gap": 2 }},
-            "children": [ {{ "id": 1, "kind": "Container", "props": {{
+            "children": [ {{ "id": 1, "kind": "Button", "props": {{
                 "color": "#102030", "width": 60, "height": 40, "radius": 4,
                 "shadow": {shadow}{state_prop} }},
                 "children": [], "events": {{}} }} ], "events": {{}} }},

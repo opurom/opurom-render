@@ -2,7 +2,7 @@
 //! Flutter paints the splash on the button's Material box. A press whose IR
 //! ancestors contain no button-semantic node must never paint a ripple.
 
-use opurom_render::{parse_ir, PressPhase, Renderer, StateView};
+use opurom_render::{a11y_tree, digest_hex, parse_ir, PressPhase, Renderer, StateView};
 
 fn ir() -> String {
     r##"{
@@ -68,15 +68,75 @@ fn hit_text_child_paints_ripple_on_the_button_host() {
     assert!((nc as i64 - nb as i64).abs() < 800);
 }
 
+/// Flutter gives GestureDetector no press feedback. A tappable Text or Row
+/// with no Button ancestor must stay byte-identical to the idle frame.
 #[test]
-fn plain_text_and_container_have_no_ripple_host() {
-    assert_eq!(ripple_count(&idle()), 0);
-    assert!(
-        ripple_count(&frame(3, 300)) < 500,
-        "plain tappable Text has no ink host"
+fn plain_text_and_container_have_no_press_feedback() {
+    let base = idle();
+    assert_eq!(ripple_count(&base), 0);
+    assert_eq!(
+        digest_hex(&frame(3, 300)),
+        digest_hex(&base),
+        "plain tappable Text: no tint and no ripple"
     );
-    assert!(
-        ripple_count(&frame(4, 300)) < 500,
-        "plain tappable Container has no ink host"
+    assert_eq!(
+        digest_hex(&frame(4, 300)),
+        digest_hex(&base),
+        "plain tappable Container: no tint and no ripple"
     );
+}
+
+/// Host and ripple must agree: pressing a Button's Text child paints both the
+/// Active tint and the disc inside the Button box, never on the child.
+#[test]
+fn ink_host_tint_and_ripple_stay_inside_the_button_box() {
+    let text = ir();
+    let ir = parse_ir(&text).unwrap();
+    let state = StateView::from_ir(&ir);
+    let btn = a11y_tree(&ir, &state, 240, 200)
+        .into_iter()
+        .find(|n| n.id == 1)
+        .unwrap()
+        .bounds;
+    let (bx, by, bw, bh) = (btn[0], btn[1], btn[2], btn[3]);
+    let base = idle();
+    let pressed = frame(2, 300);
+    let (mut inside, mut outside) = (0, 0);
+    for (i, (a, b)) in base
+        .chunks_exact(4)
+        .zip(pressed.chunks_exact(4))
+        .enumerate()
+    {
+        if a == b {
+            continue;
+        }
+        let (px, py) = ((i % 240) as i64, (i / 240) as i64);
+        if bx <= px && px < bx + bw && by <= py && py < by + bh {
+            inside += 1;
+        } else {
+            outside += 1;
+        }
+    }
+    assert!(inside > 1000, "the Button box carries tint and ripple");
+    assert_eq!(outside, 0, "no feedback outside the Button box");
+}
+
+/// The incremental path must apply the same host-only policy as the full path.
+#[test]
+fn incremental_plain_press_is_byte_identical_to_idle() {
+    let text = ir();
+    let ir = parse_ir(&text).unwrap();
+    let state = StateView::from_ir(&ir);
+    let press = PressPhase {
+        node_id: 3,
+        press_start_tick: 0,
+        confirm_tick: None,
+        touch: None,
+    };
+    let mut r = Renderer::new(240, 200);
+    let idle_pixels = r.render_at(&ir, &state, 300).pixels;
+    let pressed = r
+        .render_with_press_incremental(&ir, &state, 300, Some(&press))
+        .pixels;
+    assert_eq!(digest_hex(&pressed), digest_hex(&idle_pixels));
 }

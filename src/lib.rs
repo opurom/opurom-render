@@ -497,9 +497,14 @@ impl Renderer {
             &mut self.anim.borrow_mut(),
         );
         if let Some(p) = press {
-            if let Some(n) = laid.iter_mut().find(|n| n.id == p.node_id) {
-                if n.state != NodeState::Disabled {
-                    n.state = NodeState::Active;
+            // Flutter gives press feedback only to the ink host. The hit test
+            // may land on a text/row inside a Button; tint the Button instead.
+            let host_id = press_host(&laid, ir, p).map(|(host, _)| host.id);
+            if let Some(id) = host_id {
+                if let Some(n) = laid.iter_mut().find(|n| n.id == id) {
+                    if n.state != NodeState::Disabled {
+                        n.state = NodeState::Active;
+                    }
                 }
             }
         }
@@ -532,9 +537,14 @@ impl Renderer {
             &mut self.anim.borrow_mut(),
         );
         if let Some(p) = press {
-            if let Some(n) = laid.iter_mut().find(|n| n.id == p.node_id) {
-                if n.state != NodeState::Disabled {
-                    n.state = NodeState::Active;
+            // Flutter gives press feedback only to the ink host. The hit test
+            // may land on a text/row inside a Button; tint the Button instead.
+            let host_id = press_host(&laid, ir, p).map(|(host, _)| host.id);
+            if let Some(id) = host_id {
+                if let Some(n) = laid.iter_mut().find(|n| n.id == id) {
+                    if n.state != NodeState::Disabled {
+                        n.state = NodeState::Active;
+                    }
                 }
             }
         }
@@ -548,8 +558,9 @@ impl Renderer {
         let reusable = self.prev.is_some()
             && self.prev_laid.is_some()
             && self.prev_size == Some((self.width, self.height));
-        let cur_disc = press
-            .and_then(|p| press_host(&laid, ir, p))
+        let host = press.and_then(|p| press_host(&laid, ir, p));
+        let cur_disc = host
+            .as_ref()
             .map(|(host, hp)| ripple_disc(host, hp.touch, self.width, self.height));
         let region = if reusable {
             let mut r = changed_region(
@@ -591,7 +602,7 @@ impl Renderer {
             canvas.set_edge_aa(self.edge_aa);
             canvas.set_suppress_text(self.suppress_text);
             canvas.set_elevation_shadows(self.elevation_shadows);
-            canvas.set_press_elevate(press.map(|p| p.node_id));
+            canvas.set_press_elevate(host.as_ref().map(|(h, _)| h.id));
             canvas.set_render_quality(ir.render_quality.as_ref());
             canvas.clip = Some(region);
             canvas.fill_rect(region, pal.stage);
@@ -599,7 +610,7 @@ impl Renderer {
                 if !rect_intersects(n.rect, region) {
                     continue;
                 }
-                if press.map_or(false, |p| p.node_id == n.id)
+                if host.as_ref().map_or(false, |(h, _)| h.id == n.id)
                     && n.kind == crate::Kind::Text
                     && n.state == NodeState::Active
                     && node_has_tap(&ir.tree, n.id)
@@ -617,9 +628,9 @@ impl Renderer {
                     );
                 }
                 raster::draw(&mut canvas, n);
-                if let Some((host, hp)) = press.and_then(|p| press_host(&laid, ir, p)) {
-                    if host.id == n.id {
-                        canvas.draw_node_ripple(n, &hp, elapsed_ms, n.accent);
+                if let Some((h, hp)) = host.as_ref() {
+                    if h.id == n.id {
+                        canvas.draw_node_ripple(n, hp, elapsed_ms, n.accent);
                     }
                 }
             }
@@ -698,31 +709,31 @@ impl Renderer {
         canvas.set_edge_aa(self.edge_aa);
         canvas.set_suppress_text(self.suppress_text);
         canvas.set_elevation_shadows(self.elevation_shadows);
-        canvas.set_press_elevate(press.map(|p| p.node_id));
+        let host = press.and_then(|p| press_host(laid, ir, p));
+        canvas.set_press_elevate(host.as_ref().map(|(h, _)| h.id));
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
-            // A tappable Text has no authored fill, so Active darkening has
-            // nothing to paint. Draw the M3 pressed state layer beneath the
-            // glyph: low-alpha accent, only for a pressed tap-gesture Text.
-            if press.map_or(false, |p| p.node_id == n.id) {
-                if n.kind == crate::Kind::Text
-                    && n.state == crate::interaction::NodeState::Active
-                    && node_has_tap(&ir.tree, n.id)
-                {
-                    let c = n.text_color.unwrap_or(n.accent);
-                    let layer = Rgba {
-                        r: c.r,
-                        g: c.g,
-                        b: c.b,
-                        a: 26, // 10% state layer on primary
-                    };
-                    canvas.fill_rounded(n.rect, layer, n.radius);
-                }
+            // A tappable Text ink host has no authored fill, so Active
+            // darkening has nothing to paint. Draw the M3 state layer under
+            // the glyph: low-alpha accent, only for a pressed tap-gesture Text.
+            if host.as_ref().map_or(false, |(h, _)| h.id == n.id)
+                && n.kind == crate::Kind::Text
+                && n.state == crate::interaction::NodeState::Active
+                && node_has_tap(&ir.tree, n.id)
+            {
+                let c = n.text_color.unwrap_or(n.accent);
+                let layer = Rgba {
+                    r: c.r,
+                    g: c.g,
+                    b: c.b,
+                    a: 26, // 10% state layer on primary
+                };
+                canvas.fill_rounded(n.rect, layer, n.radius);
             }
             raster::draw(&mut canvas, n);
-            if let Some((host, hp)) = press.and_then(|p| press_host(laid, ir, p)) {
-                if host.id == n.id {
-                    canvas.draw_node_ripple(n, &hp, elapsed_ms, n.accent);
+            if let Some((h, hp)) = host.as_ref() {
+                if h.id == n.id {
+                    canvas.draw_node_ripple(n, hp, elapsed_ms, n.accent);
                 }
             }
         }
