@@ -160,3 +160,37 @@ fn hex_of(s: String) -> String {
             .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64))
     )
 }
+
+/// Curved edges sample on an 8x8 grid (65 coverage levels); the old 4x4 grid
+/// offered only 17. Count distinct blend colours along a large-radius arc.
+#[test]
+fn rounded_corner_span_more_than_64_blend_levels() {
+    let text = r##"{
+      "ir": "0.1.0", "app": "CornerLevels", "state": [],
+      "renderQuality": { "msaa": 4 },
+      "tree": { "id": 0, "kind": "Column", "props": { "padding": 0 },
+        "children": [ { "id": 1, "kind": "Container", "props": {
+            "width": 120, "height": 120, "color": "#112233", "radius": 60
+          }, "children": [], "events": {} } ], "events": {} },
+      "theme": { "mode": "light", "accent": "#097FEB", "radius": 12 }
+    }"##;
+    let ir = parse_ir(text).unwrap();
+    let state = StateView::from_ir(&ir);
+    let px = Renderer::new(200, 200).render(&ir, &state).pixels;
+    let at = |x: usize, y: usize| {
+        let i = (y * 200 + x) * 4;
+        [px[i], px[i + 1], px[i + 2]]
+    };
+    let stage = at(150, 150);
+    let fill = [0x11, 0x22, 0x33];
+    let mut levels = std::collections::BTreeSet::new();
+    for y in 0..60 {
+        for x in 0..60 {
+            let c = at(x, y);
+            if c != stage && c != fill {
+                levels.insert(c);
+            }
+        }
+    }
+    assert!(levels.len() > 64, "corner blend levels = {}", levels.len());
+}

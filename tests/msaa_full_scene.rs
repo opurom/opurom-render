@@ -83,12 +83,13 @@ fn scene_ir(quality: Option<serde_json::Value>) -> String {
 }
 
 #[test]
-fn full_scene_edge_pixels_match_the_fixed_4x_coverage_oracle() {
+fn full_scene_edge_pixels_match_the_fixed_coverage_oracle() {
     let aa = scene(true);
     // Byte-for-byte oracle for the whole four-shape scene. The sub-sample
     // coverage values themselves are checked against an independent analytic
     // point-to-segment reference in raster.rs unit tests.
-    assert_eq!(digest_hex(&aa), "9f422bcb800abf64");
+    // Curved edges use 8x8 coverage (CORNER_AA), straight lines stay 4x4.
+    assert_eq!(digest_hex(&aa), "f5b37190668c14cc");
     assert!(
         count_partial(&aa) >= 20,
         "edge coverage must produce partial pixels"

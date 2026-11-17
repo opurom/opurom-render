@@ -77,8 +77,13 @@ pub struct Canvas {
     commands: Vec<Command>,
 }
 
-/// Sub-samples per axis for opt-in geometric edge coverage.
+/// Sub-samples per axis for opt-in straight-line coverage.
 const EDGE_AA: i64 = 4;
+/// Finer sub-samples for curved edges (rounded boxes, discs, rings). Curvature
+/// needs more than the 16 straight-line samples to avoid visible stair-steps;
+/// 8x8 gives 65 coverage levels. Independent of EDGE_AA so line raster stays
+/// byte-stable.
+const CORNER_AA: i64 = 8;
 
 impl Canvas {
     pub fn new(width: u32, height: u32, bg: Rgba) -> Canvas {
@@ -152,47 +157,49 @@ impl Canvas {
         }
     }
 
-    /// 4x4 integer coverage of a rounded-box edge at one pixel. Sub-samples are
-    /// taken in a 4x-scaled space so the existing quarter-circle predicate is
+    /// 8x8 integer coverage of a rounded-box edge at one pixel. Sub-samples are
+    /// taken in an 8x-scaled space so the existing quarter-circle predicate is
     /// reused without floats. Interior pixels return 255 and keep the fast path.
     fn round_coverage(r: Rect, x: i64, y: i64, rad: i64) -> u8 {
         if rad <= 0 {
             return 255;
         }
         let big = Rect {
-            x: r.x * EDGE_AA,
-            y: r.y * EDGE_AA,
-            w: r.w * EDGE_AA,
-            h: r.h * EDGE_AA,
+            x: r.x * CORNER_AA,
+            y: r.y * CORNER_AA,
+            w: r.w * CORNER_AA,
+            h: r.h * CORNER_AA,
         };
-        let bx = x * EDGE_AA;
-        let by = y * EDGE_AA;
+        let bx = x * CORNER_AA;
+        let by = y * CORNER_AA;
         let mut hits = 0i64;
-        for sy in 0..EDGE_AA {
-            for sx in 0..EDGE_AA {
-                if !Self::outside_round(big, bx + sx, by + sy, rad * EDGE_AA) {
+        for sy in 0..CORNER_AA {
+            for sx in 0..CORNER_AA {
+                if !Self::outside_round(big, bx + sx, by + sy, rad * CORNER_AA) {
                     hits += 1;
                 }
             }
         }
-        ((255 * hits + (EDGE_AA * EDGE_AA) / 2) / (EDGE_AA * EDGE_AA)) as u8
+        let n = CORNER_AA * CORNER_AA;
+        ((255 * hits + n / 2) / n) as u8
     }
 
-    /// 4x4 integer coverage of a disc (`inner` is the squared inner radius for
+    /// 8x8 integer coverage of a disc (`inner` is the squared inner radius for
     /// rings; pass 0 for a filled circle) at one pixel.
     fn circle_coverage(cx: i64, cy: i64, outer: i64, inner: i64, x: i64, y: i64) -> u8 {
         let mut hits = 0i64;
-        for sy in 0..EDGE_AA {
-            for sx in 0..EDGE_AA {
-                let dx = (x * EDGE_AA + sx) - cx * EDGE_AA;
-                let dy = (y * EDGE_AA + sy) - cy * EDGE_AA;
+        for sy in 0..CORNER_AA {
+            for sx in 0..CORNER_AA {
+                let dx = (x * CORNER_AA + sx) - cx * CORNER_AA;
+                let dy = (y * CORNER_AA + sy) - cy * CORNER_AA;
                 let d = dx * dx + dy * dy;
                 if d <= outer && d > inner {
                     hits += 1;
                 }
             }
         }
-        ((255 * hits + (EDGE_AA * EDGE_AA) / 2) / (EDGE_AA * EDGE_AA)) as u8
+        let n = CORNER_AA * CORNER_AA;
+        ((255 * hits + n / 2) / n) as u8
     }
 
     /// Blend a colour whose alpha encodes edge coverage; 255 keeps the exact
@@ -574,7 +581,7 @@ impl Canvas {
         for y in y_from..y_to {
             for x in x_from..x_to {
                 if self.edge_aa {
-                    let cov = Self::circle_coverage(cx, cy, limit * EDGE_AA * EDGE_AA, 0, x, y);
+                    let cov = Self::circle_coverage(cx, cy, limit * CORNER_AA * CORNER_AA, 0, x, y);
                     self.set_covered(x, y, c, cov);
                 } else {
                     let dx = x - cx;
@@ -608,7 +615,7 @@ impl Canvas {
         for y in y_from..y_to {
             for x in x_from..x_to {
                 if self.edge_aa {
-                    let s = EDGE_AA * EDGE_AA;
+                    let s = CORNER_AA * CORNER_AA;
                     let cov = Self::circle_coverage(cx, cy, outer * s, inner * s, x, y);
                     self.set_covered(x, y, c, cov);
                 } else {
