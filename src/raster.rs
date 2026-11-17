@@ -651,7 +651,7 @@ impl Canvas {
         elapsed_ms: i64,
         tint: Rgba,
     ) {
-        let max_r = (n.rect.w.max(0) / 2).max(n.rect.h.max(0) / 2);
+        let max_r = interaction::ripple_target_radius(n.rect.w, n.rect.h);
         let Some((radius, alpha)) =
             interaction::ripple_frame(press, elapsed_ms, max_r, interaction::RIPPLE_PEAK_ALPHA)
         else {

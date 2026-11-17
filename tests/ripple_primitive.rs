@@ -5,8 +5,9 @@
 
 use opurom_render::{
     digest_hex, raster::Canvas, ripple_alpha_confirmed, ripple_alpha_held, ripple_frame,
-    ripple_radius_confirmed, ripple_radius_unconfirmed, PressPhase, Rect, Rgba, RIPPLE_FADE_IN_MS,
-    RIPPLE_FADE_OUT_MS, RIPPLE_PEAK_ALPHA, RIPPLE_RADIUS_MS, RIPPLE_UNCONFIRMED_MS,
+    ripple_radius_confirmed, ripple_radius_unconfirmed, ripple_target_radius, PressPhase, Rect,
+    Rgba, RIPPLE_FADE_IN_MS, RIPPLE_FADE_OUT_MS, RIPPLE_PEAK_ALPHA, RIPPLE_RADIUS_MS,
+    RIPPLE_UNCONFIRMED_MS,
 };
 
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
@@ -96,6 +97,56 @@ fn controllers_are_independent_integer_curves() {
     assert_eq!(ripple_alpha_confirmed(300, RIPPLE_PEAK_ALPHA), 128);
     assert_eq!(ripple_alpha_confirmed(375, RIPPLE_PEAK_ALPHA), 0);
     assert_eq!(ripple_radius_confirmed(300, 225, 100), 105);
+}
+
+/// S3: Flutter `_getTargetRadius` is half the box diagonal, so the splash
+/// reaches all four corners. `max(w,h)/2` stopped at the edge midpoints.
+#[test]
+fn target_radius_is_half_the_diagonal() {
+    assert_eq!(ripple_target_radius(0, 0), 0);
+    assert_eq!(ripple_target_radius(3, 4), 2); // isqrt(25)/2
+    assert_eq!(ripple_target_radius(100, 100), 70); // isqrt(20000)=141
+    assert_eq!(ripple_target_radius(120, 60), 67); // isqrt(18000)=134
+    assert_eq!(ripple_target_radius(60, 120), 67); // symmetric
+    let target = ripple_target_radius(120, 60);
+    assert_eq!(ripple_radius_unconfirmed(1000, target), target + 5);
+    assert_eq!(ripple_radius_unconfirmed(2000, target), target + 5);
+    assert_eq!(ripple_radius_unconfirmed(0, target), target * 30 / 100);
+}
+
+/// S3 visual proof: the diagonal target+5 paints the box corner; the old
+/// `max(w,h)/2` target leaves it untouched.
+#[test]
+fn diagonal_target_covers_button_corners() {
+    let color = Rgba {
+        r: 9,
+        g: 127,
+        b: 235,
+        a: 255,
+    };
+    let corner_pixels = |radius: i64| {
+        let mut c = Canvas::new(120, 60, Rgba::rgb(0, 0, 0));
+        c.draw_ripple(60, 30, radius, color);
+        let mut n = 0;
+        for y in 0..6 {
+            for x in 0..6 {
+                let i = (y * 120 + x) * 4;
+                if [c.pixels[i], c.pixels[i + 1], c.pixels[i + 2]] != [0, 0, 0] {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    assert_eq!(
+        corner_pixels(60),
+        0,
+        "old max(w,h)/2 target misses the corner"
+    );
+    assert!(
+        corner_pixels(ripple_target_radius(120, 60) + 5) > 0,
+        "diagonal target reaches the corner"
+    );
 }
 
 #[test]

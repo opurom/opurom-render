@@ -196,6 +196,31 @@ fn ease(x: i64) -> i64 {
     (y as i128 * UNIT as i128 / EASE_UNIT as i128) as i64
 }
 
+/// Floor integer square root, no float. `mid <= v / mid` avoids overflow.
+fn isqrt(v: i128) -> i128 {
+    if v <= 0 {
+        return 0;
+    }
+    let (mut lo, mut hi) = (1i128, v);
+    while lo < hi {
+        let mid = lo + (hi - lo + 1) / 2;
+        if mid <= v / mid {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+/// Flutter `_getTargetRadius` (ink_ripple.dart:43): half the box diagonal, so
+/// the splash reaches all four corners. Integer floor, no float.
+pub fn ripple_target_radius(w: i64, h: i64) -> i64 {
+    let w = w.max(0) as i128;
+    let h = h.max(0) as i128;
+    (isqrt(w * w + h * h) / 2) as i64
+}
+
 /// Radius endpoint for a target: Flutter draws up to `target + 5`.
 fn ripple_end(max_radius: i64) -> i64 {
     max_radius.max(0) + RIPPLE_END_EXTRA

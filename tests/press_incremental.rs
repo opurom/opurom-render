@@ -99,3 +99,81 @@ fn press_with_frame_effect_falls_back_to_full_bytes() {
         );
     }
 }
+
+fn switch_ir() -> opurom_render::Ir {
+    let text = r##"{
+      "ir": "0.1.0", "app": "SwitchPress", "state": [],
+      "tree": { "id": 0, "kind": "Column", "props": { "padding": 8, "gap": 20 }, "children": [
+        { "id": 1, "kind": "Button", "props": { "width": 140, "height": 70 },
+          "children": [
+            { "id": 2, "kind": "Text", "props": { "value": "A", "size": 12,
+                                                  "color": "#101010" },
+              "children": [], "events": { "tap": { "actions": [] } } }
+          ], "events": {} },
+        { "id": 3, "kind": "Button", "props": { "label": "B", "width": 80, "height": 40 },
+          "children": [], "events": {} }
+      ], "events": {} },
+      "theme": { "mode": "light", "accent": "#097FEB", "radius": 4,
+                 "surface": "#FFFFFF", "onSurface": "#000000" }
+    }"##;
+    opurom_render::parse_ir(text).unwrap()
+}
+
+fn held(id: u32, touch: Option<(i64, i64)>) -> PressPhase {
+    PressPhase {
+        node_id: id,
+        press_start_tick: 0,
+        confirm_tick: None,
+        touch,
+    }
+}
+
+/// S2: after a press moves from button A to button B, the incremental frame
+/// must equal a fresh full render of press B. Any stale splash left in the
+/// prev buffer at A would change the digest.
+#[test]
+fn switching_press_host_clears_the_previous_ripple() {
+    let ir = switch_ir();
+    let state = StateView::from_ir(&ir);
+    let (w, h) = (200u32, 200u32);
+    let mut incr = Renderer::new(w, h);
+    let _ = incr.render_at(&ir, &state, 4000);
+    for &ms in &[75i64, 300, 500] {
+        let _ =
+            incr.render_with_press_incremental(&ir, &state, ms, Some(&held(2, Some((130, 60)))));
+    }
+    let switched = incr.render_with_press_incremental(&ir, &state, 500, Some(&held(3, None)));
+
+    let mut full = Renderer::new(w, h);
+    let _ = full.render_at(&ir, &state, 4000);
+    let expected = full.render_with_press(&ir, &state, 500, Some(&held(3, None)));
+    assert_eq!(
+        digest_hex(&switched.pixels),
+        digest_hex(&expected.pixels),
+        "old ripple on button 1 must clear when press moves to button 3"
+    );
+}
+
+/// S2: the same host with a moved touch point also relocates the disc; the
+/// previous disc must be unioned into the dirty region and cleared.
+#[test]
+fn switching_touch_position_clears_the_previous_disc() {
+    let ir = switch_ir();
+    let state = StateView::from_ir(&ir);
+    let (w, h) = (200u32, 200u32);
+    let p1 = held(1, Some((10, 10)));
+    let p2 = held(1, Some((60, 30)));
+    let mut incr = Renderer::new(w, h);
+    let _ = incr.render_at(&ir, &state, 4000);
+    let _ = incr.render_with_press_incremental(&ir, &state, 500, Some(&p1));
+    let switched = incr.render_with_press_incremental(&ir, &state, 500, Some(&p2));
+
+    let mut full = Renderer::new(w, h);
+    let _ = full.render_at(&ir, &state, 4000);
+    let expected = full.render_with_press(&ir, &state, 500, Some(&p2));
+    assert_eq!(
+        digest_hex(&switched.pixels),
+        digest_hex(&expected.pixels),
+        "old disc at the first touch point must be cleared"
+    );
+}

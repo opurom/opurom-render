@@ -77,11 +77,11 @@ pub use incremental::{
 };
 pub use interaction::{
     is_interactive, press_color, ripple_alpha_confirmed, ripple_alpha_held, ripple_frame,
-    ripple_progress, ripple_radius_confirmed, ripple_radius_unconfirmed, NodeState, PressPhase,
-    Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY, RIPPLE_DURATION_MS,
-    RIPPLE_FADE_IN_MS, RIPPLE_FADE_OUT_MS, RIPPLE_FADE_OUT_START_MS, RIPPLE_PEAK_ALPHA,
-    RIPPLE_RADIUS_MS, RIPPLE_START_PERCENT, RIPPLE_TOTAL_MS, RIPPLE_UNCONFIRMED_MS, SUCCESS,
-    WARNING,
+    ripple_progress, ripple_radius_confirmed, ripple_radius_unconfirmed, ripple_target_radius,
+    NodeState, PressPhase, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
+    RIPPLE_DURATION_MS, RIPPLE_FADE_IN_MS, RIPPLE_FADE_OUT_MS, RIPPLE_FADE_OUT_START_MS,
+    RIPPLE_PEAK_ALPHA, RIPPLE_RADIUS_MS, RIPPLE_START_PERCENT, RIPPLE_TOTAL_MS,
+    RIPPLE_UNCONFIRMED_MS, SUCCESS, WARNING,
 };
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Directionality, Event, Ir, IrError, Kind,
@@ -204,10 +204,11 @@ pub struct Renderer {
     prev_size: Option<(u32, u32)>,
     /// Previous laid-out node list, used to locate the nodes that changed.
     prev_laid: Option<Vec<LaidOut>>,
-    /// True when the buffered frame carried a press ripple. A ripple paints
-    /// outside its node box, so the next frame must re-rasterize fully even if
-    /// the node boxes are unchanged (otherwise the ripple leaves a residue).
-    prev_had_press: bool,
+    /// Ripple disc painted in the previous press frame. The ripple extends
+    /// outside its node box, so the next incremental frame must re-rasterize
+    /// this area even when the node boxes are unchanged — otherwise moving a
+    /// press leaves the old ripple in the buffer. `None` means no prior ripple.
+    prev_press_disc: Option<crate::layout::Rect>,
     /// Hint for `finish_frame`: a known superset of the changed pixels. When
     /// set, the full-frame pixel diff is skipped and this rect is emitted as
     /// the dirty list. Incremental/press paths know their own dirty region;
@@ -303,7 +304,7 @@ impl Renderer {
             prev: None,
             prev_size: None,
             prev_laid: None,
-            prev_had_press: false,
+            prev_press_disc: None,
             dirty_hint: None,
             redrawn_nodes: 0,
             redraw_pixels: 0,
@@ -503,7 +504,9 @@ impl Renderer {
             }
         }
         let pixels = self.raster_laid_press(&laid, ir, press, elapsed_ms);
-        self.prev_had_press = press.is_some();
+        self.prev_press_disc = press
+            .and_then(|p| press_host(&laid, ir, p))
+            .map(|(host, hp)| ripple_disc(host, hp.touch, self.width, self.height));
         self.finish_frame(laid, pixels)
     }
 
@@ -545,6 +548,9 @@ impl Renderer {
         let reusable = self.prev.is_some()
             && self.prev_laid.is_some()
             && self.prev_size == Some((self.width, self.height));
+        let cur_disc = press
+            .and_then(|p| press_host(&laid, ir, p))
+            .map(|(host, hp)| ripple_disc(host, hp.touch, self.width, self.height));
         let region = if reusable {
             let mut r = changed_region(
                 &laid,
@@ -552,12 +558,13 @@ impl Renderer {
                 self.width,
                 self.height,
             );
-            // Union the ripple's full-lifetime disc around the press node so
-            // every press frame paints (and clears) the same bounded area.
-            if let Some(p) = press {
-                if let Some((host, hp)) = press_host(&laid, ir, p) {
-                    r = union_rect(r, ripple_disc(host, hp.touch, self.width, self.height));
-                }
+            // A press moving to another host leaves its old splash in the
+            // buffer. Re-rasterize both discs so the old one is cleared.
+            if let Some(d) = cur_disc {
+                r = union_rect(r, d);
+            }
+            if let Some(d) = self.prev_press_disc {
+                r = union_rect(r, d);
             }
             r
         } else {
@@ -618,7 +625,7 @@ impl Renderer {
             }
             canvas.pixels
         };
-        self.prev_had_press = press.is_some();
+        self.prev_press_disc = cur_disc;
         self.dirty_hint = Some(region);
         self.finish_frame(laid, pixels)
     }
@@ -751,11 +758,11 @@ impl Renderer {
         // a resize or the first frame still rasterizes the whole surface.
         // A previous press frame painted outside its node box; a full raster
         // is required to clear that ripple even when node boxes did not move.
-        let reusable = !self.prev_had_press
+        let reusable = self.prev_press_disc.is_none()
             && self.prev.is_some()
             && self.prev_laid.is_some()
             && self.prev_size == Some((self.width, self.height));
-        self.prev_had_press = false;
+        self.prev_press_disc = None;
         let (pixels, redrawn_nodes, redraw_pixels) = if !reusable {
             let pixels = self.raster_laid(&laid, ir);
             (pixels, laid.len(), self.width as u64 * self.height as u64)
@@ -860,7 +867,7 @@ fn ripple_disc(
         Some((tx, ty)) => (n.rect.x + tx, n.rect.y + ty),
         None => (n.rect.x + n.rect.w / 2, n.rect.y + n.rect.h / 2),
     };
-    let r = (n.rect.w.max(0) / 2).max(n.rect.h.max(0) / 2);
+    let r = crate::interaction::ripple_target_radius(n.rect.w, n.rect.h);
     // The raster clips the ripple to the node box (Flutter InkRipple), so the
     // dirty region is the disc intersected with the box, not the whole disc.
     // A small margin covers anti-aliasing at the clipped edge.
