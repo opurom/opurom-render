@@ -45,16 +45,18 @@ fn stdout(ir: &PathBuf, ppm: &PathBuf, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
-fn fixtures() -> (PathBuf, PathBuf) {
+fn fixtures(name: &str) -> (PathBuf, PathBuf) {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let ir = dir.join("quality.opuir.json");
+    // Each test gets its own paths: cargo runs tests in parallel, so a shared
+    // PPM lets one test read another test's output.
+    let ir = dir.join(format!("quality-{name}.opuir.json"));
     fs::write(&ir, QUALITY_IR).unwrap();
-    (ir, dir.join("quality.ppm"))
+    (ir, dir.join(format!("quality-{name}.ppm")))
 }
 
 #[test]
 fn default_path_matches_library_render_and_has_no_quality_line() {
-    let (ir_path, ppm) = fixtures();
+    let (ir_path, ppm) = fixtures("default");
     let out = stdout(&ir_path, &ppm, &[]);
     assert_eq!(out, format!("digest={DEFAULT_DIGEST}\ndirty=1\n"));
 
@@ -70,7 +72,7 @@ fn default_path_matches_library_render_and_has_no_quality_line() {
 
 #[test]
 fn frame_budget_degrades_the_frame_and_reports_quality() {
-    let (ir_path, ppm) = fixtures();
+    let (ir_path, ppm) = fixtures("degrade");
     let default = stdout(&ir_path, &ppm, &[]);
     let default_bytes = fs::read(&ppm).unwrap();
 
@@ -97,7 +99,7 @@ fn frame_budget_degrades_the_frame_and_reports_quality() {
 
 #[test]
 fn frame_budget_tiers_are_monotonic_and_deterministic() {
-    let (ir_path, ppm) = fixtures();
+    let (ir_path, ppm) = fixtures("tiers");
     let default_digest = DEFAULT_DIGEST.to_string();
     let mut previous_particles = 0usize;
     for (budget, expected) in [(0, 16), (4, 32), (8, 48), (16, 64)] {
@@ -123,7 +125,7 @@ fn frame_budget_tiers_are_monotonic_and_deterministic() {
 
 #[test]
 fn frame_budget_is_validated() {
-    let (ir_path, ppm) = fixtures();
+    let (ir_path, ppm) = fixtures("invalid");
     for bad in ["-1", "1001", "abc"] {
         let out = run(&ir_path, &ppm, &["--frame-budget", bad]);
         assert_eq!(out.status.code(), Some(1), "{bad} must fail cleanly");
