@@ -59,7 +59,8 @@ pub use anim::{
 pub use curve::cubic_bezier;
 pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
 pub use effects::{
-    VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS, EFFECT_UNIT,
+    elevation_level, VisualEffect, VisualEffectKind, EFFECT_MAX_OFFSET, EFFECT_MAX_RADIUS,
+    EFFECT_UNIT, ELEVATION_TABLE,
 };
 pub use font::{measure, FontMetrics};
 pub use gestures::{
@@ -224,6 +225,8 @@ pub struct Renderer {
     edge_aa: bool,
     /// Opt-in display-layer split: skip bitmap text for system-font overlay.
     suppress_text: bool,
+    /// Opt-in material elevation table for node shadows (§12.5). Off by default.
+    elevation_shadows: bool,
 }
 
 /// True when the IR node with `id` is tappable: either a `gesture: tap` prop
@@ -307,6 +310,7 @@ impl Renderer {
             anim: RefCell::new(AnimTable::new()),
             edge_aa: false,
             suppress_text: false,
+            elevation_shadows: false,
         })
     }
 
@@ -320,6 +324,12 @@ impl Renderer {
     /// default path stays byte-identical; capture mode is unaffected.
     pub fn set_suppress_text(&mut self, on: bool) {
         self.suppress_text = on;
+    }
+
+    /// Enable the material elevation table for node shadows (§12.5). Off by
+    /// default so the strength-derived shadow path stays byte-identical.
+    pub fn set_elevation_shadows(&mut self, on: bool) {
+        self.elevation_shadows = on;
     }
 
     /// Convenience constructor; use `try_new` for untrusted CLI input.
@@ -388,6 +398,7 @@ impl Renderer {
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
         canvas.set_suppress_text(self.suppress_text);
+        canvas.set_elevation_shadows(self.elevation_shadows);
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in &laid {
             raster::draw(&mut canvas, n);
@@ -420,6 +431,7 @@ impl Renderer {
         let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
         canvas.set_suppress_text(self.suppress_text);
+        canvas.set_elevation_shadows(self.elevation_shadows);
         for n in &laid {
             let frame = crate::effects::EffectFrame::new(self.width, self.height, n);
             if frame.has_local {
@@ -571,6 +583,7 @@ impl Renderer {
             );
             canvas.set_edge_aa(self.edge_aa);
             canvas.set_suppress_text(self.suppress_text);
+            canvas.set_elevation_shadows(self.elevation_shadows);
             canvas.set_render_quality(ir.render_quality.as_ref());
             canvas.clip = Some(region);
             canvas.fill_rect(region, pal.stage);
@@ -653,6 +666,7 @@ impl Renderer {
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
         canvas.set_suppress_text(self.suppress_text);
+        canvas.set_elevation_shadows(self.elevation_shadows);
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
             raster::draw(&mut canvas, n);
@@ -675,6 +689,7 @@ impl Renderer {
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
         canvas.set_suppress_text(self.suppress_text);
+        canvas.set_elevation_shadows(self.elevation_shadows);
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
             // A tappable Text has no authored fill, so Active darkening has
@@ -757,6 +772,7 @@ impl Renderer {
                     raster::Canvas::from_pixels(self.width, self.height, prev.to_vec());
                 canvas.set_edge_aa(self.edge_aa);
                 canvas.set_suppress_text(self.suppress_text);
+                canvas.set_elevation_shadows(self.elevation_shadows);
                 canvas.set_render_quality(ir.render_quality.as_ref());
                 canvas.clip = Some(region);
                 canvas.fill_rect(region, pal.stage);

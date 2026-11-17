@@ -563,6 +563,111 @@ fn shadow(canvas: &mut Canvas, e: &VisualEffect, bounds: Rect, mask: &[u8], soft
     }
 }
 
+/// One material elevation layer: (offset_x, offset_y, blur, spread, alpha).
+/// Colors are black at the table alpha; the three layers share the box radius.
+pub type ElevationLayer = (i64, i64, i64, i64, u8);
+
+/// Material elevation table (DEFAULT_UI_GLASS_REFINEMENT.md §12.5), transcribed
+/// from opurom-ui/theme/material-tokens.json `tokens/elevation`. Indexed by
+/// level; levels 5 and 7+ are absent by spec. Each entry is
+/// `[ambient, penumbra, umbra]` drawn far-to-near. Alpha values are the
+/// #1F/#24/#33 AARRGGBB colors (31/36/51).
+pub const ELEVATION_TABLE: [Option<[ElevationLayer; 3]>; 7] = [
+    None,                                                            // 0
+    Some([(0, 1, 3, 0, 31), (0, 1, 1, 0, 36), (0, 2, 1, -1, 51)]),   // 1
+    Some([(0, 1, 5, 0, 31), (0, 2, 2, 0, 36), (0, 3, 1, -2, 51)]),   // 2
+    Some([(0, 1, 8, 0, 31), (0, 3, 4, 0, 36), (0, 3, 3, -2, 51)]),   // 3
+    Some([(0, 1, 10, 0, 31), (0, 4, 5, 0, 36), (0, 2, 4, -1, 51)]),  // 4
+    None,                                                            // 5 (no level)
+    Some([(0, 1, 18, 0, 31), (0, 6, 10, 0, 36), (0, 3, 5, -1, 51)]), // 6
+];
+
+/// Resolve a `shadow` strength (0..8) to a table level: the largest level
+/// `<= min(strength, 6)`. Strength 5 falls back to 4, 7/8 to 6, 0 has none.
+pub fn elevation_level(strength: i64) -> usize {
+    let s = strength.clamp(0, 8) as usize;
+    if s >= 6 {
+        6
+    } else if s == 5 {
+        4
+    } else {
+        s
+    }
+}
+
+/// Draw a material elevation shadow for `n` at `level`, far-to-near. Uses the
+/// existing deterministic box blur and integer compositing; no floats, no wall
+/// clock. Called only when the backend elevation switch is on and not capturing,
+/// so the default path and the display-list command stream are untouched.
+pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
+    let Some(layers) = ELEVATION_TABLE.get(level).copied().flatten() else {
+        return;
+    };
+    let clip = canvas.effective_clip();
+    let rad = shape_radius(n);
+    for (dx, dy, blur, spread, alpha) in layers {
+        // Layer box: node rect expanded by spread (negative shrinks), shifted
+        // by the layer offset. Clamp radius into the (possibly smaller) box.
+        let box_r = Rect {
+            x: n.rect.x.saturating_add(dx).saturating_sub(spread),
+            y: n.rect.y.saturating_add(dy).saturating_sub(spread),
+            w: (n.rect.w.saturating_add(spread.saturating_mul(2))).max(0),
+            h: (n.rect.h.saturating_add(spread.saturating_mul(2))).max(0),
+        };
+        if box_r.w <= 0 || box_r.h <= 0 {
+            continue;
+        }
+        let sigma = blur.max(0) / 2; // blur radius = 2*sigma (CSS/Skia)
+        let pad = sigma.saturating_mul(3).max(1);
+        let bounds = clipped_area(canvas.width, canvas.height, clip, box_r, pad);
+        if bounds.w <= 0 || bounds.h <= 0 {
+            continue;
+        }
+        let bw = bounds.w as usize;
+        let bh = bounds.h as usize;
+        let mut mask = vec![0u8; bw * bh];
+        let lrad = rad
+            .saturating_add(spread.max(0))
+            .max(0)
+            .min(box_r.w.min(box_r.h) / 2);
+        for iy in 0..bh {
+            let y = bounds.y + iy as i64;
+            for ix in 0..bw {
+                let x = bounds.x + ix as i64;
+                if x < clip.x
+                    || y < clip.y
+                    || x >= clip.x.saturating_add(clip.w)
+                    || y >= clip.y.saturating_add(clip.h)
+                {
+                    continue;
+                }
+                if !Canvas::outside_round(box_r, x, y, lrad) {
+                    mask[iy * bw + ix] = 255;
+                }
+            }
+        }
+        let soft = blur_mask(&mask, bw, bh, sigma);
+        for iy in 0..bh {
+            let y = bounds.y + iy as i64;
+            for ix in 0..bw {
+                let x = bounds.x + ix as i64;
+                // Skip pixels under the node's own body: the shadow is behind it.
+                if !Canvas::outside_round(n.rect, x, y, rad)
+                    && x >= n.rect.x
+                    && y >= n.rect.y
+                    && x < n.rect.x.saturating_add(n.rect.w)
+                    && y < n.rect.y.saturating_add(n.rect.h)
+                {
+                    continue;
+                }
+                let cov = soft[iy * bw + ix] as i64;
+                let a = ((alpha as i64 * cov + 127) / 255).clamp(0, 255) as u8;
+                composite(canvas, x, y, DARK, a);
+            }
+        }
+    }
+}
+
 fn glow(
     canvas: &mut Canvas,
     n: &LaidOut,

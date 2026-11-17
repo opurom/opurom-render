@@ -1,4 +1,4 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--elevation-shadows]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
@@ -269,7 +269,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--elevation-shadows] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
                 .to_string(),
         );
     }
@@ -296,6 +296,7 @@ fn run() -> Result<(), String> {
     let mut incremental = false;
     // Opt-in 4x geometric edge coverage; off by default for golden parity.
     let mut edge_aa = false;
+    let mut elevation_shadows = false;
     // Opt-in measured-frame budget: inject explicit samples (the CLI has no
     // live render loop) and apply the resulting tier caps to the render config.
     let mut auto_rate: Option<FrameRate> = None;
@@ -400,6 +401,10 @@ fn run() -> Result<(), String> {
                 edge_aa = true;
                 i += 1;
             }
+            "--elevation-shadows" => {
+                elevation_shadows = true;
+                i += 1;
+            }
             "--auto-degrade" => {
                 let contract = args
                     .get(i + 1)
@@ -446,7 +451,7 @@ fn run() -> Result<(), String> {
             }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental, --edge-aa, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
+                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental, --edge-aa, --elevation-shadows, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
                 ));
             }
         }
@@ -499,6 +504,7 @@ fn run() -> Result<(), String> {
     }
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
     renderer.set_edge_aa(edge_aa);
+    renderer.set_elevation_shadows(elevation_shadows);
     let (mut frame, incremental_line) = if incremental {
         let frame = renderer.render_incremental_at(&ir, &state, elapsed_ms);
         let (nodes, pixels) = renderer.redraw_stats();

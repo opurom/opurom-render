@@ -67,6 +67,9 @@ pub struct Canvas {
     /// Opt-in display-layer split: skip bitmap text so the host can overlay
     /// system-font spans. Off by default so every golden stays byte-identical.
     suppress_text: bool,
+    /// Opt-in material elevation table for node shadows. Off by default so the
+    /// strength-derived shadow path stays byte-identical; capture ignores it.
+    elevation_shadows: bool,
     capture: bool,
     commands: Vec<Command>,
 }
@@ -89,6 +92,7 @@ impl Canvas {
             edge_aa: false,
             gradient_bits: 10,
             suppress_text: false,
+            elevation_shadows: false,
             capture: false,
             commands: Vec::new(),
         }
@@ -112,6 +116,12 @@ impl Canvas {
     /// font spans instead. Every other primitive is unaffected. Default false.
     pub fn set_suppress_text(&mut self, on: bool) {
         self.suppress_text = on;
+    }
+
+    /// Enable the material elevation table for node shadows. Capture mode keeps
+    /// its command stream byte-identical, so this is a no-op while recording.
+    pub fn set_elevation_shadows(&mut self, on: bool) {
+        self.elevation_shadows = on && !self.capture;
     }
 
     /// Apply the root `renderQuality` opt-in signals. Capture ignores every
@@ -208,6 +218,7 @@ impl Canvas {
             edge_aa: false,
             gradient_bits: 10,
             suppress_text: false,
+            elevation_shadows: false,
             capture: false,
             commands: Vec::new(),
         }
@@ -762,6 +773,10 @@ fn with_alpha(c: Rgba, alpha: i64) -> Rgba {
 fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
     let s = n.effects.shadow.clamp(0, 8);
     if s == 0 {
+        return;
+    }
+    if canvas.elevation_shadows && !canvas.is_capturing() {
+        crate::effects::draw_elevation(canvas, n, crate::effects::elevation_level(s));
         return;
     }
     let dx = s / 2 + 1;
