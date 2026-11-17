@@ -146,29 +146,64 @@ pub struct PressPhase {
     pub touch: Option<(i64, i64)>,
 }
 
-/// Ripple timing in milliseconds. Structural constants held here until the
-/// material token table lands; callers may override duration per primitive.
-/// The value is the framework default from the medium motion token (§7).
-pub const RIPPLE_DURATION_MS: i64 = 220;
+/// Ripple timing, mirroring Flutter's `InkRipple` (packages/flutter/lib/src/
+/// material/ink_ripple.dart). Three independent controllers run off one
+/// caller clock: fade-in, radius expansion and a delayed fade-out. Durations
+/// are the framework's own constants, in milliseconds.
+pub const RIPPLE_FADE_IN_MS: i64 = 75;
+pub const RIPPLE_RADIUS_MS: i64 = 225;
+pub const RIPPLE_FADE_OUT_MS: i64 = 375;
+/// Fade-out begins once the radius expansion has finished (225/375 of its span).
+pub const RIPPLE_FADE_OUT_START_MS: i64 = RIPPLE_RADIUS_MS;
+/// The whole splash is gone when the fade-out controller completes.
+pub const RIPPLE_TOTAL_MS: i64 = RIPPLE_FADE_OUT_START_MS + RIPPLE_FADE_OUT_MS;
+/// Radius starts at 30% of the target radius, as Flutter's InkRipple does
+/// (initial splash diameter is 60% of the final diameter).
+pub const RIPPLE_START_PERCENT: i64 = 30;
+/// Legacy aggregate duration kept for the original primitive's callers/tests;
+/// the Flutter-accurate path uses the three constants above.
+pub const RIPPLE_DURATION_MS: i64 = RIPPLE_TOTAL_MS;
 /// Peak alpha of a fresh ripple, in fixed-point `UNIT` units.
 pub const RIPPLE_PEAK_ALPHA: i64 = 256; // 25% opacity
 
-/// Normalized ripple progress at `elapsed_ms` since the press, in `0..=UNIT`.
-/// Before the press zero, after the duration exactly `UNIT`; integer only.
+/// Progress of a phase in `0..=UNIT`: zero before `start`, ONE at/after
+/// `start+span`, ease-out cubic in between. Integer-only and deterministic.
+fn phase_progress(elapsed_ms: i64, start: i64, span: i64) -> i64 {
+    if elapsed_ms <= start {
+        return 0;
+    }
+    if elapsed_ms >= start + span || span <= 0 {
+        return UNIT;
+    }
+    let t = (elapsed_ms - start) as i128 * UNIT as i128 / span as i128;
+    let inv = UNIT as i128 - t;
+    (UNIT as i128 - inv * inv * inv / (UNIT as i128 * UNIT as i128)) as i64
+}
+
+/// Radius at `elapsed_ms` since the press: starts at 30% of `max_radius` and
+/// eases out to the full radius over `RIPPLE_RADIUS_MS`. Integer fixed point.
+pub fn ripple_radius(elapsed_ms: i64, max_radius: i64) -> i64 {
+    let p = phase_progress(elapsed_ms, 0, RIPPLE_RADIUS_MS);
+    let start = max_radius * RIPPLE_START_PERCENT / 100;
+    start + (max_radius - start) * p / UNIT
+}
+
+/// Alpha at `elapsed_ms` since the press: fades in over `RIPPLE_FADE_IN_MS`,
+/// holds at `peak`, then fades out over `RIPPLE_FADE_OUT_MS` beginning at
+/// `RIPPLE_FADE_OUT_START_MS`. Integer fixed point.
+pub fn ripple_alpha(elapsed_ms: i64, peak: i64) -> i64 {
+    let fade_in = phase_progress(elapsed_ms, 0, RIPPLE_FADE_IN_MS);
+    let fade_out = phase_progress(elapsed_ms, RIPPLE_FADE_OUT_START_MS, RIPPLE_FADE_OUT_MS);
+    (peak as i128 * fade_in as i128 * (UNIT - fade_out) as i128 / (UNIT as i128 * UNIT as i128))
+        as i64
+}
+
+/// Legacy linear progress retained for the original primitive test. The
+/// Flutter-accurate draw path calls `ripple_radius`/`ripple_alpha` directly
+/// with elapsed time and does not use this function.
 pub fn ripple_progress(elapsed_ms: i64, duration_ms: i64) -> i64 {
     let d = duration_ms.max(1);
     (elapsed_ms.clamp(0, d) as i128 * UNIT as i128 / d as i128) as i64
-}
-
-/// Ripple radius at `progress`: grows linearly to `max_radius`, integer fixed
-/// point with half-up rounding so small radii do not stall at zero.
-pub fn ripple_radius(progress: i64, max_radius: i64) -> i64 {
-    ((progress as i128 * max_radius as i128 + UNIT as i128 / 2) / UNIT as i128) as i64
-}
-
-/// Ripple alpha at `progress`: fades from `peak` to zero as the circle grows.
-pub fn ripple_alpha(progress: i64, peak: i64) -> i64 {
-    (peak as i128 * (UNIT - progress) as i128 / UNIT as i128).clamp(0, UNIT as i128) as i64
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

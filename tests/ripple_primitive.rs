@@ -1,10 +1,12 @@
 //! A3/M4 ripple primitive (ANIMATION_AND_PHYSICS.md §8): integer fixed-point
-//! ripple progress/radius/alpha and a clip-aware Canvas draw. Opt-in only; no
-//! existing render path calls it, so every pinned golden stays byte-identical.
+//! ripple progress/radius/alpha and a clip-aware Canvas draw. The radius and
+//! alpha follow Flutter's InkRipple timing (fade-in / ease expansion / delayed
+//! fade-out). Opt-in only; no default path calls it, so goldens stay identical.
 
 use opurom_render::{
     digest_hex, raster::Canvas, ripple_alpha, ripple_progress, ripple_radius, Rect, Rgba, ONE,
-    RIPPLE_DURATION_MS, RIPPLE_PEAK_ALPHA,
+    RIPPLE_DURATION_MS, RIPPLE_FADE_IN_MS, RIPPLE_FADE_OUT_START_MS, RIPPLE_PEAK_ALPHA,
+    RIPPLE_RADIUS_MS, RIPPLE_START_PERCENT, RIPPLE_TOTAL_MS,
 };
 
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
@@ -25,27 +27,66 @@ fn progress_has_exact_endpoints_and_is_monotonic() {
 }
 
 #[test]
-fn radius_grows_and_alpha_fades_in_lockstep() {
-    let max_r = 60;
-    let mut prev_r = -1;
-    let mut prev_a = i64::MAX;
-    for p in (0..=ONE).step_by(64) {
-        let r = ripple_radius(p, max_r);
-        let a = ripple_alpha(p, RIPPLE_PEAK_ALPHA);
-        assert!(r >= prev_r, "radius monotonic at p={p}");
-        assert!(a <= prev_a, "alpha fades at p={p}");
-        assert!(r <= max_r && a >= 0 && a <= RIPPLE_PEAK_ALPHA);
-        prev_r = r;
-        prev_a = a;
-    }
-    assert_eq!(ripple_radius(0, max_r), 0, "zero progress zero radius");
-    assert_eq!(ripple_radius(ONE, max_r), max_r, "full progress max radius");
+fn ripple_follows_flutter_ink_timing() {
+    // Radius starts at 30% of target, eases out to full by 225ms, then holds.
+    let max_r = 100;
+    let start_r = max_r * RIPPLE_START_PERCENT / 100;
     assert_eq!(
-        ripple_alpha(0, RIPPLE_PEAK_ALPHA),
-        RIPPLE_PEAK_ALPHA,
-        "fresh peak"
+        ripple_radius(0, max_r),
+        start_r,
+        "starts at 30% like InkRipple"
     );
-    assert_eq!(ripple_alpha(ONE, RIPPLE_PEAK_ALPHA), 0, "fully faded");
+    assert_eq!(
+        ripple_radius(RIPPLE_RADIUS_MS, max_r),
+        max_r,
+        "full at 225ms"
+    );
+    assert_eq!(
+        ripple_radius(RIPPLE_TOTAL_MS, max_r),
+        max_r,
+        "holds after expand"
+    );
+    let mut prev_r = -1;
+    for t in 0..=RIPPLE_TOTAL_MS {
+        let r = ripple_radius(t, max_r);
+        assert!(r >= prev_r && r <= max_r, "radius monotonic at t={t}");
+        prev_r = r;
+    }
+    // Alpha fades in over 75ms, holds at peak until fade-out begins, then
+    // decays to zero at the end of the 375ms fade-out.
+    assert_eq!(ripple_alpha(0, RIPPLE_PEAK_ALPHA), 0, "no alpha at press");
+    assert_eq!(
+        ripple_alpha(RIPPLE_FADE_IN_MS, RIPPLE_PEAK_ALPHA),
+        RIPPLE_PEAK_ALPHA,
+        "full alpha at 75ms"
+    );
+    assert_eq!(
+        ripple_alpha(RIPPLE_FADE_OUT_START_MS, RIPPLE_PEAK_ALPHA),
+        RIPPLE_PEAK_ALPHA,
+        "holds peak until fade-out starts"
+    );
+    assert_eq!(
+        ripple_alpha(RIPPLE_TOTAL_MS, RIPPLE_PEAK_ALPHA),
+        0,
+        "fully faded at 600ms"
+    );
+    let mut prev = 0;
+    for t in 0..=RIPPLE_FADE_IN_MS {
+        let a = ripple_alpha(t, RIPPLE_PEAK_ALPHA);
+        assert!(a >= prev, "alpha rises during fade-in at t={t}");
+        prev = a;
+    }
+    prev = RIPPLE_PEAK_ALPHA + 1;
+    for t in RIPPLE_FADE_OUT_START_MS..=RIPPLE_TOTAL_MS {
+        let a = ripple_alpha(t, RIPPLE_PEAK_ALPHA);
+        assert!(a <= prev, "alpha falls during fade-out at t={t}");
+        prev = a;
+    }
+    for t in 0..=RIPPLE_TOTAL_MS {
+        let a = ripple_alpha(t, RIPPLE_PEAK_ALPHA);
+        assert!(a >= 0 && a <= RIPPLE_PEAK_ALPHA, "alpha bounded at t={t}");
+    }
+    assert_eq!(RIPPLE_TOTAL_MS, RIPPLE_FADE_OUT_START_MS + 375);
 }
 
 #[test]

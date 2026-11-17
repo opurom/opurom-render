@@ -77,7 +77,8 @@ pub use incremental::{
 pub use interaction::{
     is_interactive, press_color, ripple_alpha, ripple_progress, ripple_radius, NodeState,
     PressPhase, Tone, Variant, CYAN, DEEP_INK, ERROR, FOCUS_RING, INFO, PRIMARY,
-    RIPPLE_DURATION_MS, RIPPLE_PEAK_ALPHA, SUCCESS, WARNING,
+    RIPPLE_DURATION_MS, RIPPLE_FADE_IN_MS, RIPPLE_FADE_OUT_START_MS, RIPPLE_PEAK_ALPHA,
+    RIPPLE_RADIUS_MS, RIPPLE_START_PERCENT, RIPPLE_TOTAL_MS, SUCCESS, WARNING,
 };
 pub use ir::{
     parse_ir, parse_state_json, Action, Align, Contrast, Directionality, Event, Ir, IrError, Kind,
@@ -200,6 +201,10 @@ pub struct Renderer {
     prev_size: Option<(u32, u32)>,
     /// Previous laid-out node list, used to locate the nodes that changed.
     prev_laid: Option<Vec<LaidOut>>,
+    /// True when the buffered frame carried a press ripple. A ripple paints
+    /// outside its node box, so the next frame must re-rasterize fully even if
+    /// the node boxes are unchanged (otherwise the ripple leaves a residue).
+    prev_had_press: bool,
     /// Nodes and pixels the most recent incremental render recomputed.
     redrawn_nodes: usize,
     redraw_pixels: u64,
@@ -237,6 +242,7 @@ impl Renderer {
             prev: None,
             prev_size: None,
             prev_laid: None,
+            prev_had_press: false,
             redrawn_nodes: 0,
             redraw_pixels: 0,
             anim: RefCell::new(AnimTable::new()),
@@ -426,6 +432,7 @@ impl Renderer {
             }
         }
         let pixels = self.raster_laid_press(&laid, ir, press, elapsed_ms);
+        self.prev_had_press = press.is_some();
         self.finish_frame(laid, pixels)
     }
 
@@ -537,9 +544,13 @@ impl Renderer {
         let pal = Palette::from_theme(&ir.theme);
         // A previous frame is reusable only when the viewport is unchanged, so
         // a resize or the first frame still rasterizes the whole surface.
-        let reusable = self.prev.is_some()
+        // A previous press frame painted outside its node box; a full raster
+        // is required to clear that ripple even when node boxes did not move.
+        let reusable = !self.prev_had_press
+            && self.prev.is_some()
             && self.prev_laid.is_some()
             && self.prev_size == Some((self.width, self.height));
+        self.prev_had_press = false;
         let (pixels, redrawn_nodes, redraw_pixels) = if !reusable {
             let pixels = self.raster_laid(&laid, ir);
             (pixels, laid.len(), self.width as u64 * self.height as u64)

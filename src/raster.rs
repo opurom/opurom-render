@@ -599,16 +599,19 @@ impl Canvas {
         touch: Option<(i64, i64)>,
         tint: Rgba,
     ) {
-        let progress = interaction::ripple_progress(
-            elapsed_ms.saturating_sub(press_start_tick),
-            interaction::RIPPLE_DURATION_MS,
-        );
-        if progress <= 0 {
+        let elapsed = elapsed_ms.saturating_sub(press_start_tick);
+        // Flutter InkRipple timing: radius and alpha advance on their own
+        // clocks (ease-out expansion from 30%, delayed fade-out), not a single
+        // lockstep linear progress.
+        if elapsed < 0 || elapsed > interaction::RIPPLE_TOTAL_MS {
             return;
         }
         let max_r = (n.rect.w.max(0) / 2).max(n.rect.h.max(0) / 2);
-        let radius = interaction::ripple_radius(progress, max_r);
-        let alpha = interaction::ripple_alpha(progress, interaction::RIPPLE_PEAK_ALPHA);
+        let radius = interaction::ripple_radius(elapsed, max_r);
+        let alpha = interaction::ripple_alpha(elapsed, interaction::RIPPLE_PEAK_ALPHA);
+        if alpha <= 0 {
+            return;
+        }
         let color = with_alpha(tint, alpha);
         let (cx, cy) = match touch {
             Some((tx, ty)) => (n.rect.x + tx, n.rect.y + ty),
