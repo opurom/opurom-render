@@ -1040,7 +1040,14 @@ fn place(
             }
             let sh = crate::incremental::subtree_hash(n, state);
             let dv = crate::incremental::dep_values(n, state);
-            let key = c.key(&id, sh, dv, rect, clip, rtl, bp_code(bp), elapsed_ms);
+            // Only clock-dependent subtrees key on elapsed_ms. Static subtrees
+            // reuse their memo across frames of a changing animation clock.
+            let phase_key = if subtree_clock_sensitive(n) {
+                elapsed_ms
+            } else {
+                0
+            };
+            let key = c.key(&id, sh, dv, rect, clip, rtl, bp_code(bp), phase_key);
             if let Some(seg) = c.get(&key, sh, rect.y) {
                 out.extend(seg.iter().cloned());
                 c.counters.layout_reused += seg.len();
@@ -1422,6 +1429,19 @@ fn place(
             c.insert(key, sh, seg);
         }
     }
+}
+
+/// True when any node in this subtree produces clock-dependent output: an
+/// entry/implicit animation, or a spinner whose phase is the animation clock.
+/// Only such subtrees need `elapsed_ms` in their layout cache key; every other
+/// subtree is clock-invariant and can be reused across frames of a changing
+/// clock (e.g. a press ripple pump). Keeping the clock out of static subtrees
+/// is what lets a tiny ripple avoid a full-tree layout every frame.
+fn subtree_clock_sensitive(n: &Node) -> bool {
+    if n.props.animate != crate::anim::Curve::None || n.kind == Kind::Spinner {
+        return true;
+    }
+    n.children.iter().any(subtree_clock_sensitive)
 }
 
 /// Resolve one node's animated props at `elapsed_ms`.
