@@ -516,6 +516,10 @@ pub struct Props {
     pub weight: Option<String>,
     pub letter_spacing: Option<i64>,
     pub font_px: Option<i64>,
+    /// Line-height multiplier, fixed 1024==1.0; 0 = kTextHeightNone.
+    pub line_height: Option<i64>,
+    /// Baseline selector; absent = alphabetic.
+    pub baseline_kind: Option<BaselineKind>,
     /// Grid: distribute surplus box height across rows (deterministic i128).
     pub fill_height: bool,
     pub labels: Vec<String>,
@@ -622,6 +626,44 @@ pub enum ThemeMode {
     System,
 }
 
+/// Per-em vertical font metrics for one family (1024 == 1 em). Values follow
+/// Flutter's positive-ascent convention; used for baseline alignment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FontVerticalMetrics {
+    pub ascent: i64,
+    pub descent: i64,
+    pub leading: i64,
+}
+
+/// Theme-level vertical metrics keyed by font family. Travels in the IR so the
+/// same IR produces the same baseline on every host (determinism red line).
+pub type VerticalMetrics = std::collections::BTreeMap<String, FontVerticalMetrics>;
+
+/// Which font baseline a node selects. `Alphabetic` is the default and matches
+/// Flutter's forced-alphabetic baseline; `Ideographic` is wire parity only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BaselineKind {
+    #[default]
+    Alphabetic,
+    Ideographic,
+}
+
+impl BaselineKind {
+    pub fn parse(s: &str) -> Option<BaselineKind> {
+        match s {
+            "alphabetic" => Some(BaselineKind::Alphabetic),
+            "ideographic" => Some(BaselineKind::Ideographic),
+            _ => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            BaselineKind::Alphabetic => "alphabetic",
+            BaselineKind::Ideographic => "ideographic",
+        }
+    }
+}
+
 /// Theme tokens; missing tokens fall back to `mode`/`accent`/`radius`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Contrast {
@@ -664,9 +706,12 @@ pub struct Theme {
     /// Global text scale (fixed point, 1024 == 1.0); nodes without their own
     /// `fontScale` prop inherit this value.
     pub font_scale: Option<i64>,
-    /// Global text metrics; nodes without their own `fontMetrics` prop inherit
-    /// it. `Fixed` keeps committed frames byte-identical.
+    /// Global text metrics mode; `Fixed` keeps committed frames byte-identical.
     pub font_metrics: FontMetrics,
+    /// Theme font family (wire key `fontFamily`); selects vertical metrics.
+    pub font_family: Option<String>,
+    /// Per-family vertical metrics for baseline alignment (opt-in).
+    pub vertical_metrics: VerticalMetrics,
 }
 
 /// Flat, ordered state map consumed by text interpolation and by the CLI.
@@ -774,6 +819,24 @@ fn opt_integer(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<i
         }
         None => Ok(None),
     }
+}
+
+/// Integer in an inclusive range, with a readable diagnostic.
+fn bounded_int(
+    m: &Map<String, Value>,
+    key: &str,
+    what: &str,
+    lo: i64,
+    hi: i64,
+) -> Result<i64, IrError> {
+    let v = m
+        .get(key)
+        .ok_or_else(|| bad(format!("{what}.{key} is required")))?;
+    let n = integer(v, &format!("{what}.{key}"))?;
+    if n < lo || n > hi {
+        return Err(bad(format!("{what}.{key} must be {lo}..={hi}")));
+    }
+    Ok(n)
 }
 
 /// Like `opt_integer` but negative values are allowed (slider bounds).
@@ -1123,6 +1186,28 @@ fn font_scale_in_range(parts: (bool, i128, i32)) -> bool {
         den *= 10;
     }
     2 * mant >= den && mant <= 3 * den
+}
+
+/// Line-height multiplier (fixed 1024==1.0, domain 0.5..=3.0), or exactly 0
+/// for Flutter's `kTextHeightNone`. Absent -> None -> legacy 1.5 box.
+fn line_height_prop(o: &Map<String, Value>, what: &str) -> Result<Option<i64>, IrError> {
+    let diag = || bad(format!("{what}.lineHeight must be 0 or 0.5..=3.0"));
+    let Some(v) = o.get("lineHeight") else {
+        return Ok(None);
+    };
+    let text = v.as_number().map(|n| n.to_string()).ok_or_else(diag)?;
+    // Exact 0 (integer or 0.0) is the kTextHeightNone sentinel.
+    let parts = decimal_parts(&text).ok_or_else(diag)?;
+    let (negative, mant, _scale) = parts;
+    if !negative && mant == 0 {
+        // Accept only a true zero literal, not e.g. 0.0 parsed with mant 0.
+        return Ok(Some(0));
+    }
+    if font_scale_in_range(parts) {
+        Ok(Some(fixed_from_parts(parts, 1024).ok_or_else(diag)?))
+    } else {
+        Err(diag())
+    }
 }
 
 /// `#RRGGBB,#RRGGBB` -> the two gradient stops.
@@ -1482,6 +1567,15 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         color_role: color_role_prop(o, "color", what)?,
         color: color_prop(o, "color", what)?,
         text_color: color_prop(o, "textColor", what)?,
+        line_height: line_height_prop(o, what)?,
+        baseline_kind: match opt_string(o, "baselineKind", what)?.as_deref() {
+            None => None,
+            Some(s) => Some(BaselineKind::parse(s).ok_or_else(|| {
+                bad(format!(
+                    "{what}.baselineKind has unknown value {s:?}: expected alphabetic or ideographic"
+                ))
+            })?),
+        },
         value: opt_text(o, "value", what)?,
         value_num,
         value_frac,
@@ -1882,6 +1976,54 @@ fn node(v: &Value, next_id: &mut u32, decls: &[StateDecl]) -> Result<Node, IrErr
     })
 }
 
+/// Parse `theme.verticalMetrics`: `{ "<family>": { "ascent": i, "descent": i,
+/// "leading": i } }`, per-em (1024==1em). ascent/descent in 0..=2048, leading
+/// in -1024..=1024. Missing or empty -> default (no baseline activation).
+fn vertical_metrics_prop(v: Option<&Value>) -> Result<VerticalMetrics, IrError> {
+    let Some(v) = v else {
+        return Ok(VerticalMetrics::new());
+    };
+    let o = v
+        .as_object()
+        .ok_or_else(|| bad("theme.verticalMetrics must be an object"))?;
+    let mut out = VerticalMetrics::new();
+    for (family, mv) in o {
+        let m = mv
+            .as_object()
+            .ok_or_else(|| bad(format!("theme.verticalMetrics.{family} must be an object")))?;
+        let ascent = bounded_int(
+            m,
+            "ascent",
+            &format!("theme.verticalMetrics.{family}"),
+            0,
+            2048,
+        )?;
+        let descent = bounded_int(
+            m,
+            "descent",
+            &format!("theme.verticalMetrics.{family}"),
+            0,
+            2048,
+        )?;
+        let leading = bounded_int(
+            m,
+            "leading",
+            &format!("theme.verticalMetrics.{family}"),
+            -1024,
+            1024,
+        )?;
+        out.insert(
+            family.clone(),
+            FontVerticalMetrics {
+                ascent,
+                descent,
+                leading,
+            },
+        );
+    }
+    Ok(out)
+}
+
 fn tokens(v: &Value) -> Result<ThemeTokens, IrError> {
     let Some(o) = v.as_object() else {
         return Err(bad("theme.tokens must be a JSON object"));
@@ -1938,6 +2080,8 @@ fn theme(v: &Value) -> Result<Theme, IrError> {
         })?,
         None => FontMetrics::Fixed,
     };
+    let font_family = opt_string(o, "fontFamily", "theme")?;
+    let vertical_metrics = vertical_metrics_prop(o.get("verticalMetrics"))?;
     Ok(Theme {
         mode,
         accent,
@@ -1945,6 +2089,8 @@ fn theme(v: &Value) -> Result<Theme, IrError> {
         tokens: tk,
         font_scale,
         font_metrics,
+        font_family,
+        vertical_metrics,
     })
 }
 

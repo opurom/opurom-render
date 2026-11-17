@@ -2191,7 +2191,13 @@ fn draw_text(canvas: &mut Canvas, n: &LaidOut) {
                 Align::Center => n.rect.x + ((n.rect.w - tw) / 2).max(pad),
                 Align::End => n.rect.x + (n.rect.w - tw - pad).max(pad),
             };
-            let y0 = n.rect.y + ((n.rect.h - th) / 2).max(pad);
+            let y0 = match n.text_baseline {
+                // Opt-in baseline: seat the bitmap glyph band on the real
+                // baseline (top = baseline - glyph height). Default path keeps
+                // the historical vertical centering byte-for-byte.
+                Some(baseline) => baseline - th,
+                None => n.rect.y + ((n.rect.h - th) / 2).max(pad),
+            };
             (x0, y0)
         }
     };

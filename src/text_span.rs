@@ -24,6 +24,8 @@ pub struct TextSpan {
     pub weight: Option<String>,
     pub letter_spacing: Option<i64>,
     pub font_px: Option<i64>,
+    /// Absolute baseline from vertical metrics, emitted only when activated.
+    pub baseline: Option<i64>,
 }
 
 fn align_name(a: Align) -> &'static str {
@@ -62,6 +64,7 @@ pub fn text_spans(laid: &[LaidOut]) -> Vec<TextSpan> {
                 weight: n.text_weight.clone(),
                 letter_spacing: n.text_letter_spacing,
                 font_px: n.text_font_px,
+                baseline: n.text_baseline,
             })
         })
         .collect()
@@ -71,9 +74,9 @@ pub fn text_spans(laid: &[LaidOut]) -> Vec<TextSpan> {
 /// every number is an integer, so two runs over the same input are byte-equal.
 /// Shape: `[{"x":..,"y":..,"w":..,"h":..,"text":"..","color":[r,g,b,a],
 /// "size":..,"align":"start|center|end","origin":[x,y]|null, ...opt-in
-/// "weight"/"letterSpacing"/"fontPx" when declared}, ...]`. The three typography
-/// keys appear only when the source declared them; default spans keep the exact
-/// pinned bytes. Field order is fixed and every number is an integer.
+/// "weight"/"letterSpacing"/"fontPx"/"baseline" when declared}, ...]`. The
+/// opt-in keys appear only when active; default spans keep the exact pinned
+/// bytes. Field order is fixed and every number is an integer.
 pub fn text_spans_json(laid: &[LaidOut]) -> String {
     fn escape(text: &str, out: &mut String) {
         for c in text.chars() {
@@ -145,6 +148,10 @@ pub fn text_spans_json(laid: &[LaidOut]) -> String {
         if let Some(fp) = s.font_px {
             out.push_str(",\"fontPx\":");
             out.push_str(&fp.to_string());
+        }
+        if let Some(bl) = s.baseline {
+            out.push_str(",\"baseline\":");
+            out.push_str(&bl.to_string());
         }
         out.push('}');
     }

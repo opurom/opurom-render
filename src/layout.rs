@@ -286,6 +286,10 @@ pub struct LaidOut {
     pub text_weight: Option<String>,
     pub text_letter_spacing: Option<i64>,
     pub text_font_px: Option<i64>,
+    /// Absolute baseline from vertical metrics, when activated (opt-in).
+    pub text_baseline: Option<i64>,
+    /// Node line-height multiplier (fixed 1024==1.0), carried for the baseline pass.
+    pub text_line_height: Option<i64>,
     /// Animation clock phase in milliseconds (drives the spinner).
     pub phase: i64,
     pub accent: Rgba,
@@ -799,6 +803,41 @@ pub fn layout_at(
     layout_animated_at(ir, state, width, height, elapsed_ms, &mut AnimTable::new())
 }
 
+/// Opt-in baseline pass: for nodes with an exact `fontPx` whose family has
+/// vertical metrics in the theme, compute a real baseline and line box. Every
+/// new field is absent by default, so this pass is a no-op on the legacy path.
+fn apply_text_baselines(out: &mut [LaidOut], theme: &Theme) {
+    let Some(family) = theme.font_family.as_deref() else {
+        return;
+    };
+    let Some(m) = theme.vertical_metrics.get(family) else {
+        return;
+    };
+    for n in out.iter_mut() {
+        let Some(px) = n.text_font_px else {
+            continue;
+        };
+        let round = |v: i64| -> i64 { ((v as i128 * px as i128 + 512) / 1024) as i64 };
+        let ascent = round(m.ascent);
+        let descent = round(m.descent);
+        let leading = ((m.leading as i128 * px as i128) / 1024) as i64;
+        let metric_box = ascent + descent + leading;
+        // kTextHeightNone (0) and absent both use the metrics-derived box;
+        // a positive multiplier overrides it with round(lineHeight * px).
+        let line_box = match n.text_line_height {
+            Some(v) if v > 0 => round(v),
+            _ => metric_box,
+        };
+        if line_box > 0 {
+            n.rect.h = line_box;
+        }
+        // Single baseline for the whole run, at line top plus the ascent share
+        // of leading. Ideographic resolves through the same baseline for now
+        // (Flutter forces alphabetic; documented limit in the spec proposal).
+        n.text_baseline = Some(n.rect.y + ascent + leading / 2);
+    }
+}
+
 /// Layout at a given animation clock position, updating `anim` with each
 /// node's animated targets. The table is the renderer's cross-tick animation
 /// state: a changed target restarts the interpolation from the previous target.
@@ -843,6 +882,7 @@ pub fn layout_animated_at(
         &mut out,
         None,
     );
+    apply_text_baselines(&mut out, &ir.theme);
     out
 }
 
@@ -891,6 +931,7 @@ pub fn layout_cached_at(
         &mut out,
         Some(cache),
     );
+    apply_text_baselines(&mut out, &ir.theme);
     out
 }
 
@@ -1357,6 +1398,8 @@ fn place(
         text_weight: n.props.weight.clone(),
         text_letter_spacing: n.props.letter_spacing,
         text_font_px: n.props.font_px,
+        text_baseline: None,
+        text_line_height: n.props.line_height,
         phase: elapsed_ms,
         accent: pal.accent,
         on_accent: pal.on_accent,
