@@ -830,20 +830,22 @@ fn changed_region(
         x1 = x1.max(r.x + r.w + MARGIN);
         y1 = y1.max(r.y + r.h + MARGIN);
     };
+    // Index both sides by node id: the old nested scans were O(n^2) on every
+    // incremental frame. The dirty rect depends only on min/max, so iteration
+    // order does not affect the result.
+    let prev_by_id: std::collections::HashMap<u32, &LaidOut> =
+        prev_laid.iter().map(|p| (p.id, p)).collect();
+    let cur_ids: std::collections::HashSet<u32> = laid.iter().map(|n| n.id).collect();
     for n in laid {
         // `phase` carries the animation clock. For every node except a spinner
         // it does not affect drawing, so a clock-only change must not mark the
-        // node dirty (that would defeat the entire incremental path on every
-        // tick). Spinners rotate with phase and stay clock-sensitive.
-        let unchanged = prev_laid.iter().any(|p| {
-            if p.id != n.id {
-                return false;
-            }
+        // node dirty. Spinners rotate with phase and stay clock-sensitive.
+        let unchanged = prev_by_id.get(&n.id).map_or(false, |p| {
             if n.control == Some(Control::Spinner) {
-                return p == n;
+                return *p == n;
             }
             let mut a = n.clone();
-            let mut b = p.clone();
+            let mut b = (*p).clone();
             a.phase = 0;
             b.phase = 0;
             a == b
@@ -852,10 +854,9 @@ fn changed_region(
             grow(n.rect);
         }
     }
-    // Deleted nodes leave a hole the new layout never paints over, so their
-    // old footprint is cleared as well.
+    // Deleted nodes leave a hole the new layout never paints over.
     for p in prev_laid {
-        if !laid.iter().any(|n| n.id == p.id) {
+        if !cur_ids.contains(&p.id) {
             grow(p.rect);
         }
     }
