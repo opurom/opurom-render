@@ -25,8 +25,10 @@
 //! documented prop schema and an a11y default role; none of them change an earlier
 //! frame. The media layer adds opt-in dependency-free PNG images and text line
 //! limits/alignment, also leaving earlier frames byte-identical. The interaction
-//! matrix adds five deterministic states, six design variants and five semantic
-//! tones; all are opt-in and leave earlier frames byte-identical.
+//! matrix adds eight deterministic states (default, hover, active, focus,
+//! disabled, loading, success, error), six design variants and five semantic
+//! tones; all are opt-in and leave earlier frames byte-identical. Loading and
+//! success are business conventions with NO_FLUTTER_EQUIVALENT.
 
 pub mod a11y;
 pub mod aaa;

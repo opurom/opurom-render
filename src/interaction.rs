@@ -1,8 +1,9 @@
-//! Five-state interaction matrix and design-system variants/tones.
+//! Eight-state component matrix and design-system variants/tones.
 //!
 //! Every transform is integer-only. The caller may override a node's authored
-//! state (the CLI does this for state-matrix screenshots), but an authored
-//! `disabled` prop always resolves to `NodeState::Disabled`.
+//! state (the CLI does this for state-matrix screenshots), but `disabled`
+//! always wins. Business states (`loading`/`success`/`error`) mask interaction
+//! feedback; their paint comes from the token constants below.
 
 use crate::{Kind, LaidOut, Rgba};
 
@@ -30,6 +31,12 @@ pub enum NodeState {
     Active,
     Focus,
     Disabled,
+    /// Business state; Flutter has no equivalent (NO_FLUTTER_EQUIVALENT).
+    Loading,
+    /// Business state; Flutter has no equivalent (NO_FLUTTER_EQUIVALENT).
+    Success,
+    /// State-semantic value, distinct from the `tone=error` palette value.
+    Error,
 }
 
 impl NodeState {
@@ -40,6 +47,9 @@ impl NodeState {
             "active" => Some(NodeState::Active),
             "focus" => Some(NodeState::Focus),
             "disabled" => Some(NodeState::Disabled),
+            "loading" => Some(NodeState::Loading),
+            "success" => Some(NodeState::Success),
+            "error" => Some(NodeState::Error),
             _ => None,
         }
     }
@@ -51,21 +61,43 @@ impl NodeState {
             NodeState::Active => "active",
             NodeState::Focus => "focus",
             NodeState::Disabled => "disabled",
+            NodeState::Loading => "loading",
+            NodeState::Success => "success",
+            NodeState::Error => "error",
         }
     }
 
-    /// A caller-supplied state overrides the authored state; `disabled` wins
-    /// over both. The resolution has no runtime or host-dependent inputs.
+    /// Chief priority: disabled > one business state > pressed > focused >
+    /// hovered > default. Business states mask interaction feedback, so a
+    /// business caller suppresses a hover/active/focus authored state and vice
+    /// versa. Among two business states the caller wins (mutual exclusion).
     pub fn resolve(caller: Option<NodeState>, authored: NodeState, disabled: bool) -> NodeState {
+        let priority = |s: NodeState| match s {
+            NodeState::Default => 0,
+            NodeState::Hover => 1,
+            NodeState::Focus => 2,
+            NodeState::Active => 3,
+            NodeState::Loading | NodeState::Success | NodeState::Error => 4,
+            NodeState::Disabled => 5,
+        };
         if disabled {
-            NodeState::Disabled
-        } else {
-            caller.unwrap_or(authored)
+            return NodeState::Disabled;
+        }
+        match caller {
+            Some(c) => {
+                if priority(c) >= priority(authored) {
+                    c
+                } else {
+                    authored
+                }
+            }
+            None => authored,
         }
     }
 
     /// State paint transform. Focus deliberately leaves the colours alone: its
     /// visible change is the exact outer ring drawn in the central box path.
+    /// Business states use the token constants, never component literals.
     pub fn color(self, c: Rgba) -> Rgba {
         match self {
             NodeState::Default | NodeState::Focus => c,
@@ -81,15 +113,24 @@ impl NodeState {
                 b: darken(c.b),
                 a: c.a,
             },
+            NodeState::Loading => CYAN,
+            NodeState::Success => SUCCESS,
+            NodeState::Error => ERROR,
             NodeState::Disabled => desaturate(c),
         }
     }
 
-    /// Fixed-point alpha reduction for disabled nodes.
+    /// Fixed-point alpha reduction for disabled nodes only.
     pub fn opacity(self, alpha: i64) -> i64 {
         match self {
             NodeState::Disabled => alpha.max(0).saturating_mul(3) / 5,
-            _ => alpha,
+            NodeState::Default
+            | NodeState::Hover
+            | NodeState::Active
+            | NodeState::Focus
+            | NodeState::Loading
+            | NodeState::Success
+            | NodeState::Error => alpha,
         }
     }
 }
@@ -494,14 +535,18 @@ mod tests {
             ("active", NodeState::Active),
             ("focus", NodeState::Focus),
             ("disabled", NodeState::Disabled),
+            ("loading", NodeState::Loading),
+            ("success", NodeState::Success),
+            ("error", NodeState::Error),
         ] {
             assert_eq!(NodeState::parse(text), Some(state));
             assert_eq!(state.name(), text);
         }
         assert_eq!(NodeState::parse("pressed"), None);
+        // Chief priority: focused outranks hovered, active outranks focus.
         assert_eq!(
             NodeState::resolve(Some(NodeState::Hover), NodeState::Focus, false),
-            NodeState::Hover
+            NodeState::Focus
         );
         assert_eq!(
             NodeState::resolve(Some(NodeState::Hover), NodeState::Focus, true),
@@ -510,6 +555,24 @@ mod tests {
         assert_eq!(
             NodeState::resolve(None, NodeState::Active, false),
             NodeState::Active
+        );
+        // A business state masks interaction feedback in either direction.
+        assert_eq!(
+            NodeState::resolve(Some(NodeState::Hover), NodeState::Loading, false),
+            NodeState::Loading
+        );
+        assert_eq!(
+            NodeState::resolve(Some(NodeState::Active), NodeState::Error, false),
+            NodeState::Error
+        );
+        assert_eq!(
+            NodeState::resolve(Some(NodeState::Success), NodeState::Hover, false),
+            NodeState::Success
+        );
+        // Disabled outranks every business state.
+        assert_eq!(
+            NodeState::resolve(Some(NodeState::Error), NodeState::Success, true),
+            NodeState::Disabled
         );
     }
 
@@ -540,5 +603,20 @@ mod tests {
             }
         );
         assert_eq!(NodeState::Disabled.opacity(UNIT), 614);
+        // Business paints come from tokens, not component literals.
+        assert_eq!(NodeState::Loading.color(c), CYAN);
+        assert_eq!(NodeState::Success.color(c), SUCCESS);
+        assert_eq!(NodeState::Error.color(c), ERROR);
+        for s in [
+            NodeState::Default,
+            NodeState::Hover,
+            NodeState::Active,
+            NodeState::Focus,
+            NodeState::Loading,
+            NodeState::Success,
+            NodeState::Error,
+        ] {
+            assert_eq!(s.opacity(UNIT), UNIT);
+        }
     }
 }

@@ -1,4 +1,4 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--elevation-shadows]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--elevation-shadows]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
@@ -269,7 +269,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--elevation-shadows] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--elevation-shadows] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
                 .to_string(),
         );
     }
@@ -323,12 +323,12 @@ fn run() -> Result<(), String> {
             }
             "--interactive-state" => {
                 let contract = args.get(i + 1).ok_or_else(|| {
-                    "--interactive-state requires default, hover, active, focus or disabled"
+                    "--interactive-state requires default, hover, active, focus, disabled, loading, success or error"
                         .to_string()
                 })?;
                 matrix_state = Some(NodeState::parse(contract).ok_or_else(|| {
                     format!(
-                        "unknown interactive state {contract:?}: expected default, hover, active, focus or disabled"
+                        "unknown interactive state {contract:?}: expected default, hover, active, focus, disabled, loading, success or error"
                     )
                 })?);
                 i += 2;
@@ -451,7 +451,7 @@ fn run() -> Result<(), String> {
             }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental, --edge-aa, --elevation-shadows, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
+                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled|loading|success|error, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental, --edge-aa, --elevation-shadows, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
                 ));
             }
         }

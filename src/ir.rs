@@ -1522,7 +1522,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
     let state = match opt_string(o, "state", what)? {
         Some(s) => NodeState::parse(&s).ok_or_else(|| {
             bad(format!(
-                "{what}.state has unknown value {s:?}: expected default, hover, active, focus or disabled"
+                "{what}.state has unknown value {s:?}: expected default, hover, active, focus, disabled, loading, success or error"
             ))
         })?,
         None => NodeState::default(),

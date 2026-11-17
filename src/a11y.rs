@@ -136,6 +136,9 @@ pub fn a11y_tree_at(
     let visible_bounds = rect_map(ir, state, width, height, elapsed_ms);
     // A second layout with every bool state true can still place `when` nodes.
     let mut expanded = state.clone();
+    // `ir.state` is the declared business-state variable array (StateDecl),
+    // not the component `NodeState` enum; only bool declarations are relevant
+    // here. Do not map loading/success/error through this loop.
     for d in &ir.state {
         if d.typ == ValueType::Bool {
             expanded.set(d.name.clone(), StateValue::Bool(true));

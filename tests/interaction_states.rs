@@ -1,4 +1,4 @@
-//! Five-state matrix, variant/tone matrix, CLI override and golden regressions.
+//! Eight-state matrix, variant/tone matrix, CLI override and golden regressions.
 
 use opurom_render::{
     digest_hex, layout, parse_ir, Node, NodeState, Renderer, StateValue, StateView, CYAN,
@@ -195,6 +195,99 @@ fn five_states_are_pairwise_distinct_and_deterministic_for_five_controls() {
 }
 
 #[test]
+fn eight_states_are_pairwise_distinct_and_new_business_states_are_pinned() {
+    // Pins generated at 160x96 from ir_for(kind, state); the five legacy
+    // defaults were verified byte-identical against the pre-change tree.
+    let pins: &[(&str, &[(&str, &str)]); 5] = &[
+        (
+            "Button",
+            &[
+                ("default", "609464e4b1333421"),
+                ("hover", "20067c304cb654d2"),
+                ("active", "92cc5d9376c7b1c3"),
+                ("focus", "f3a61407a786a2d1"),
+                ("disabled", "9579ea1f9d0a4233"),
+                ("loading", "8083a7c7066c81cd"),
+                ("success", "db60d54f8da1607d"),
+                ("error", "f5dc435b22197fb5"),
+            ],
+        ),
+        (
+            "Input",
+            &[
+                ("default", "0b72c606a801eede"),
+                ("hover", "140b7f9d74502380"),
+                ("active", "d53ad92ce4471a61"),
+                ("focus", "a05fc70c5de45cce"),
+                ("disabled", "9c4723ddbe476edf"),
+                ("loading", "8083a7c7066c81cd"),
+                ("success", "db60d54f8da1607d"),
+                ("error", "f5dc435b22197fb5"),
+            ],
+        ),
+        (
+            "Checkbox",
+            &[
+                ("default", "4194aea66cf7eddd"),
+                ("hover", "7c298024bc1c206d"),
+                ("active", "85d14f26ba3be29c"),
+                ("focus", "823e40aa1c370d5d"),
+                ("disabled", "4276669cc9ecd778"),
+                ("loading", "8083a7c7066c81cd"),
+                ("success", "db60d54f8da1607d"),
+                ("error", "f5dc435b22197fb5"),
+            ],
+        ),
+        (
+            "Switch",
+            &[
+                ("default", "a0c0cd5502cdc81f"),
+                ("hover", "9636c2a31a7f6440"),
+                ("active", "1c534a1d2b096b31"),
+                ("focus", "d85f24b99cac481f"),
+                ("disabled", "31f934d719233d5c"),
+                ("loading", "8083a7c7066c81cd"),
+                ("success", "db60d54f8da1607d"),
+                ("error", "f5dc435b22197fb5"),
+            ],
+        ),
+        (
+            "Slider",
+            &[
+                ("default", "c9f2b75293300452"),
+                ("hover", "992da0dbf7d30c7d"),
+                ("active", "c49be9f7ca5f3b40"),
+                ("focus", "d3867896590b2d72"),
+                ("disabled", "08cd0ffeb27fc443"),
+                ("loading", "95ac97cf905b6111"),
+                ("success", "07deacf2bdde62e9"),
+                ("error", "08d5354cb469722d"),
+            ],
+        ),
+    ];
+    for (kind, rows) in pins {
+        assert_eq!(rows.len(), 8, "{kind} must cover all eight states");
+        let mut seen = HashSet::new();
+        for (state, pin) in *rows {
+            let extra = if *state == "default" {
+                json!({})
+            } else {
+                json!({ "state": state })
+            };
+            let got = digest(kind, extra.clone());
+            assert_eq!(got, *pin, "{kind} {state} golden drift");
+            assert_eq!(
+                got,
+                digest(kind, extra),
+                "{kind} {state} must be deterministic"
+            );
+            assert!(seen.insert(got), "{kind} {state} repeats an earlier state");
+        }
+        assert_eq!(seen.len(), 8, "{kind} eight-state matrix");
+    }
+}
+
+#[test]
 fn explicit_default_and_absent_state_are_byte_identical() {
     assert_eq!(
         render("Button", json!({})),
@@ -350,6 +443,11 @@ fn unknown_state_variant_tone_and_bad_types_are_clear_ir_errors() {
             .to_string();
         assert!(err.contains(expected), "{err:?}");
         assert!(err.contains("expected"), "{err:?}");
+        if prop == "state" {
+            for name in ["loading", "success", "error"] {
+                assert!(err.contains(name), "error string must list {name}: {err:?}");
+            }
+        }
     }
     let err = parse_ir(&ir_for("Button", json!({ "state": 1 })))
         .unwrap_err()
@@ -436,8 +534,36 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
         &["--interactive-state", "pressed"],
     );
     assert_eq!(bad.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&bad.stderr).contains("unknown interactive state"));
-    assert!(!String::from_utf8_lossy(&bad.stderr).contains("panicked"));
+    let bad_stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(bad_stderr.contains("unknown interactive state"));
+    assert!(
+        bad_stderr.contains("loading, success or error"),
+        "{bad_stderr}"
+    );
+    assert!(!bad_stderr.contains("panicked"));
+
+    // The three new business states are accepted by the CLI contract and mask
+    // an authored interaction state through NodeState::resolve.
+    for state in ["loading", "success", "error"] {
+        let authored_hover = dir.join(format!("interaction-auth-hover-{state}.opuir.json"));
+        fs::write(&authored_hover, matrix_ir(Some("hover"), None)).unwrap();
+        let expected_ir = parse_ir(&matrix_ir(Some(state), None)).unwrap();
+        let expected = format!(
+            "digest={}\ndirty=1\n",
+            digest_hex(
+                &Renderer::new(W, H).pixels(&expected_ir, &StateView::from_ir(&expected_ir))
+            )
+        );
+        let out = stdout(cli(
+            exe,
+            &authored_hover,
+            "160",
+            "96",
+            &dir.join(format!("interaction-{state}.ppm")),
+            &["--interactive-state", state],
+        ));
+        assert_eq!(out, expected, "CLI business state {state}");
+    }
 }
 
 #[test]
