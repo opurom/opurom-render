@@ -471,6 +471,12 @@ impl Renderer {
                 }
             }
         }
+        // Frame-level effects (blur/glass) read the whole frame and are applied
+        // after raster; reusing a previously-blurred buffer would blur twice.
+        // Fall back to the exact full path for such layouts.
+        if !layout_is_incremental_safe(&laid) {
+            return self.render_with_press(ir, state, elapsed_ms, press);
+        }
         let pal = Palette::from_theme(&ir.theme);
         let reusable = self.prev.is_some()
             && self.prev_laid.is_some()
