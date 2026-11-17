@@ -49,7 +49,7 @@ fn rounded_clip_content_uses_intermediate_coverage_when_opted_in() {
             "intermediate coverage at {x},{y}"
         );
     }
-    assert_eq!(digest_hex(&on), "c6dfeab078e2ae47");
+    assert_eq!(digest_hex(&on), "9ca5593018668ebb");
 }
 
 #[test]

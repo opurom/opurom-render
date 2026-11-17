@@ -374,6 +374,18 @@ impl Canvas {
         }
     }
 
+    /// Coverage of the active rounded clip at one pixel: 255 outside a clipped
+    /// shape, 0 in the fully cut corner. Shared by content and shadow paths so
+    /// both use the same closure A source.
+    pub(crate) fn clip_coverage(&self, x: i64, y: i64) -> u8 {
+        if !self.edge_aa {
+            return 255;
+        }
+        self.clip_shape
+            .map(|s| Self::radii_coverage(s.rect, x, y, s.radii))
+            .unwrap_or(255)
+    }
+
     fn set_quiet(&mut self, x: i64, y: i64, c: Rgba) -> bool {
         if x < 0 || y < 0 || x >= self.width as i64 || y >= self.height as i64 {
             return false;
@@ -383,13 +395,7 @@ impl Canvas {
                 return false;
             }
         }
-        let clip_cov = if self.edge_aa {
-            self.clip_shape
-                .map(|s| Self::radii_coverage(s.rect, x, y, s.radii))
-                .unwrap_or(255)
-        } else {
-            255
-        };
+        let clip_cov = self.clip_coverage(x, y);
         if clip_cov == 0 {
             return false;
         }
@@ -397,7 +403,7 @@ impl Canvas {
             c
         } else {
             let mut soft = c;
-            soft.a = ((c.a as i64 * clip_cov as i64) / 255) as u8;
+            soft.a = ((c.a as i64 * clip_cov as i64 + 127) / 255) as u8;
             if soft.a == 0 {
                 return false;
             }

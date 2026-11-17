@@ -266,3 +266,69 @@ fn elevation_command_carries_the_effective_clip() {
     let b = render(ir_text);
     assert_eq!(a, b, "clipped elevation is byte-reproducible");
 }
+
+fn clipped_elevation_ir(elevation: Option<i64>) -> String {
+    let extra = elevation
+        .map(|e| format!(",\"elevation\":{e}"))
+        .unwrap_or_default();
+    format!(
+        r##"{{
+        "ir": "0.1.0", "app": "ElevClip", "state": [],
+        "tree": {{ "id": 0, "kind": "Column", "props": {{ "padding": 0, "align": "start" }},
+            "children": [ {{ "id": 1, "kind": "Container", "props": {{
+                "width": 48, "height": 48, "radius": 10, "color": "#112233" }},
+                "children": [ {{ "id": 2, "kind": "Container", "props": {{
+                    "width": 30, "height": 30, "color": "#FF0000"{extra} }},
+                    "children": [], "events": {{}} }} ], "events": {{}} }} ], "events": {{}} }},
+        "theme": {{ "mode": "light", "accent": "#097FEB", "radius": 4 }}
+    }}"##
+    )
+}
+
+fn clipped_pixels(elevation: Option<i64>, edge_aa: bool) -> Vec<u8> {
+    let ir = parse_ir(&clipped_elevation_ir(elevation)).unwrap();
+    let state = StateView::from_ir(&ir);
+    let mut r = Renderer::new(64, 64);
+    r.set_edge_aa(edge_aa);
+    r.render(&ir, &state).pixels
+}
+
+fn rgb(p: &[u8], x: usize, y: usize) -> [u8; 3] {
+    let i = (y * 64 + x) * 4;
+    [p[i], p[i + 1], p[i + 2]]
+}
+
+#[test]
+fn elevation_shadow_respects_rounded_clip_coverage() {
+    // Closure A coverage is shared by content and shadow. The cut corner
+    // (0,0) loses the shadow only when edge_aa is on; an interior shadow pixel
+    // (27,0) still proves the elevation path is active.
+    let off = clipped_pixels(Some(6), false);
+    let off_plain = clipped_pixels(None, false);
+    assert_ne!(rgb(&off, 0, 0), rgb(&off_plain, 0, 0));
+
+    let on = clipped_pixels(Some(6), true);
+    let on_plain = clipped_pixels(None, true);
+    assert_eq!(rgb(&on, 0, 0), rgb(&on_plain, 0, 0));
+    assert_ne!(rgb(&on, 27, 0), rgb(&on_plain, 27, 0));
+}
+
+#[test]
+fn elevation_layer_order_is_pinned_far_to_near() {
+    // AAudit: the three integer blends move 1 LSB under permutation. The
+    // far-to-near order is deliberate; do not reorder to the source order.
+    let layers = ELEVATION_TABLE[4].unwrap();
+    assert_eq!(layers.map(|layer| layer.4), [31, 36, 51]);
+    let mut d = [247u8, 248, 250];
+    for (_, _, _, _, alpha) in layers {
+        for channel in &mut d {
+            *channel = ((*channel as i64 * (255 - alpha as i64) + 127) / 255) as u8;
+        }
+    }
+    assert_eq!(d, [149, 150, 151]);
+    let reference = [149u8, 149, 151];
+    assert!(d
+        .iter()
+        .zip(reference)
+        .all(|(a, b)| (*a as i16 - b as i16).abs() <= 1));
+}

@@ -708,6 +708,11 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
                 }
                 let cov = soft[iy * bw + ix] as i64;
                 let a = ((alpha as i64 * cov + 127) / 255).clamp(0, 255) as u8;
+                // Rounded-container clip coverage applies to shadows too.
+                // Without it the rounded corner's cut-out keeps full shadow
+                // alpha while clipped content is erased: a dark fringe.
+                let clip_cov = canvas.clip_coverage(x, y);
+                let a = ((a as i64 * clip_cov as i64 + 127) / 255).clamp(0, 255) as u8;
                 composite(canvas, x, y, DARK, a);
             }
         }
