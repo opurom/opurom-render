@@ -29,11 +29,13 @@
 //! tones; all are opt-in and leave earlier frames byte-identical.
 
 pub mod a11y;
+pub mod aaa;
 pub mod anim;
 pub mod curve;
 pub mod display;
 pub mod effects;
 pub mod font;
+pub mod geometry;
 pub mod gestures;
 pub mod icons;
 pub mod image;
