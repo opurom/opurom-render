@@ -435,7 +435,10 @@ impl Canvas {
         let y1 = (r.y + r.h).min(clip.y + clip.h).min(self.height as i64);
         // Opaque fill: write one repeated pixel pattern per row instead of a
         // per-pixel bounds/clip/alpha test. The written bytes are identical.
-        if c.a == 255 && x1 > x0 {
+        // Both dimensions must be non-empty: the old per-pixel loop wrote
+        // nothing when y1 <= y0, so an empty (e.g. stale-clip) range must
+        // stay a no-op rather than index past the framebuffer.
+        if c.a == 255 && x1 > x0 && y1 > y0 {
             let w = self.width as usize;
             let row_len = (x1 - x0) as usize * 4;
             let first = (y0 as usize * w + x0 as usize) * 4;
