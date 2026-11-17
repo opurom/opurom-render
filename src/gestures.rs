@@ -483,8 +483,8 @@ impl GestureEngine {
         if let Some(winner) = self.arena.winner() {
             if winner.kind == GestureKind::Drag {
                 return Some(Gesture::Drag {
-                    dx: event.local_x.saturating_sub(down.local_x),
-                    dy: event.local_y.saturating_sub(down.local_y),
+                    dx: event.global_x.saturating_sub(down.global_x),
+                    dy: event.global_y.saturating_sub(down.global_y),
                 });
             }
             return None;
@@ -520,8 +520,8 @@ impl GestureEngine {
             self.arena.reject(node_id, GestureKind::DoubleTap);
             if self.arena.accept(node_id, GestureKind::Drag) {
                 return Some(Gesture::Drag {
-                    dx: event.local_x.saturating_sub(down.local_x),
-                    dy: event.local_y.saturating_sub(down.local_y),
+                    dx: event.global_x.saturating_sub(down.global_x),
+                    dy: event.global_y.saturating_sub(down.global_y),
                 });
             }
         }
@@ -749,6 +749,18 @@ mod tests {
             Some(Gesture::Drag { dx: 50, dy: 20 })
         );
         assert_eq!(up(&mut e, 1, 150, 120, 40), None);
+    }
+
+    #[test]
+    fn drag_delta_uses_the_global_frame() {
+        let mut e = engine();
+        let down = PointerEvent::new(PointerKind::Down, 0, 0, 30, 30, 50, 50);
+        assert_eq!(e.on_down(1, &down), None);
+        let move_event = PointerEvent::new(PointerKind::Move, 0, 10, 60, 35, 95, 60);
+        assert_eq!(
+            e.on_move(1, &move_event),
+            Some(Gesture::Drag { dx: 45, dy: 10 })
+        );
     }
 
     #[test]
