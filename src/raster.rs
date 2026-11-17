@@ -84,8 +84,12 @@ const EDGE_AA: i64 = 4;
 /// Finer sub-samples for curved edges (rounded boxes, discs, rings). Curvature
 /// needs more than the 16 straight-line samples to avoid visible stair-steps;
 /// 8x8 gives 65 coverage levels. Independent of EDGE_AA so line raster stays
-/// byte-stable.
+/// byte-stable. Kept only as the small-radius fast path; larger and irregular
+/// corners use the analytic coverage in [`crate::aaa`].
 const CORNER_AA: i64 = 8;
+/// Radius above which the analytic path replaces corner supersampling. Small
+/// uniform corners stay on the cheap per-pixel test.
+const AAA_MIN_RADIUS: i64 = 4;
 
 impl Canvas {
     pub fn new(width: u32, height: u32, bg: Rgba) -> Canvas {
@@ -217,6 +221,32 @@ impl Canvas {
             let mut soft = c;
             soft.a = ((c.a as i64 * cov as i64) / 255) as u8;
             self.set_quiet(x, y, soft);
+        }
+    }
+
+    /// Rasterize a convex path with analytic per-row coverage. `x_from..x_to`
+    /// and `y_from..y_to` bound the box in absolute canvas pixels; the row mask
+    /// is indexed from column 0 and reused across rows. Only opt-in callers
+    /// reach this, so capture's command stream is never touched.
+    fn fill_aaa_path(
+        &mut self,
+        path: &[crate::aaa::Segment],
+        x_from: i64,
+        x_to: i64,
+        y_from: i64,
+        y_to: i64,
+        c: Rgba,
+    ) {
+        let mut row = vec![0i64; self.width as usize];
+        for y in y_from..y_to {
+            for a in row.iter_mut() {
+                *a = 0;
+            }
+            crate::aaa::rasterize_convex_row(path, &mut row, 0, y);
+            for x in x_from..x_to {
+                let cov = row[x as usize].clamp(0, 255) as u8;
+                self.set_covered(x, y, c, cov);
+            }
         }
     }
 
@@ -481,6 +511,21 @@ impl Canvas {
         let x_to = (r.x + r.w).min(clip.x + clip.w).min(self.width as i64);
         let y_from = r.y.max(clip.y).max(0);
         let y_to = (r.y + r.h).min(clip.y + clip.h).min(self.height as i64);
+        let max_r = radii
+            .top_left
+            .x
+            .max(radii.top_left.y)
+            .max(radii.top_right.x)
+            .max(radii.top_right.y)
+            .max(radii.bottom_left.x)
+            .max(radii.bottom_left.y)
+            .max(radii.bottom_right.x)
+            .max(radii.bottom_right.y);
+        if self.edge_aa && max_r > AAA_MIN_RADIUS {
+            let path = crate::aaa::round_rect_path_radii(r.x, r.y, r.w, r.h, radii);
+            self.fill_aaa_path(&path, x_from, x_to, y_from, y_to, c);
+            return;
+        }
         for y in y_from..y_to {
             for x in x_from..x_to {
                 let cov = if self.edge_aa {
@@ -528,6 +573,11 @@ impl Canvas {
         let x_to = x1.min(clip.x + clip.w);
         let y_from = r.y.max(clip.y).max(0);
         let y_to = y1.min(clip.y + clip.h);
+        if self.edge_aa && rad > AAA_MIN_RADIUS {
+            let path = crate::aaa::round_rect_path(r.x, r.y, r.w, r.h, rad);
+            self.fill_aaa_path(&path, x_from, x_to, y_from, y_to, c);
+            return;
+        }
         for y in y_from..y_to {
             for x in x_from..x_to {
                 if self.edge_aa {
@@ -807,6 +857,11 @@ impl Canvas {
         let y_to = y1.min(clip.y + clip.h);
         let x_from = r.x.max(clip.x).max(0);
         let x_to = x1.min(clip.x + clip.w);
+        if self.edge_aa && rad > AAA_MIN_RADIUS {
+            let path = crate::aaa::circle_path(cx, cy, rad);
+            self.fill_aaa_path(&path, x_from, x_to, y_from, y_to, c);
+            return;
+        }
         for y in y_from..y_to {
             for x in x_from..x_to {
                 if self.edge_aa {
@@ -962,9 +1017,40 @@ fn line_coverage(x0: i64, y0: i64, x1: i64, y1: i64, x: i64, y: i64, width: i64)
 
 /// Integer line with a square pen.
 fn line(canvas: &mut Canvas, x0: i64, y0: i64, x1: i64, y1: i64, c: Rgba, width: i64) {
+    if canvas.edge_aa && width > 2 {
+        // Thick segments use the analytic quad path, sharing coverage with
+        // corners. Thin lines keep the 4x fast path below. Capture never
+        // reaches either branch.
+        let half_fp = ((width.max(1) as i128 * crate::aaa::ONE as i128 / 2)
+            .max(crate::aaa::ONE as i128 / 2)) as i64;
+        let pad = (half_fp >> 16) + 1;
+        let xlo = x0.min(x1) - pad;
+        let xhi = x0.max(x1) + pad;
+        let ylo = y0.min(y1) - pad;
+        let yhi = y0.max(y1) + pad;
+        let path = crate::aaa::line_path(x0, y0, x1, y1, half_fp);
+        let mut row = vec![0i64; canvas.width as usize];
+        for y in ylo..=yhi {
+            for a in row.iter_mut() {
+                *a = 0;
+            }
+            if y < 0 || y >= canvas.height as i64 {
+                continue;
+            }
+            crate::aaa::rasterize_convex_row(&path, &mut row, 0, y);
+            for x in xlo..=xhi {
+                if x < 0 || x >= canvas.width as i64 {
+                    continue;
+                }
+                let cov = row[x as usize].clamp(0, 255) as u8;
+                canvas.set_covered(x, y, c, cov);
+            }
+        }
+        return;
+    }
     if canvas.edge_aa {
-        // One analytic pass over the segment bounds; the coverage test already
-        // accounts for pen width. Capture never reaches this path.
+        // Thin lines keep the analytic 4x subsample fast path; the coverage
+        // test already accounts for pen width. Capture never reaches here.
         let pad = width.max(1) / 2 + 1;
         let xlo = x0.min(x1) - pad;
         let xhi = x0.max(x1) + pad;

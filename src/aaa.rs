@@ -10,8 +10,10 @@
 //! a single trapezoid. Coverage is the exact strip area fraction, not a
 //! point-sample average. No Skia types are copied; coordinates are i64 16.16.
 
+use crate::geometry::{CornerRadii, RoundingRadii};
+
 /// 16.16 fixed-point unit (Skia `SK_Fixed1`).
-const ONE: i64 = 1 << 16;
+pub(crate) const ONE: i64 = 1 << 16;
 
 /// Clamp a fixed-point slope to Skia's saturated sentinel for near-verticals.
 const MAX_SLOPE: i64 = i64::MAX >> 2;
@@ -103,6 +105,16 @@ fn compute_alpha_below_line(alphas: &mut [i64], l: i64, r: i64, dy: i64, full: i
     alphas[0] = (full - partial_triangle_to_alpha(first, dy)).clamp(0, 255);
 }
 
+/// Skia clamps a strip to the surface clip before blitting; an out-of-row
+/// index is dropped instead of indexing past the mask.
+fn add_mask(mask: &mut [i64], idx: i64, a: i64) {
+    if idx >= 0 {
+        if let Some(slot) = mask.get_mut(idx as usize) {
+            *slot = slot.saturating_add(a);
+        }
+    }
+}
+
 /// Skia :707 — accumulate the analytic coverage of one trapezoid strip into a
 /// row mask. `ul/ur` are the top x edges, `ll/lr` the bottom x edges, all
 /// relative to the strip's left pixel and in 16.16. `ldy/rdy` are |dy/dx|.
@@ -117,6 +129,11 @@ fn blit_aaa_trapezoid_row(
     rdy: i64,
     full: i64,
 ) {
+    // Blit :837-842 swaps each edge pair so the left line runs ul<=ll and the
+    // right runs ur<=lr; excluding a triangle on the wrong side otherwise
+    // yields a constant alpha across the whole span.
+    let (ul, ll) = (ul.min(ll), ul.max(ll));
+    let (ur, lr) = (ur.min(lr), ur.max(lr));
     let left = trunc_fixed(ul);
     let right = ceil_fixed(lr);
     let len = right - left;
@@ -124,8 +141,7 @@ fn blit_aaa_trapezoid_row(
         return;
     }
     if len == 1 {
-        mask[(origin + left) as usize] =
-            mask[(origin + left) as usize].saturating_add(trapezoid_to_alpha(ur - ul, lr - ll));
+        add_mask(mask, origin + left, trapezoid_to_alpha(ur - ul, lr - ll));
         return;
     }
     let mut alphas = vec![full; len as usize];
@@ -190,8 +206,7 @@ fn blit_aaa_trapezoid_row(
     }
 
     for (i, a) in alphas.into_iter().enumerate() {
-        mask[(origin + left + i as i64) as usize] =
-            mask[(origin + left + i as i64) as usize].saturating_add(a);
+        add_mask(mask, origin + left + i as i64, a);
     }
 }
 
@@ -269,26 +284,32 @@ pub fn rasterize_convex_row(segments: &[Segment], row: &mut [i64], origin: i64, 
         // Unit-height trapezoid alphas, then scale by this strip's height.
         let first_x = trunc_fixed(ul).min(trunc_fixed(ll));
         let last_x = ceil_fixed(ur).max(ceil_fixed(lr)).max(first_x + 1);
-        let width = (last_x - first_x) as usize;
+        // Clip the strip to the row instead of dropping it: a segment ending
+        // inside this band extrapolates its far x past the surface, which can
+        // push first_x outside the row while covered pixels stay inside.
+        let row_end = origin + row.len() as i64;
+        let lo = first_x.max(origin);
+        let hi = last_x.min(row_end);
+        if hi <= lo {
+            continue;
+        }
+        let width = (hi - lo) as usize;
         let mut strip = vec![0i64; width];
-        let base = first_x - origin;
-        if base >= 0 && (base as usize) + width <= row.len() {
-            blit_aaa_trapezoid_row(
-                &mut strip,
-                0,
-                ul - (first_x << 16),
-                ur - (first_x << 16),
-                ll - (first_x << 16),
-                lr - (first_x << 16),
-                ls,
-                rs,
-                255,
-            );
-            let h = c1 - c0;
-            for (i, a) in strip.into_iter().enumerate() {
-                row[(base as usize) + i] =
-                    row[(base as usize) + i].saturating_add(partial_alpha(a, h));
-            }
+        blit_aaa_trapezoid_row(
+            &mut strip,
+            0,
+            ul - (lo << 16),
+            ur - (lo << 16),
+            ll - (lo << 16),
+            lr - (lo << 16),
+            ls,
+            rs,
+            255,
+        );
+        let h = c1 - c0;
+        let base = (lo - origin) as usize;
+        for (i, a) in strip.into_iter().enumerate() {
+            row[base + i] = row[base + i].saturating_add(partial_alpha(a, h));
         }
     }
 }
@@ -352,7 +373,7 @@ pub fn round_rect_path(x: i64, y: i64, w: i64, h: i64, radius: i64) -> Vec<Segme
             },
         ];
     }
-    let n = 1usize << conic_quad_pow2(r, 1, 8);
+    let n = (1usize << conic_quad_pow2(r, 1, 8)).max(32);
     let mut pts: Vec<(i64, i64)> = Vec::with_capacity(4 * n + 4);
     // Unit quarter arc (c,s) = ((1-u^2)/(1+u^2), 2u/(1+u^2)), u in [0,1], so
     // (c,s) runs (1,0) -> (0,1). Each corner maps it onto its own tangent pair.
@@ -410,6 +431,174 @@ pub fn round_rect_path(x: i64, y: i64, w: i64, h: i64, radius: i64) -> Vec<Segme
     for i in 0..pts.len() {
         let a = pts[i];
         let b = pts[(i + 1) % pts.len()];
+        segs.push(Segment {
+            x0: a.0,
+            y0: a.1,
+            x1: b.0,
+            y1: b.1,
+        });
+    }
+    segs
+}
+
+/// Append one quarter-ellipse arc of radii `(rx, ry)` into `pts`. The rational
+/// parameterisation of a unit quarter arc is affinely scaled to `(rx, ry)`;
+/// because affine maps preserve conics, an elliptical corner stays exact.
+fn push_arc(pts: &mut Vec<(i64, i64)>, cx: i64, cy: i64, rx: i64, ry: i64, corner: usize) {
+    let n = 1usize << conic_quad_pow2(rx.max(ry), 1, 8);
+    for i in 0..=n {
+        let u = i as i128 * ONE as i128 / n as i128;
+        let u2 = u * u / ONE as i128;
+        let den = ONE as i128 + u2;
+        let c = ((ONE as i128 - u2) << 16) / den;
+        let s = (2 * u << 16) / den;
+        let (dx, dy) = match corner {
+            0 => (-(c as i64 * rx), -(s as i64 * ry)), // TL: (1,0)->(0,1)
+            1 => ((s as i64 * rx), -(c as i64 * ry)),  // TR
+            2 => ((c as i64 * rx), (s as i64 * ry)),   // BR
+            _ => (-(s as i64 * rx), (c as i64 * ry)),  // BL
+        };
+        pts.push((cx * ONE + dx, cy * ONE + dy));
+    }
+}
+
+/// Convex path for a rectangle with independent, possibly elliptical corners.
+/// Radii must already be normalised by [`RoundingRadii::scaled`]. Straight
+/// edges stay exact; a flat corner (either component zero) contributes its
+/// rectangle vertex only.
+pub fn round_rect_path_radii(x: i64, y: i64, w: i64, h: i64, radii: RoundingRadii) -> Vec<Segment> {
+    let c = |r: CornerRadii| {
+        let r = CornerRadii {
+            x: r.x.max(0).min(w / 2),
+            y: r.y.max(0).min(h / 2),
+        };
+        if r.x <= 0 || r.y <= 0 {
+            CornerRadii::default()
+        } else {
+            r
+        }
+    };
+    let (tl, tr, br, bl) = (
+        c(radii.top_left),
+        c(radii.top_right),
+        c(radii.bottom_right),
+        c(radii.bottom_left),
+    );
+    let mut pts: Vec<(i64, i64)> = Vec::new();
+    let mut vertex = |cx: i64, cy: i64, r: CornerRadii, corner: usize| {
+        if r.x <= 0 || r.y <= 0 {
+            pts.push((cx << 16, cy << 16));
+        } else {
+            push_arc(&mut pts, cx, cy, r.x, r.y, corner);
+        }
+    };
+    vertex(x + tl.x, y + tl.y, tl, 0);
+    vertex(x + w - tr.x, y + tr.y, tr, 1);
+    vertex(x + w - br.x, y + h - br.y, br, 2);
+    vertex(x + bl.x, y + h - bl.y, bl, 3);
+    let mut segs: Vec<Segment> = Vec::with_capacity(pts.len());
+    for i in 0..pts.len() {
+        let a = pts[i];
+        let b = pts[(i + 1) % pts.len()];
+        if a == b {
+            continue;
+        }
+        segs.push(Segment {
+            x0: a.0,
+            y0: a.1,
+            x1: b.0,
+            y1: b.1,
+        });
+    }
+    segs
+}
+
+/// Integer square root of a non-negative i128, floor-rounded.
+fn isqrt(v: i128) -> i64 {
+    if v <= 0 {
+        return 0;
+    }
+    let mut x = v as u128;
+    let mut r = 0u128;
+    let mut bit = 1u128 << 126;
+    while bit > x {
+        bit >>= 2;
+    }
+    while bit != 0 {
+        if x >= r + bit {
+            x -= r + bit;
+            r = (r >> 1) + bit;
+        } else {
+            r >>= 1;
+        }
+        bit >>= 2;
+    }
+    r as i64
+}
+
+/// Convex path for a filled disc, centred at `(cx, cy)` with radius `r`.
+/// Points come from the same rational quarter-arc rule as rounded corners,
+/// mirrored across the two axes; all arithmetic is fixed point.
+pub fn circle_path(cx: i64, cy: i64, r: i64) -> Vec<Segment> {
+    if r <= 0 {
+        return Vec::new();
+    }
+    let n = (1usize << conic_quad_pow2(r, 1, 8)).max(32);
+    let mut pts: Vec<(i64, i64)> = Vec::with_capacity(4 * n);
+    // One quarter from (cx+r, cy) to (cx, cy+r) via (c, s) = ((1-u^2)/(1+u^2),
+    // 2u/(1+u^2)); the other three quarters mirror its signs.
+    for i in 0..n {
+        let u = i as i128 * ONE as i128 / n as i128;
+        let u2 = u * u / ONE as i128;
+        let den = ONE as i128 + u2;
+        let c = (((ONE as i128 - u2) << 16) / den) as i64;
+        let s = ((2 * u << 16) / den) as i64;
+        let (dx, dy) = (c as i128 * r as i128 >> 16, s as i128 * r as i128 >> 16);
+        let (dx, dy) = (dx as i64, dy as i64);
+        pts.push((cx * ONE + dx, cy * ONE + dy)); // Q1
+        pts.push((cx * ONE - dx, cy * ONE + dy)); // Q2
+        pts.push((cx * ONE - dx, cy * ONE - dy)); // Q3
+        pts.push((cx * ONE + dx, cy * ONE - dy)); // Q4
+    }
+    let total = pts.len();
+    let mut segs = Vec::with_capacity(total);
+    for i in 0..total {
+        let a = pts[i];
+        let b = pts[(i + 1) % total];
+        segs.push(Segment {
+            x0: a.0,
+            y0: a.1,
+            x1: b.0,
+            y1: b.1,
+        });
+    }
+    segs
+}
+
+/// Convex quad for a thick segment with a square pen. `half_fp` is the pen
+/// half-width in 16.16 pixels, routed through the same analytic coverage as
+/// corners. The perpendicular offset uses an integer length.
+pub fn line_path(x0: i64, y0: i64, x1: i64, y1: i64, half_fp: i64) -> Vec<Segment> {
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let len = isqrt((dx as i128) * dx as i128 + (dy as i128) * dy as i128);
+    let (px, py) = if len == 0 {
+        (0i64, 0i64)
+    } else {
+        (
+            (-dy as i128 * half_fp as i128 / len as i128) as i64,
+            (dx as i128 * half_fp as i128 / len as i128) as i64,
+        )
+    };
+    let corners = [
+        (x0 * ONE + px, y0 * ONE + py),
+        (x1 * ONE + px, y1 * ONE + py),
+        (x1 * ONE - px, y1 * ONE - py),
+        (x0 * ONE - px, y0 * ONE - py),
+    ];
+    let mut segs = Vec::with_capacity(4);
+    for i in 0..4 {
+        let a = corners[i];
+        let b = corners[(i + 1) % 4];
         segs.push(Segment {
             x0: a.0,
             y0: a.1,

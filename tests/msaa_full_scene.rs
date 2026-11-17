@@ -88,8 +88,9 @@ fn full_scene_edge_pixels_match_the_fixed_coverage_oracle() {
     // Byte-for-byte oracle for the whole four-shape scene. The sub-sample
     // coverage values themselves are checked against an independent analytic
     // point-to-segment reference in raster.rs unit tests.
-    // Curved edges use 8x8 coverage (CORNER_AA), straight lines stay 4x4.
-    assert_eq!(digest_hex(&aa), "f5b37190668c14cc");
+    // Small corners/straight lines keep 8x8/4x4; large arcs (disc radius 6)
+    // use the analytic AAA coverage path.
+    assert_eq!(digest_hex(&aa), "5a1312f3b751ea44");
     assert!(
         count_partial(&aa) >= 20,
         "edge coverage must produce partial pixels"
