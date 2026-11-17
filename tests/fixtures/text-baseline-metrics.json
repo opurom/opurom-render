@@ -1,0 +1,1144 @@
+{
+  "source": {
+    "commit": "ab2912035e",
+    "flutter": "ab2912035e",
+    "font": "Roboto-Regular.ttf",
+    "font_sha256": "79e851404657dac2106b3d22ad256d47824a9a5765458edb72c9102a45816d95",
+    "license": "Apache-2.0"
+  },
+  "perEm": {
+    "Roboto": {
+      "ascent": 950,
+      "descent": 250,
+      "leading": 0
+    }
+  },
+  "cases": [
+    {
+      "fontPx": 12,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 11.1328125,
+      "descent_px": 2.9296875,
+      "baseline_px": 11.0703125,
+      "height_px": 14.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 9.5,
+      "descent_px": 2.5,
+      "baseline_px": 9.5,
+      "height_px": 12.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 14.25,
+      "descent_px": 3.75,
+      "baseline_px": 14.25,
+      "height_px": 18.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 11.1328125,
+      "descent_px": 2.9296875,
+      "baseline_px": 11.0703125,
+      "height_px": 14.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 9.5,
+      "descent_px": 2.5,
+      "baseline_px": 9.5,
+      "height_px": 12.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 14.25,
+      "descent_px": 3.75,
+      "baseline_px": 14.25,
+      "height_px": 18.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 11.1328125,
+      "descent_px": 2.9296875,
+      "baseline_px": 11.0703125,
+      "height_px": 14.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 9.5,
+      "descent_px": 2.5,
+      "baseline_px": 9.5,
+      "height_px": 12.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 14.25,
+      "descent_px": 3.75,
+      "baseline_px": 14.25,
+      "height_px": 18.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 11.1328125,
+      "descent_px": 2.9296875,
+      "baseline_px": 11.0703125,
+      "height_px": 14.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 9.5,
+      "descent_px": 2.5,
+      "baseline_px": 9.5,
+      "height_px": 12.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 14.25,
+      "descent_px": 3.75,
+      "baseline_px": 14.25,
+      "height_px": 18.0
+    },
+    {
+      "fontPx": 12,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 12.98828125,
+      "descent_px": 3.41796875,
+      "baseline_px": 12.58203125,
+      "height_px": 16.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 11.083333969116211,
+      "descent_px": 2.9166667461395264,
+      "baseline_px": 11.083333015441895,
+      "height_px": 14.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 16.625,
+      "descent_px": 4.375,
+      "baseline_px": 16.625,
+      "height_px": 21.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 22.166667938232422,
+      "descent_px": 5.833333492279053,
+      "baseline_px": 22.16666603088379,
+      "height_px": 28.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 12.98828125,
+      "descent_px": 3.41796875,
+      "baseline_px": 12.58203125,
+      "height_px": 16.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 11.083333969116211,
+      "descent_px": 2.9166667461395264,
+      "baseline_px": 11.083333015441895,
+      "height_px": 14.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 16.625,
+      "descent_px": 4.375,
+      "baseline_px": 16.625,
+      "height_px": 21.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 22.166667938232422,
+      "descent_px": 5.833333492279053,
+      "baseline_px": 22.16666603088379,
+      "height_px": 28.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 12.98828125,
+      "descent_px": 3.41796875,
+      "baseline_px": 12.58203125,
+      "height_px": 16.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 11.083333969116211,
+      "descent_px": 2.9166667461395264,
+      "baseline_px": 11.083333015441895,
+      "height_px": 14.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 16.625,
+      "descent_px": 4.375,
+      "baseline_px": 16.625,
+      "height_px": 21.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 22.166667938232422,
+      "descent_px": 5.833333492279053,
+      "baseline_px": 22.16666603088379,
+      "height_px": 28.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 12.98828125,
+      "descent_px": 3.41796875,
+      "baseline_px": 12.58203125,
+      "height_px": 16.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 11.083333969116211,
+      "descent_px": 2.9166667461395264,
+      "baseline_px": 11.083333015441895,
+      "height_px": 14.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 16.625,
+      "descent_px": 4.375,
+      "baseline_px": 16.625,
+      "height_px": 21.0
+    },
+    {
+      "fontPx": 14,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 22.166667938232422,
+      "descent_px": 5.833333492279053,
+      "baseline_px": 22.16666603088379,
+      "height_px": 28.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 14.84375,
+      "descent_px": 3.90625,
+      "baseline_px": 15.09375,
+      "height_px": 19.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 12.666666984558105,
+      "descent_px": 3.3333334922790527,
+      "baseline_px": 12.666666030883789,
+      "height_px": 16.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 25.33333396911621,
+      "descent_px": 6.6666669845581055,
+      "baseline_px": 25.333332061767578,
+      "height_px": 32.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 14.84375,
+      "descent_px": 3.90625,
+      "baseline_px": 15.09375,
+      "height_px": 19.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 12.666666984558105,
+      "descent_px": 3.3333334922790527,
+      "baseline_px": 12.666666030883789,
+      "height_px": 16.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 25.33333396911621,
+      "descent_px": 6.6666669845581055,
+      "baseline_px": 25.333332061767578,
+      "height_px": 32.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 14.84375,
+      "descent_px": 3.90625,
+      "baseline_px": 15.09375,
+      "height_px": 19.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 12.666666984558105,
+      "descent_px": 3.3333334922790527,
+      "baseline_px": 12.666666030883789,
+      "height_px": 16.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 25.33333396911621,
+      "descent_px": 6.6666669845581055,
+      "baseline_px": 25.333332061767578,
+      "height_px": 32.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 14.84375,
+      "descent_px": 3.90625,
+      "baseline_px": 15.09375,
+      "height_px": 19.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 12.666666984558105,
+      "descent_px": 3.3333334922790527,
+      "baseline_px": 12.666666030883789,
+      "height_px": 16.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 16,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 25.33333396911621,
+      "descent_px": 6.6666669845581055,
+      "baseline_px": 25.333332061767578,
+      "height_px": 32.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 18.5546875,
+      "descent_px": 4.8828125,
+      "baseline_px": 18.1171875,
+      "height_px": 23.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 15.833333969116211,
+      "descent_px": 4.1666669845581055,
+      "baseline_px": 15.833333015441895,
+      "height_px": 20.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 23.75,
+      "descent_px": 6.25,
+      "baseline_px": 23.75,
+      "height_px": 30.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 31.666667938232422,
+      "descent_px": 8.333333969116211,
+      "baseline_px": 31.66666603088379,
+      "height_px": 40.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 18.5546875,
+      "descent_px": 4.8828125,
+      "baseline_px": 18.1171875,
+      "height_px": 23.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 15.833333969116211,
+      "descent_px": 4.1666669845581055,
+      "baseline_px": 15.833333015441895,
+      "height_px": 20.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 23.75,
+      "descent_px": 6.25,
+      "baseline_px": 23.75,
+      "height_px": 30.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 31.666667938232422,
+      "descent_px": 8.333333969116211,
+      "baseline_px": 31.66666603088379,
+      "height_px": 40.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 18.5546875,
+      "descent_px": 4.8828125,
+      "baseline_px": 18.1171875,
+      "height_px": 23.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 15.833333969116211,
+      "descent_px": 4.1666669845581055,
+      "baseline_px": 15.833333015441895,
+      "height_px": 20.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 23.75,
+      "descent_px": 6.25,
+      "baseline_px": 23.75,
+      "height_px": 30.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 31.666667938232422,
+      "descent_px": 8.333333969116211,
+      "baseline_px": 31.66666603088379,
+      "height_px": 40.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 18.5546875,
+      "descent_px": 4.8828125,
+      "baseline_px": 18.1171875,
+      "height_px": 23.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 15.833333969116211,
+      "descent_px": 4.1666669845581055,
+      "baseline_px": 15.833333015441895,
+      "height_px": 20.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 23.75,
+      "descent_px": 6.25,
+      "baseline_px": 23.75,
+      "height_px": 30.0
+    },
+    {
+      "fontPx": 20,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 31.666667938232422,
+      "descent_px": 8.333333969116211,
+      "baseline_px": 31.66666603088379,
+      "height_px": 40.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 22.265625,
+      "descent_px": 5.859375,
+      "baseline_px": 22.140625,
+      "height_px": 28.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 28.5,
+      "descent_px": 7.5,
+      "baseline_px": 28.5,
+      "height_px": 36.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 22.265625,
+      "descent_px": 5.859375,
+      "baseline_px": 22.140625,
+      "height_px": 28.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 28.5,
+      "descent_px": 7.5,
+      "baseline_px": 28.5,
+      "height_px": 36.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 22.265625,
+      "descent_px": 5.859375,
+      "baseline_px": 22.140625,
+      "height_px": 28.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 28.5,
+      "descent_px": 7.5,
+      "baseline_px": 28.5,
+      "height_px": 36.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 22.265625,
+      "descent_px": 5.859375,
+      "baseline_px": 22.140625,
+      "height_px": 28.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 19.0,
+      "descent_px": 5.0,
+      "baseline_px": 19.0,
+      "height_px": 24.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 28.5,
+      "descent_px": 7.5,
+      "baseline_px": 28.5,
+      "height_px": 36.0
+    },
+    {
+      "fontPx": 24,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 29.6875,
+      "descent_px": 7.8125,
+      "baseline_px": 30.1875,
+      "height_px": 38.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 25.33333396911621,
+      "descent_px": 6.6666669845581055,
+      "baseline_px": 25.333332061767578,
+      "height_px": 32.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 50.66666793823242,
+      "descent_px": 13.333333969116211,
+      "baseline_px": 50.666664123535156,
+      "height_px": 64.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 29.6875,
+      "descent_px": 7.8125,
+      "baseline_px": 30.1875,
+      "height_px": 38.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 25.33333396911621,
+      "descent_px": 6.6666669845581055,
+      "baseline_px": 25.333332061767578,
+      "height_px": 32.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 50.66666793823242,
+      "descent_px": 13.333333969116211,
+      "baseline_px": 50.666664123535156,
+      "height_px": 64.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 29.6875,
+      "descent_px": 7.8125,
+      "baseline_px": 30.1875,
+      "height_px": 38.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 25.33333396911621,
+      "descent_px": 6.6666669845581055,
+      "baseline_px": 25.333332061767578,
+      "height_px": 32.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 50.66666793823242,
+      "descent_px": 13.333333969116211,
+      "baseline_px": 50.666664123535156,
+      "height_px": 64.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 29.6875,
+      "descent_px": 7.8125,
+      "baseline_px": 30.1875,
+      "height_px": 38.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 25.33333396911621,
+      "descent_px": 6.6666669845581055,
+      "baseline_px": 25.333332061767578,
+      "height_px": 32.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 32,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 50.66666793823242,
+      "descent_px": 13.333333969116211,
+      "baseline_px": 50.666664123535156,
+      "height_px": 64.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 44.53125,
+      "descent_px": 11.71875,
+      "baseline_px": 44.28125,
+      "height_px": 56.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 57.0,
+      "descent_px": 15.0,
+      "baseline_px": 57.0,
+      "height_px": 72.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hg",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 76.0,
+      "descent_px": 20.0,
+      "baseline_px": 76.0,
+      "height_px": 96.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": null,
+      "ascent_px": 44.53125,
+      "descent_px": 11.71875,
+      "baseline_px": 44.28125,
+      "height_px": 56.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.0,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 1.5,
+      "ascent_px": 57.0,
+      "descent_px": 15.0,
+      "baseline_px": 57.0,
+      "height_px": 72.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "gyjp",
+      "script": "latin",
+      "lineHeight": 2.0,
+      "ascent_px": 76.0,
+      "descent_px": 20.0,
+      "baseline_px": 76.0,
+      "height_px": 96.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 44.53125,
+      "descent_px": 11.71875,
+      "baseline_px": 44.28125,
+      "height_px": 56.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 57.0,
+      "descent_px": 15.0,
+      "baseline_px": 57.0,
+      "height_px": 72.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hello世界",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 76.0,
+      "descent_px": 20.0,
+      "baseline_px": 76.0,
+      "height_px": 96.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": null,
+      "ascent_px": 44.53125,
+      "descent_px": 11.71875,
+      "baseline_px": 44.28125,
+      "height_px": 56.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.0,
+      "ascent_px": 38.0,
+      "descent_px": 10.0,
+      "baseline_px": 38.0,
+      "height_px": 48.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 1.5,
+      "ascent_px": 57.0,
+      "descent_px": 15.0,
+      "baseline_px": 57.0,
+      "height_px": 72.0
+    },
+    {
+      "fontPx": 48,
+      "sample": "Hello世界gyjp",
+      "script": "cjk",
+      "lineHeight": 2.0,
+      "ascent_px": 76.0,
+      "descent_px": 20.0,
+      "baseline_px": 76.0,
+      "height_px": 96.0
+    }
+  ],
+  "thresholds": {
+    "metricsPx": 1,
+    "latinDiffPct": 2,
+    "cjkDiffPct": 12,
+    "maxErrGated": false
+  }
+}

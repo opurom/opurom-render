@@ -1,0 +1,47 @@
+{
+  "source": {
+    "commit": "ab2912035e",
+    "font": "Roboto-Regular.ttf",
+    "font_sha256": "79e851404657dac2106b3d22ad256d47824a9a5765458edb72c9102a45816d95",
+    "license": "Apache-2.0"
+  },
+  "note": "N/A - no font file / no CoreText / no Flutter oracle in CI",
+  "cases": [
+    {
+      "name": "px12_hg",
+      "script": "latin",
+      "diffPct": 0.12,
+      "maxErr": 255
+    },
+    {
+      "name": "px12_mixed",
+      "script": "cjk",
+      "diffPct": 0.76,
+      "maxErr": 255
+    },
+    {
+      "name": "px24_hg",
+      "script": "latin",
+      "diffPct": 0.34,
+      "maxErr": 255
+    },
+    {
+      "name": "px24_mixed",
+      "script": "cjk",
+      "diffPct": 2.88,
+      "maxErr": 255
+    },
+    {
+      "name": "px48_hg",
+      "script": "latin",
+      "diffPct": 1.33,
+      "maxErr": 255
+    },
+    {
+      "name": "px48_mixed",
+      "script": "cjk",
+      "diffPct": 10.2,
+      "maxErr": 255
+    }
+  ]
+}
