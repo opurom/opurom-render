@@ -129,11 +129,6 @@ fn blit_aaa_trapezoid_row(
     rdy: i64,
     full: i64,
 ) {
-    // Blit :837-842 swaps each edge pair so the left line runs ul<=ll and the
-    // right runs ur<=lr; excluding a triangle on the wrong side otherwise
-    // yields a constant alpha across the whole span.
-    let (ul, ll) = (ul.min(ll), ul.max(ll));
-    let (ur, lr) = (ur.min(lr), ur.max(lr));
     let left = trunc_fixed(ul);
     let right = ceil_fixed(lr);
     let len = right - left;

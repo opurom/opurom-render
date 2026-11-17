@@ -237,15 +237,56 @@ impl Canvas {
         y_to: i64,
         c: Rgba,
     ) {
+        self.fill_aaa_path_ex(path, x_from, x_to, y_from, y_to, c, y_from, y_from);
+    }
+
+    /// As [`Canvas::fill_aaa_path`], but rows in `[inner_y0, inner_y1)` are
+    /// known to span the full box width, so they skip the trapezoid scan and
+    /// fill directly. Only opt-in callers with that guarantee use this.
+    #[allow(clippy::too_many_arguments)]
+    fn fill_aaa_path_ex(
+        &mut self,
+        path: &[crate::aaa::Segment],
+        x_from: i64,
+        x_to: i64,
+        y_from: i64,
+        y_to: i64,
+        c: Rgba,
+        inner_y0: i64,
+        inner_y1: i64,
+    ) {
         let mut row = vec![0i64; self.width as usize];
         for y in y_from..y_to {
+            if y >= inner_y0 && y < inner_y1 {
+                self.fill_rect_raw(
+                    Rect {
+                        x: x_from,
+                        y,
+                        w: x_to - x_from,
+                        h: 1,
+                    },
+                    c,
+                );
+                continue;
+            }
             for a in row.iter_mut() {
                 *a = 0;
             }
             crate::aaa::rasterize_convex_row(path, &mut row, 0, y);
+            let w = self.width as usize;
             for x in x_from..x_to {
                 let cov = row[x as usize].clamp(0, 255) as u8;
-                self.set_covered(x, y, c, cov);
+                if cov == 255 {
+                    // Bounds and clip already resolved by x_from/x_to and the
+                    // caller's y_from/y_to; write the opaque pixel directly.
+                    let i = (y as usize * w + x as usize) * 4;
+                    self.pixels[i] = c.r;
+                    self.pixels[i + 1] = c.g;
+                    self.pixels[i + 2] = c.b;
+                    self.pixels[i + 3] = 255;
+                } else {
+                    self.set_covered(x, y, c, cov);
+                }
             }
         }
     }
@@ -388,6 +429,22 @@ impl Canvas {
         let y0 = r.y.max(clip.y).max(0);
         let x1 = (r.x + r.w).min(clip.x + clip.w).min(self.width as i64);
         let y1 = (r.y + r.h).min(clip.y + clip.h).min(self.height as i64);
+        // Opaque fill: write one repeated pixel pattern per row instead of a
+        // per-pixel bounds/clip/alpha test. The written bytes are identical.
+        if c.a == 255 && x1 > x0 {
+            let w = self.width as usize;
+            let row_len = (x1 - x0) as usize * 4;
+            let first = (y0 as usize * w + x0 as usize) * 4;
+            let px = [c.r, c.g, c.b, 255u8];
+            for ch in self.pixels[first..first + row_len].chunks_exact_mut(4) {
+                ch.copy_from_slice(&px);
+            }
+            for y in y0 + 1..y1 {
+                let dst = (y as usize * w + x0 as usize) * 4;
+                self.pixels.copy_within(first..first + row_len, dst);
+            }
+            return;
+        }
         for y in y0..y1 {
             for x in x0..x1 {
                 self.set_quiet(x, y, c);
@@ -575,7 +632,16 @@ impl Canvas {
         let y_to = y1.min(clip.y + clip.h);
         if self.edge_aa && rad > AAA_MIN_RADIUS {
             let path = crate::aaa::round_rect_path(r.x, r.y, r.w, r.h, rad);
-            self.fill_aaa_path(&path, x_from, x_to, y_from, y_to, c);
+            self.fill_aaa_path_ex(
+                &path,
+                x_from,
+                x_to,
+                y_from,
+                y_to,
+                c,
+                r.y + rad,
+                r.y + r.h - rad,
+            );
             return;
         }
         for y in y_from..y_to {
