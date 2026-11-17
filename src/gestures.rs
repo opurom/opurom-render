@@ -16,6 +16,11 @@
 //! - `multitap.dart:340-345` the second tap accepts and emits double tap;
 //!   `:355` the 300ms timer resets the pending first tap.
 //! - `hit_test.dart:30` hit testing returns a leaf-to-root path.
+//! - `scale.dart:345` ScaleGestureRecognizer; `:436-437` initial/current span,
+//!   `:455` span ratio, `:641` focal mean, `:744-748` slop acceptance,
+//!   `:806` acceptGesture. Blob fe3cdf27a414de2f112c58ad5d633831f7f1536e.
+//! - `constants.dart:65` kTouchSlop 18px, `:80` kScaleSlop == kTouchSlop.
+//!   Blob ae23eac1178aff50cbb5b0f29566a0e45589dd99.
 //!
 //! The five live phases are down -> pending -> triggered -> cancelled -> up:
 //! a down enters pending, a tick at the deadline triggers, leaving the hit
@@ -83,6 +88,9 @@ pub enum GestureKind {
     DoubleTap,
     LongPress,
     Drag,
+    /// Two-finger pinch; joins the same arena as the other recognizers
+    /// (`scale.dart:345`).
+    Scale,
 }
 
 impl GestureKind {
@@ -93,6 +101,7 @@ impl GestureKind {
             "doubleTap" => Some(GestureKind::DoubleTap),
             "longPress" => Some(GestureKind::LongPress),
             "drag" => Some(GestureKind::Drag),
+            "scale" => Some(GestureKind::Scale),
             _ => None,
         }
     }
@@ -104,16 +113,19 @@ impl GestureKind {
             GestureKind::DoubleTap => "doubleTap",
             GestureKind::LongPress => "longPress",
             GestureKind::Drag => "drag",
+            GestureKind::Scale => "scale",
         }
     }
 
     /// A node with no explicit gesture prop competes with every recognizer.
-    const fn all() -> [GestureKind; 4] {
+    /// Scale is last so the sweep order of the four legacy kinds is unchanged.
+    const fn all() -> [GestureKind; 5] {
         [
             GestureKind::Tap,
             GestureKind::DoubleTap,
             GestureKind::LongPress,
             GestureKind::Drag,
+            GestureKind::Scale,
         ]
     }
 }
@@ -129,6 +141,14 @@ pub enum Gesture {
         dx: i64,
         dy: i64,
     },
+    /// A two-finger scale. `scale` is fixed point, 1024 == 1.0, computed as
+    /// current span / initial span (`scale.dart:455,463`). `focal_x`/`focal_y`
+    /// are the current midpoint of the two pointers (`scale.dart:641`).
+    Scale {
+        scale: i64,
+        focal_x: i64,
+        focal_y: i64,
+    },
 }
 
 /// Time a pointer must stay down before a long press fires (`constants.dart:29`).
@@ -141,6 +161,12 @@ pub const DOUBLE_TAP_MIN_MS: i64 = 40;
 pub const DOUBLE_TAP_SLOP: i64 = 100;
 /// Distance past which a move becomes a drag (`constants.dart:65`).
 pub const DRAG_THRESHOLD: i64 = 18;
+/// Scale fixed point: 1024 == 1.0, matching the IR/raster unit convention.
+pub const SCALE_UNIT: i64 = 1024;
+/// Span change that accepts a scale gesture (`constants.dart:80` kScaleSlop).
+pub const SCALE_SLOP: i64 = 18;
+/// Focal movement that also accepts a scale (`constants.dart:76` kPanSlop).
+pub const PAN_SLOP: i64 = 36;
 /// Minimum interactive target in canvas px. Flutter's `kMinInteractiveDimension`
 /// (`material/constants.dart:27`) resolved to the IR design domain, not dp.
 pub const MIN_HIT_SIZE: i64 = 48;
@@ -286,6 +312,119 @@ struct Down {
     origin_t: i64,
 }
 
+/// Two-finger span tracker for the active sequence. All coordinates are the
+/// host-supplied global frame, matching the drag delta's frame.
+#[derive(Clone, Copy, Debug)]
+struct ScaleTrack {
+    node: u32,
+    first_id: u32,
+    second_id: u32,
+    init_x1: i64,
+    init_y1: i64,
+    init_x2: i64,
+    init_y2: i64,
+    cur_x1: i64,
+    cur_y1: i64,
+    cur_x2: i64,
+    cur_y2: i64,
+}
+
+impl ScaleTrack {
+    fn new(node: u32, first: &Down, second: &PointerEvent) -> ScaleTrack {
+        ScaleTrack {
+            node,
+            first_id: first.pointer_id,
+            second_id: second.pointer_id,
+            init_x1: first.global_x,
+            init_y1: first.global_y,
+            init_x2: second.global_x,
+            init_y2: second.global_y,
+            cur_x1: first.global_x,
+            cur_y1: first.global_y,
+            cur_x2: second.global_x,
+            cur_y2: second.global_y,
+        }
+    }
+
+    fn has(&self, pointer_id: u32) -> bool {
+        pointer_id == self.first_id || pointer_id == self.second_id
+    }
+
+    fn update(&mut self, event: &PointerEvent) -> bool {
+        if event.pointer_id == self.first_id {
+            self.cur_x1 = event.global_x;
+            self.cur_y1 = event.global_y;
+            true
+        } else if event.pointer_id == self.second_id {
+            self.cur_x2 = event.global_x;
+            self.cur_y2 = event.global_y;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn distance_sq(&self, current: bool) -> i128 {
+        let (x1, y1, x2, y2) = if current {
+            (self.cur_x1, self.cur_y1, self.cur_x2, self.cur_y2)
+        } else {
+            (self.init_x1, self.init_y1, self.init_x2, self.init_y2)
+        };
+        distance_sq(x1, y1, x2, y2)
+    }
+
+    /// Flutter's span is the mean deviation from the focal point; for two
+    /// pointers that is half their separation (`scale.dart:641`, `_update`).
+    fn span(&self, current: bool) -> i64 {
+        (isqrt(self.distance_sq(current)) / 2) as i64
+    }
+
+    fn focal(&self) -> (i64, i64) {
+        (
+            self.cur_x1.saturating_add(self.cur_x2) / 2,
+            self.cur_y1.saturating_add(self.cur_y2) / 2,
+        )
+    }
+
+    /// `currentSpan / initialSpan` in 1024 fixed point (`scale.dart:455,463`).
+    fn scale(&self) -> i64 {
+        let initial = self.span(false);
+        if initial <= 0 {
+            return SCALE_UNIT;
+        }
+        (self.span(true) as i128 * SCALE_UNIT as i128 / initial as i128) as i64
+    }
+
+    /// `scale.dart:744-748`: span slop or focal slop accepts the recognizer.
+    fn exceeded(&self) -> bool {
+        (self.span(true) - self.span(false)).abs() > SCALE_SLOP || {
+            let (fx, fy) = self.focal();
+            let (ix, iy) = (
+                self.init_x1.saturating_add(self.init_x2) / 2,
+                self.init_y1.saturating_add(self.init_y2) / 2,
+            );
+            distance_sq(fx, fy, ix, iy) > (PAN_SLOP as i128) * (PAN_SLOP as i128)
+        }
+    }
+}
+
+/// Floor integer square root, no float; `mid <= v / mid` cannot overflow.
+fn isqrt(v: i128) -> i128 {
+    if v <= 0 {
+        return 0;
+    }
+    let (mut lo, mut hi) = (1i128, v);
+    while lo < hi {
+        let mid = lo + (hi - lo + 1) / 2;
+        if mid <= v / mid {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
 /// The most recent completed tap that may start a double tap.
 #[derive(Clone, Copy, Debug)]
 struct TapMark {
@@ -308,6 +447,7 @@ struct NodeEntry {
 pub struct GestureEngine {
     nodes: Vec<NodeEntry>,
     down: Option<Down>,
+    scale: Option<ScaleTrack>,
     phase: Phase,
     last_tap: Option<TapMark>,
     arena: Arena,
@@ -422,7 +562,21 @@ impl GestureEngine {
     /// Starts a sequence. The pointer id and both coordinate frames are kept
     /// verbatim; only events from this pointer can continue the sequence.
     pub fn on_down(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
-        if event.kind != PointerKind::Down || self.down.is_some() {
+        if event.kind != PointerKind::Down {
+            return None;
+        }
+        if let Some(first) = self.down {
+            // A second finger on the same node opens a two-pointer scale
+            // track; Flutter records every down in the pointer queue
+            // (`scale.dart:586-592`) while the arena stays open.
+            if first.pointer_id != event.pointer_id
+                && first.node == node_id
+                && self.scale.is_none()
+                && self.arena.winner().is_none()
+                && self.arena.has(node_id, GestureKind::Scale)
+            {
+                self.scale = Some(ScaleTrack::new(node_id, &first, event));
+            }
             return None;
         }
         let entry = self.nodes.iter().find(|n| n.id == node_id)?;
@@ -480,6 +634,29 @@ impl GestureEngine {
     pub fn on_move(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         if event.kind != PointerKind::Move {
             return None;
+        }
+        if let Some(mut track) = self.scale {
+            if track.update(event) {
+                self.scale = Some(track);
+                if self
+                    .arena
+                    .winner()
+                    .is_some_and(|w| w.kind == GestureKind::Scale)
+                    || (self.arena.winner().is_none()
+                        && track.exceeded()
+                        && self.arena.accept(track.node, GestureKind::Scale))
+                {
+                    let (focal_x, focal_y) = track.focal();
+                    return Some(Gesture::Scale {
+                        scale: track.scale(),
+                        focal_x,
+                        focal_y,
+                    });
+                }
+                // Two pointers in one sequence form a scale candidate, not a
+                // drag; leave the drag member for the arena sweep on lift.
+                return None;
+            }
         }
         let Some(down) = self.down else { return None };
         if down.node != node_id || down.pointer_id != event.pointer_id {
@@ -539,6 +716,15 @@ impl GestureEngine {
     pub fn on_up(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         if event.kind != PointerKind::Up {
             return None;
+        }
+        if self.scale.is_some_and(|track| track.has(event.pointer_id)) {
+            // Lifting either finger ends the two-pointer phase
+            // (`scale.dart:600-604`); the remaining pointer keeps its own
+            // single-pointer sequence.
+            self.scale = None;
+            if self.down.is_some_and(|d| d.pointer_id != event.pointer_id) {
+                return None;
+            }
         }
         let Some(down) = self.down else { return None };
         if down.node != node_id || down.pointer_id != event.pointer_id {
@@ -601,6 +787,12 @@ impl GestureEngine {
     pub fn on_cancel(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         if event.kind != PointerKind::Cancel {
             return None;
+        }
+        if self.scale.is_some_and(|track| track.has(event.pointer_id)) {
+            self.scale = None;
+            if self.down.is_some_and(|d| d.pointer_id != event.pointer_id) {
+                return None;
+            }
         }
         let Some(down) = self.down else { return None };
         if down.node != node_id || down.pointer_id != event.pointer_id {
@@ -673,7 +865,7 @@ fn gesture_of(kind: GestureKind) -> Option<Gesture> {
         GestureKind::Tap => Some(Gesture::Tap),
         GestureKind::DoubleTap => Some(Gesture::DoubleTap),
         GestureKind::LongPress => Some(Gesture::LongPress),
-        GestureKind::Drag => None,
+        GestureKind::Drag | GestureKind::Scale => None,
     }
 }
 

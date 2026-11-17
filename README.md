@@ -266,7 +266,7 @@ byte-identically to the core release — the three golden digests below are unch
 | Conditional visibility | The optional node fields `when: "<boolState>"` and `unless: "<boolState>"` hide the node **and its subtree** from layout and from the raster while the state is false for `when` or true for `unless`. A field on a non-bool or undeclared state is a parse error. |
 | Node kinds | All 24 interactive UI kinds render: the eight 0.1.0 kinds plus `Card, Divider, Icon, Badge, Progress, Switch, Slider, Checkbox, Radio, Dialog, Tabs, List, Grid, Scroll, Avatar, Spinner`. `Grid` uses `columns` for a fluid grid, `Scroll` clips to `height`, `List` is a vertical stack, `Progress`/`Slider` draw a track plus fill, `Switch`/`Checkbox`/`Radio` draw a box plus indicator. An unknown kind degrades to the documented fallback (Container with children, else Text using label/value/title/name) instead of failing. |
 | Animation | `animate: spring\|ease\|inertia\|collision\|none` on a node selects the curve for its implicit animation, with optional `duration` (ms) and `delay` (ms) props. On a node with a curve, `radius`, `padding`, `shadow`, `color` and `opacity` interpolate from their previous targets to the new ones over `duration`, starting at `delay`; the entry box grows from its centre and fades in on first layout. The clock is the only time source: `Animator::tick(dt_ms)` advances it and `Renderer::render_at` draws the frame for that clock position. |
-| Gesture input | The optional `props.gesture` value `tap\|doubleTap\|longPress\|drag` declares an interactive node's gesture. The recognizer is a pure integer state machine in `GestureEngine`; it does not feed the raster, so a gesture prop changes no frame. |
+| Gesture input | The optional `props.gesture` value `tap\|doubleTap\|longPress\|drag\|scale` declares an interactive node's gesture. The recognizer is a pure integer state machine in `GestureEngine`; it does not feed the raster, so a gesture prop changes no frame. |
 
 Unknown props are ignored and never fatal; an unknown kind degrades instead of
 rejecting the file. Multi-action events (`{"actions": [...]}`) and
@@ -287,6 +287,7 @@ Interactive nodes accept a `gesture` prop that names the gesture they accept:
 | `doubleTap` | Same sequence as `tap`; the caller dispatches only the `DoubleTap` result. |
 | `longPress` | A down held for 500 ms. The engine has no timer, so the threshold is checked lazily on each event while the pointer is down; it fires once and then ignores the rest of that down. |
 | `drag` | A move past 18 px from the down point reports `Drag { dx, dy }`, the delta from the down point. |
+| `scale` | Two pointers on the same node form a scale candidate. A span change past 18 px or a focal move past 36 px reports `Scale { scale, focal_x, focal_y }` (`scale` is fixed point, 1024 == 1.0) on every move of either pointer. A single pointer never scales. |
 
 The engine is `GestureEngine` in `src/gestures.rs` and is pure and deterministic:
 no wall-clock, no floats, no panics. Register nodes with `add_node(id, rect)` in
@@ -294,8 +295,9 @@ draw order; `hit_test(x, y)` returns the top-most node whose laid-out rect
 contains the point. `hit(rect, x, y)` is the point-in-rect helper. A single
 pointer is tracked: a second `down` while a pointer is down, a `move`/`up`
 before any `down`, a `move`/`up` on another node, and events for an unregistered
-node are all ignored (`None`). Long press and drag consume the down, so their
-lift reports `None`. Because the recognizer does not draw or lay out, no golden
+node are all ignored (`None`) unless the second `down` is on the active node:
+that opens a two-pointer scale track, closed by lifting either pointer. Long
+press, drag and scale consume the down, so their lift reports `None`. Because the recognizer does not draw or lay out, no golden
 digest changes.
 
 ## Inverted conditional visibility (the language rules framework rules)

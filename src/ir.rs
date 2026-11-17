@@ -2502,6 +2502,7 @@ mod tests {
             ("doubleTap", GestureKind::DoubleTap),
             ("longPress", GestureKind::LongPress),
             ("drag", GestureKind::Drag),
+            ("scale", GestureKind::Scale),
         ] {
             let mut o = Map::new();
             o.insert("gesture".into(), Value::from(value));

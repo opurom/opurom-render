@@ -71,6 +71,7 @@ pub use font::{measure, FontMetrics};
 pub use gestures::{
     hit, tap_hit_rect, Gesture, GestureEngine, GestureKind, Phase, PointerEvent, PointerKind,
     DOUBLE_TAP_INTERVAL_MS, DOUBLE_TAP_MIN_MS, DOUBLE_TAP_SLOP, DRAG_THRESHOLD, LONG_PRESS_MS,
+    PAN_SLOP, SCALE_SLOP, SCALE_UNIT,
 };
 pub use icons::{icon_coverage, icon_shape, IconShape, Shape, ICON_NAMES};
 pub use image::{
