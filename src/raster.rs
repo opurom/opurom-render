@@ -305,10 +305,17 @@ impl Canvas {
     }
 
     fn fill_rect_raw(&mut self, r: Rect, c: Rgba) {
-        let x1 = (r.x + r.w).min(self.width as i64);
-        let y1 = (r.y + r.h).min(self.height as i64);
-        for y in r.y.max(0)..y1 {
-            for x in r.x.max(0)..x1 {
+        // Iterate only the intersection with the clip. `set_quiet` already
+        // rejects out-of-clip pixels; shrinking the loop bounds skips those
+        // rejects entirely, which matters when a large background box is
+        // redrawn inside a tiny dirty region. Written pixels are identical.
+        let clip = self.effective_clip();
+        let x0 = r.x.max(clip.x).max(0);
+        let y0 = r.y.max(clip.y).max(0);
+        let x1 = (r.x + r.w).min(clip.x + clip.w).min(self.width as i64);
+        let y1 = (r.y + r.h).min(clip.y + clip.h).min(self.height as i64);
+        for y in y0..y1 {
+            for x in x0..x1 {
                 self.set_quiet(x, y, c);
             }
         }
@@ -363,8 +370,16 @@ impl Canvas {
                 color: c,
             });
         }
-        for y in r.y.max(0)..y1 {
-            for x in r.x.max(0)..x1 {
+        // Shrink the raster loop to the clip∩rect intersection. set_quiet /
+        // set_covered already reject out-of-clip pixels, so written pixels are
+        // unchanged; this avoids scanning a huge box for a small dirty region.
+        let clip = self.effective_clip();
+        let x_from = r.x.max(clip.x).max(0);
+        let x_to = x1.min(clip.x + clip.w);
+        let y_from = r.y.max(clip.y).max(0);
+        let y_to = y1.min(clip.y + clip.h);
+        for y in y_from..y_to {
+            for x in x_from..x_to {
                 if self.edge_aa {
                     let cov = Self::round_coverage(r, x, y, rad);
                     self.set_covered(x, y, c, cov);
@@ -418,8 +433,13 @@ impl Canvas {
             };
             self.emit(command);
         }
-        for y in r.y.max(0)..y1 {
-            for x in r.x.max(0)..x1 {
+        let clip = self.effective_clip();
+        let x_from = r.x.max(clip.x).max(0);
+        let x_to = x1.min(clip.x + clip.w);
+        let y_from = r.y.max(clip.y).max(0);
+        let y_to = y1.min(clip.y + clip.h);
+        for y in y_from..y_to {
+            for x in x_from..x_to {
                 let local = if horizontal { x - r.x } else { y - r.y };
                 let c = if self.gradient_bits == 16 {
                     let t = if last <= 0 {
