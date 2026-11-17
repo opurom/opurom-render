@@ -624,8 +624,10 @@ pub fn project_state_level(x: i64) -> usize {
 /// replay backend expands `level` via [`ELEVATION_TABLE`]; level 0 is never
 /// recorded (no shadow).
 pub(crate) fn emit_elevation_command(canvas: &mut Canvas, n: &LaidOut, level: i64) {
+    let clip = canvas.effective_clip();
     canvas.emit(Command::EffectElevation {
         rect: n.rect,
+        clip,
         radius: shape_radius(n),
         level,
         color: DARK,

@@ -92,6 +92,7 @@ pub enum Command {
     /// elevation table. Recorded in capture only when elevation > 0.
     EffectElevation {
         rect: Rect,
+        clip: Rect,
         radius: i64,
         level: i64,
         color: Rgba,
@@ -219,6 +220,7 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
         }
         Command::EffectElevation {
             rect,
+            clip,
             radius,
             level,
             ..
@@ -229,6 +231,7 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
                 )));
             }
             push_rect(&mut values, rect);
+            push_rect(&mut values, clip);
             values.extend_from_slice(&[radius, level]);
         }
         Command::EffectGlow {
@@ -541,12 +544,15 @@ impl DisplayList {
                 }
                 Command::EffectElevation {
                     rect,
+                    clip,
                     radius,
                     level,
                     color,
                 } => {
                     out.push_str("{\"kind\":\"effect_elevation\",");
                     write_rect(&mut out, "rect", *rect).map_err(fmt_err)?;
+                    out.push(',');
+                    write_rect(&mut out, "clip", *clip).map_err(fmt_err)?;
                     write!(&mut out, ",\"radius\":{radius},\"level\":{level},").map_err(fmt_err)?;
                     write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
                     out.push('}');

@@ -222,3 +222,47 @@ fn default_path_keeps_the_two_counter_goldens() {
         "318beb1dd337bc4e"
     );
 }
+
+#[test]
+fn elevation_command_carries_the_effective_clip() {
+    // gpu-dev ABI: the GPU replay expands `level` itself, so it must receive the
+    // same clip the software `draw_elevation` masks with
+    // (`canvas.effective_clip()`), otherwise a clipped node cannot be
+    // byte-identical. Wire format is `"clip":[x,y,w,h]`.
+    let ir_text = r##"{
+        "ir": "0.1.0", "app": "Elev", "state": [],
+        "tree": { "id": 0, "kind": "Column", "props": { "padding": 0 },
+            "children": [ { "id": 1, "kind": "Scroll", "props": {
+                "width": 80, "height": 40 },
+                "children": [ { "id": 2, "kind": "Container", "props": {
+                    "color": "#102030", "width": 60, "height": 40, "radius": 4,
+                    "elevation": 4 },
+                    "children": [], "events": {} } ], "events": {} } ], "events": {} },
+        "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
+    }"##;
+    let ir = parse_ir(ir_text).unwrap();
+    let state = StateView::from_ir(&ir);
+    let r = Renderer::new(240, 200);
+    let json = r.display_list(&ir, &state).to_json().unwrap();
+    let v: Value = serde_json::from_str(&json).unwrap();
+    let cmd = v["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["kind"] == "effect_elevation")
+        .expect("clipped node still records its elevation command");
+    assert_eq!(cmd["level"], 4);
+    let clip = cmd["clip"]
+        .as_array()
+        .expect("clip must be an [x,y,w,h] array");
+    let clip: Vec<i64> = clip.iter().map(|n| n.as_i64().unwrap()).collect();
+    // The scroll viewport clip is narrower than the 240x200 canvas: the
+    // command must carry the trimmed rect, not the full canvas.
+    assert_eq!(clip, vec![0, 0, 80, 40], "effective clip, not the canvas");
+    assert_eq!(clip[2] < 240, true, "non-full clip is actually exercised");
+
+    // The software path is deterministic for the same clipped elevation.
+    let a = render(ir_text);
+    let b = render(ir_text);
+    assert_eq!(a, b, "clipped elevation is byte-reproducible");
+}
