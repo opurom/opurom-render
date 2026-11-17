@@ -86,7 +86,10 @@ fn ripple_follows_flutter_ink_timing() {
         let a = ripple_alpha(t, RIPPLE_PEAK_ALPHA);
         assert!(a >= 0 && a <= RIPPLE_PEAK_ALPHA, "alpha bounded at t={t}");
     }
-    assert_eq!(RIPPLE_TOTAL_MS, RIPPLE_FADE_OUT_START_MS + 375);
+    assert_eq!(
+        RIPPLE_TOTAL_MS, 375,
+        "splash ends with the fade-out controller"
+    );
 }
 
 #[test]

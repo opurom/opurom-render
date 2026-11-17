@@ -153,10 +153,14 @@ pub struct PressPhase {
 pub const RIPPLE_FADE_IN_MS: i64 = 75;
 pub const RIPPLE_RADIUS_MS: i64 = 225;
 pub const RIPPLE_FADE_OUT_MS: i64 = 375;
-/// Fade-out begins once the radius expansion has finished (225/375 of its span).
+/// The fade-out controller runs 375ms but its alpha interval only starts at
+/// 225/375 of that span, so the visible fade is the last 150ms. Matches
+/// Flutter's `Interval(_kFadeOutIntervalStart, 1.0)`.
 pub const RIPPLE_FADE_OUT_START_MS: i64 = RIPPLE_RADIUS_MS;
+/// Visible fade-out window: from 225ms to the controller's 375ms end.
+pub const RIPPLE_FADE_WINDOW_MS: i64 = RIPPLE_FADE_OUT_MS - RIPPLE_FADE_OUT_START_MS;
 /// The whole splash is gone when the fade-out controller completes.
-pub const RIPPLE_TOTAL_MS: i64 = RIPPLE_FADE_OUT_START_MS + RIPPLE_FADE_OUT_MS;
+pub const RIPPLE_TOTAL_MS: i64 = RIPPLE_FADE_OUT_MS;
 /// Radius starts at 30% of the target radius, as Flutter's InkRipple does
 /// (initial splash diameter is 60% of the final diameter).
 pub const RIPPLE_START_PERCENT: i64 = 30;
@@ -193,7 +197,7 @@ pub fn ripple_radius(elapsed_ms: i64, max_radius: i64) -> i64 {
 /// `RIPPLE_FADE_OUT_START_MS`. Integer fixed point.
 pub fn ripple_alpha(elapsed_ms: i64, peak: i64) -> i64 {
     let fade_in = phase_progress(elapsed_ms, 0, RIPPLE_FADE_IN_MS);
-    let fade_out = phase_progress(elapsed_ms, RIPPLE_FADE_OUT_START_MS, RIPPLE_FADE_OUT_MS);
+    let fade_out = phase_progress(elapsed_ms, RIPPLE_FADE_OUT_START_MS, RIPPLE_FADE_WINDOW_MS);
     (peak as i128 * fade_in as i128 * (UNIT - fade_out) as i128 / (UNIT as i128 * UNIT as i128))
         as i64
 }
