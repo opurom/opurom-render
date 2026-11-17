@@ -453,6 +453,8 @@ pub struct Props {
     pub height: Option<i64>,
     pub radius: Option<i64>,
     pub color: Option<Rgba>,
+    /// Explicit text colour, independent of the fill (Button foreground).
+    pub text_color: Option<Rgba>,
     pub value: Option<String>,
     /// Integer form of `value` (`Progress` percentage).
     pub value_num: Option<i64>,
@@ -1372,6 +1374,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         height: opt_integer(o, "height", what)?,
         radius: opt_integer(o, "radius", what)?,
         color: color_prop(o, "color", what)?,
+        text_color: color_prop(o, "textColor", what)?,
         value: opt_text(o, "value", what)?,
         value_num,
         value_frac,

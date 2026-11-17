@@ -1264,6 +1264,11 @@ fn place(
     if let Some(variant) = n.props.variant {
         text_color = Some(variant.text_color());
     }
+    // Explicit `textColor` overrides the variant foreground but stays below the
+    // high-contrast override below, matching the foreground/background split.
+    if n.props.text_color.is_some() {
+        text_color = n.props.text_color;
+    }
     let text_color = if contrast {
         Some(contrast_text(fill.unwrap_or(pal.bg)))
     } else {
