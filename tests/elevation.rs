@@ -1,8 +1,12 @@
-//! M2 material elevation table (DEFAULT_UI_GLASS_REFINEMENT.md §12.5): the
-//! embedded table matches opurom-ui/material-tokens.json verbatim, the backend
-//! switch changes node shadows, and every default/capture path stays pinned.
+//! Per-node M3 material elevation (ELEVATION_PER_NODE_PROPOSAL.md): the
+//! embedded table matches material-tokens.json, authored levels pass a strict
+//! six-level whitelist, state deltas use the separate M projector, and the
+//! default (no elevation) path stays byte-identical.
 
-use opurom_render::{digest_hex, elevation_level, parse_ir, Renderer, StateView, ELEVATION_TABLE};
+use opurom_render::{
+    digest_hex, elevation_level, parse_ir, project_state_level, Command, Renderer, StateView,
+    ELEVATION_TABLE,
+};
 use serde_json::Value;
 
 // CI checks out render without the sibling UI repo, so the fixture is the
@@ -12,7 +16,6 @@ const SIBLING_TOKENS: &str = "../opurom-ui/theme/material-tokens.json";
 const COUNTER: &str = "../opurom-examples/golden/counter.opuir.json";
 
 fn alpha_of(hex: &str) -> u8 {
-    // #AARRGGBB -> AA
     u8::from_str_radix(&hex[1..3], 16).unwrap()
 }
 
@@ -34,7 +37,6 @@ fn embedded_table_matches_material_tokens_json() {
         };
         let key = format!("md-elev-{level}");
         let node = &elev[&key];
-        // Table order: [ambient, penumbra, umbra]; JSON keys match by name.
         for (layer, name) in layers.iter().zip(["ambient", "penumbra", "umbra"]) {
             let j = &node[name];
             let off = j["offset"].as_array().unwrap();
@@ -50,95 +52,157 @@ fn embedded_table_matches_material_tokens_json() {
             );
         }
     }
-    // Level 5 does not exist in either; 0 is empty.
     assert!(ELEVATION_TABLE[5].is_none());
     assert!(ELEVATION_TABLE[0].is_none());
 }
 
 #[test]
-fn level_mapping_matches_spec() {
+fn legacy_shadow_canonicalizer_is_unchanged() {
     assert_eq!(elevation_level(0), 0);
     assert_eq!(elevation_level(1), 1);
     assert_eq!(elevation_level(4), 4);
-    assert_eq!(elevation_level(5), 4, "5 falls back to 4");
+    assert_eq!(elevation_level(5), 4);
     assert_eq!(elevation_level(6), 6);
-    assert_eq!(elevation_level(7), 6, "7 falls back to 6");
-    assert_eq!(elevation_level(8), 6, "8 falls back to 6");
+    assert_eq!(elevation_level(7), 6);
+    assert_eq!(elevation_level(8), 6);
 }
 
-fn box_ir(shadow: i64) -> String {
+#[test]
+fn state_projector_uses_six_level_table() {
+    // M(x) = largest legal level <= clamp(round_half_up(x), 0, 6).
+    assert_eq!(project_state_level(0), 0);
+    assert_eq!(project_state_level(1), 1);
+    assert_eq!(project_state_level(3), 3);
+    assert_eq!(project_state_level(4), 4);
+    assert_eq!(project_state_level(5), 4); // 3+2=5 -> 4
+    assert_eq!(project_state_level(6), 6);
+    assert_eq!(project_state_level(7), 6); // 1+6=7 -> 6
+    assert_eq!(project_state_level(10), 6);
+    assert_eq!(project_state_level(-3), 0); // disabled clamp
+}
+
+fn box_ir(elevation: Option<i64>) -> String {
+    let extra = elevation
+        .map(|e| format!(",\"elevation\":{e}"))
+        .unwrap_or_default();
     format!(
         r##"{{
         "ir": "0.1.0", "app": "Elev", "state": [],
         "tree": {{ "id": 0, "kind": "Column", "props": {{ "padding": 8 }},
             "children": [ {{ "id": 1, "kind": "Container", "props": {{
-                "color": "#102030", "width": 60, "height": 40, "radius": 4, "shadow": {shadow} }},
+                "color": "#102030", "width": 60, "height": 40, "radius": 4{extra} }},
                 "children": [], "events": {{}} }} ], "events": {{}} }},
         "theme": {{ "mode": "light", "accent": "#097FEB", "radius": 4 }}
     }}"##
     )
 }
 
-fn render(ir_text: &str, elevation: bool) -> Vec<u8> {
+fn render(ir_text: &str) -> Vec<u8> {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut r = Renderer::new(240, 200);
-    r.set_elevation_shadows(elevation);
-    r.render(&ir, &state).pixels
+    Renderer::new(240, 200).render(&ir, &state).pixels
 }
 
 #[test]
-fn elevation_switch_changes_shadow_and_default_is_unchanged() {
-    let ir_text = box_ir(3);
-    let legacy = render(&ir_text, false);
-    let material = render(&ir_text, true);
+fn authored_whitelist_rejects_illegal_levels() {
+    for bad in [5, 7, 8, -1, 9] {
+        assert!(
+            parse_ir(&box_ir(Some(bad))).is_err(),
+            "elevation {bad} must fail loud"
+        );
+    }
+    for good in [0, 1, 2, 3, 4, 6] {
+        assert!(
+            parse_ir(&box_ir(Some(good))).is_ok(),
+            "elevation {good} must be accepted"
+        );
+    }
+}
+
+#[test]
+fn per_node_elevation_draws_a_material_shadow() {
+    let none = render(&box_ir(None));
+    let elev = render(&box_ir(Some(3)));
     assert_ne!(
-        digest_hex(&legacy),
-        digest_hex(&material),
-        "elevation table draws a different shadow"
+        digest_hex(&none),
+        digest_hex(&elev),
+        "elevation 3 draws a different shadow than no elevation"
     );
-    // Switch off must equal the original strength-derived path byte for byte.
-    let ir = parse_ir(&ir_text).unwrap();
-    let state = StateView::from_ir(&ir);
-    let original = Renderer::new(240, 200).render(&ir, &state).pixels;
+    let l1 = render(&box_ir(Some(1)));
+    let l6 = render(&box_ir(Some(6)));
+    assert_ne!(digest_hex(&l1), digest_hex(&l6), "levels differ");
     assert_eq!(
-        digest_hex(&legacy),
-        digest_hex(&original),
-        "switch off is the default path"
-    );
-}
-
-#[test]
-fn switch_on_is_deterministic_and_level_dependent() {
-    let a = render(&box_ir(3), true);
-    let b = render(&box_ir(3), true);
-    assert_eq!(digest_hex(&a), digest_hex(&b), "deterministic");
-    let l1 = render(&box_ir(1), true);
-    let l6 = render(&box_ir(6), true);
-    assert_ne!(
         digest_hex(&l1),
-        digest_hex(&l6),
-        "different levels draw differently"
+        digest_hex(&render(&box_ir(Some(1)))),
+        "deterministic"
     );
 }
 
 #[test]
-fn capture_command_stream_ignores_the_switch() {
-    // The display-list path builds its own capturing canvas and never consults
-    // the elevation switch, so commands are identical with it on or off.
-    let ir_text = box_ir(3);
-    let ir = parse_ir(&ir_text).unwrap();
+fn elevation_wins_over_legacy_shadow() {
+    // A node declaring both elevation and shadow uses the material path.
+    let text = r##"{
+        "ir": "0.1.0", "app": "Elev", "state": [],
+        "tree": { "id": 0, "kind": "Column", "props": { "padding": 8 },
+            "children": [ { "id": 1, "kind": "Container", "props": {
+                "color": "#102030", "width": 60, "height": 40, "radius": 4,
+                "shadow": 6, "elevation": 2 },
+                "children": [], "events": {} } ], "events": {} },
+        "theme": { "mode": "light", "accent": "#097FEB", "radius": 4 }
+    }"##;
+    let both = render(text);
+    let only_shadow = render(&text.replace(", \"elevation\": 2", ""));
+    assert_ne!(
+        digest_hex(&both),
+        digest_hex(&only_shadow),
+        "elevation>0 wins over legacy shadow strength"
+    );
+}
+
+#[test]
+fn capture_records_elevation_only_when_set() {
+    let ir = parse_ir(&box_ir(Some(4))).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut r_off = Renderer::new(240, 200);
-    r_off.set_elevation_shadows(false);
-    let mut r_on = Renderer::new(240, 200);
-    r_on.set_elevation_shadows(true);
-    let dl_off = r_off.display_list(&ir, &state);
-    let dl_on = r_on.display_list(&ir, &state);
+    let r = Renderer::new(240, 200);
+    let dl = r.display_list(&ir, &state);
+    assert!(
+        dl.commands
+            .iter()
+            .any(|c| matches!(c, Command::EffectElevation { level: 4, .. })),
+        "capture records the resolved elevation level"
+    );
+    let ir0 = parse_ir(&box_ir(None)).unwrap();
+    let s0 = StateView::from_ir(&ir0);
+    let dl0 = r.display_list(&ir0, &s0);
+    assert!(
+        !dl0.commands
+            .iter()
+            .any(|c| matches!(c, Command::EffectElevation { .. })),
+        "no elevation command for a default node"
+    );
+}
+
+#[test]
+fn authored_elevation_change_invalidates_incremental_cache() {
+    // The appearance hash must include authored elevation, otherwise a cached
+    // shadowless node would be reused after elevation is added.
+    let ir0 = parse_ir(&box_ir(None)).unwrap();
+    let s0 = StateView::from_ir(&ir0);
+    let ir3 = parse_ir(&box_ir(Some(3))).unwrap();
+    let s3 = StateView::from_ir(&ir3);
+    let mut r = Renderer::new(240, 200);
+    r.render_incremental_at(&ir0, &s0, 0);
+    r.render_incremental_at(&ir0, &s0, 0);
+    assert_eq!(r.redraw_stats(), (0, 0), "seed settled");
+    let incr = r.render_incremental_at(&ir3, &s3, 0).pixels;
+    let (nodes, pixels) = r.redraw_stats();
+    assert!(nodes > 0 && pixels > 0, "elevation change redraws the node");
+    let mut full = Renderer::new(240, 200);
+    let expected = full.render(&ir3, &s3).pixels;
     assert_eq!(
-        format!("{:?}", dl_off.commands),
-        format!("{:?}", dl_on.commands),
-        "display-list command stream ignores the elevation switch"
+        digest_hex(&incr),
+        digest_hex(&expected),
+        "incremental equals full after elevation change"
     );
 }
 
@@ -148,13 +212,11 @@ fn default_path_keeps_the_two_counter_goldens() {
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
     let mut r = Renderer::new(320, 240);
-    r.set_elevation_shadows(false);
     assert_eq!(
         digest_hex(&r.render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     let mut r2 = Renderer::new(800, 600);
-    r2.set_elevation_shadows(true); // counter has no shadow node -> no effect
     assert_eq!(
         digest_hex(&r2.render(&ir, &state).pixels),
         "318beb1dd337bc4e"

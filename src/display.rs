@@ -87,6 +87,15 @@ pub enum Command {
         alpha: i64,
         color: Rgba,
     },
+    /// Per-node M3 material elevation shadow. `level` is the resolved M3
+    /// table index (1/2/3/4/6); the replay backend expands it via the shared
+    /// elevation table. Recorded in capture only when elevation > 0.
+    EffectElevation {
+        rect: Rect,
+        radius: i64,
+        level: i64,
+        color: Rgba,
+    },
     EffectGlow {
         bounds: Rect,
         radius: i64,
@@ -207,6 +216,20 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
         } => {
             push_rect(&mut values, bounds);
             values.extend_from_slice(&[radius, dx, dy, alpha]);
+        }
+        Command::EffectElevation {
+            rect,
+            radius,
+            level,
+            ..
+        } => {
+            if !matches!(level, 1 | 2 | 3 | 4 | 6) {
+                return Err(bad(format!(
+                    "{what}.level {level} must be one of levels 1,2,3,4,6"
+                )));
+            }
+            push_rect(&mut values, rect);
+            values.extend_from_slice(&[radius, level]);
         }
         Command::EffectGlow {
             bounds,
@@ -513,6 +536,18 @@ impl DisplayList {
                         ",\"radius\":{radius},\"dx\":{dx},\"dy\":{dy},\"alpha\":{alpha},"
                     )
                     .map_err(fmt_err)?;
+                    write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
+                    out.push('}');
+                }
+                Command::EffectElevation {
+                    rect,
+                    radius,
+                    level,
+                    color,
+                } => {
+                    out.push_str("{\"kind\":\"effect_elevation\",");
+                    write_rect(&mut out, "rect", *rect).map_err(fmt_err)?;
+                    write!(&mut out, ",\"radius\":{radius},\"level\":{level},").map_err(fmt_err)?;
                     write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
                     out.push('}');
                 }

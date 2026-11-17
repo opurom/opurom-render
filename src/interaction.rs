@@ -134,6 +134,27 @@ impl NodeState {
             | NodeState::Error => alpha,
         }
     }
+
+    /// State-driven elevation level. Flutter deltas (disabled 0, pressed +6,
+    /// hovered/focused +2) are applied to the authored level then projected
+    /// through M into the legal six-level table. Business states keep the base.
+    pub fn elevation(self, authored: i64) -> i64 {
+        // A node with no declared elevation stays shadowless in every state;
+        // state deltas only raise an already-elevated surface (Flutter widgets
+        // carry their own non-zero base elevation).
+        if authored <= 0 {
+            return 0;
+        }
+        let raw = match self {
+            NodeState::Disabled => 0,
+            NodeState::Active => authored + 6,
+            NodeState::Hover | NodeState::Focus => authored + 2,
+            NodeState::Default | NodeState::Loading | NodeState::Success | NodeState::Error => {
+                authored
+            }
+        };
+        crate::effects::project_state_level(raw) as i64
+    }
 }
 
 fn lighten(v: u8) -> u8 {
@@ -566,6 +587,9 @@ impl StatePaint {
             values.push(color_value(particles.color));
             values.push(AnimValue::scalar(particles.alpha));
         }
+        // Trailing scalar: resolved elevation level (already M-projected by
+        // style_node for non-default states, authored legal level otherwise).
+        values.push(AnimValue::scalar(n.elevation));
         StatePaint { values }
     }
 
@@ -636,6 +660,11 @@ impl StatePaint {
             }
             particles.alpha = self.scalar(base + 1, particles.alpha);
         }
+        // Trailing elevation scalar: lerp already did round-half-up; project
+        // the blended scalar through M into the legal level.
+        if let Some(v) = self.values.last().and_then(|v| v.as_scalar()) {
+            n.elevation = crate::effects::project_state_level(v) as i64;
+        }
     }
 }
 
@@ -653,6 +682,7 @@ pub fn style_node(n: &LaidOut) -> LaidOut {
     out.tone_color = out.tone_color.map(paint);
     out.effects.gradient = out.effects.gradient.map(|(a, b)| (paint(a), paint(b)));
     out.effects.opacity = n.state.opacity(out.effects.opacity);
+    out.elevation = n.state.elevation(n.elevation);
     for effect in &mut out.visual_effects {
         effect.color = effect.color.map(paint);
         effect.alpha = n.state.opacity(effect.alpha);

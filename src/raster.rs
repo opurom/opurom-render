@@ -95,12 +95,6 @@ pub struct Canvas {
     /// Opt-in display-layer split: skip bitmap text so the host can overlay
     /// system-font spans. Off by default so every golden stays byte-identical.
     suppress_text: bool,
-    /// Opt-in material elevation table for node shadows. Off by default so the
-    /// strength-derived shadow path stays byte-identical; capture ignores it.
-    elevation_shadows: bool,
-    /// Node id currently press-elevated (one level up). Set only on press paths;
-    /// `draw_shadow` rechecks the node state and shadow strength.
-    press_elevate: Option<u32>,
     capture: bool,
     capture_unsupported: Option<String>,
     commands: Vec<Command>,
@@ -138,8 +132,6 @@ impl Canvas {
             edge_aa: false,
             gradient_bits: 10,
             suppress_text: false,
-            elevation_shadows: false,
-            press_elevate: None,
             capture: false,
             capture_unsupported: None,
             commands: Vec::new(),
@@ -164,19 +156,6 @@ impl Canvas {
     /// font spans instead. Every other primitive is unaffected. Default false.
     pub fn set_suppress_text(&mut self, on: bool) {
         self.suppress_text = on;
-    }
-
-    /// Enable the material elevation table for node shadows. Capture mode keeps
-    /// its command stream byte-identical, so this is a no-op while recording.
-    pub fn set_elevation_shadows(&mut self, on: bool) {
-        self.elevation_shadows = on && !self.capture;
-    }
-
-    /// Mark a node for one-level elevation while pressed. Only meaningful with
-    /// the elevation switch on; the node's state and shadow are rechecked in
-    /// `draw_shadow`. Ignored in capture mode.
-    pub fn set_press_elevate(&mut self, node: Option<u32>) {
-        self.press_elevate = if self.capture { None } else { node };
     }
 
     /// Apply the root `renderQuality` opt-in signals. Capture ignores every
@@ -343,8 +322,6 @@ impl Canvas {
             edge_aa: false,
             gradient_bits: 10,
             suppress_text: false,
-            elevation_shadows: false,
-            press_elevate: None,
             capture: false,
             capture_unsupported: None,
             commands: Vec::new(),
@@ -1227,14 +1204,20 @@ fn with_alpha(c: Rgba, alpha: i64) -> Rgba {
 /// Soft shadow: three rounded layers, offset down-right, darkening towards
 /// the box. The alpha is derived from the strength (0..8) only.
 fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
-    let s = n.effects.shadow.clamp(0, 8);
-    if s == 0 {
+    // Per-node material elevation wins over the legacy strength shadow. The
+    // level is already resolved/projected in layout; capture records it for
+    // replay instead of rasterizing pixels.
+    let level = n.elevation.clamp(0, 6);
+    if matches!(level, 1 | 2 | 3 | 4 | 6) {
+        if canvas.is_capturing() {
+            crate::effects::emit_elevation_command(canvas, n, level);
+        } else {
+            crate::effects::draw_elevation(canvas, n, level as usize);
+        }
         return;
     }
-    if canvas.elevation_shadows && !canvas.is_capturing() {
-        let pressed = canvas.press_elevate == Some(n.id) && n.state != NodeState::Disabled;
-        let level = crate::effects::elevation_level(if pressed { s + 1 } else { s });
-        crate::effects::draw_elevation(canvas, n, level);
+    let s = n.effects.shadow.clamp(0, 8);
+    if s == 0 {
         return;
     }
     let dx = s / 2 + 1;

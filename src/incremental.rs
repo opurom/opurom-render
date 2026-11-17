@@ -192,6 +192,7 @@ fn appearance(node: &Node, h: &mut Hasher) {
     h.int(16, p.size.unwrap_or(0));
     h.int(17, p.opacity.unwrap_or(0));
     h.int(18, p.shadow.unwrap_or(0));
+    h.int(32, p.elevation.unwrap_or(0));
     h.int(19, p.max_lines.unwrap_or(0) as i64);
     h.int(20, i64::from(p.glass));
     h.int(21, i64::from(p.secure));

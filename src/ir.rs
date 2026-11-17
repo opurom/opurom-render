@@ -488,6 +488,11 @@ pub struct Props {
     pub size: Option<i64>,
     // Canonical style effects.
     pub shadow: Option<i64>,
+    /// M3 material elevation level: 0/1/2/3/4/6 (absent or 0 = no shadow).
+    /// Independent of legacy `shadow` strength; a node with elevation > 0
+    /// draws the material shadow instead. Authored values never pass through
+    /// the state-only projector.
+    pub elevation: Option<i64>,
     pub gradient: Option<(Rgba, Rgba)>,
     /// `gradientDirection: "horizontal"` sweeps the gradient along the rect's
     /// horizontal axis; the default (absent, or `"vertical"`) keeps top to
@@ -1483,6 +1488,14 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         }
         other => other,
     };
+    let elevation = match opt_integer(o, "elevation", what)? {
+        Some(n) if !matches!(n, 0 | 1 | 2 | 3 | 4 | 6) => {
+            return Err(bad(format!(
+                "{what}.elevation must be one of levels 0,1,2,3,4,6"
+            )));
+        }
+        other => other,
+    };
     let animate = match opt_string(o, "animate", what)?.as_deref() {
         None => Curve::None,
         Some(s) => {
@@ -1589,6 +1602,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         fit,
         size: opt_integer(o, "size", what)?,
         shadow,
+        elevation,
         gradient: gradient_prop(o, "gradient", what)?,
         gradient_horizontal: match opt_string(o, "gradientDirection", what)?.as_deref() {
             None => false,

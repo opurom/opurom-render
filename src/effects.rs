@@ -589,6 +589,8 @@ pub const ELEVATION_TABLE: [Option<[ElevationLayer; 3]>; 7] = [
 
 /// Resolve a `shadow` strength (0..8) to a table level: the largest level
 /// `<= min(strength, 6)`. Strength 5 falls back to 4, 7/8 to 6, 0 has none.
+/// This is the legacy `shadow` canonicalizer only; state-driven elevation
+/// must use [`project_state_level`] instead.
 pub fn elevation_level(strength: i64) -> usize {
     let s = strength.clamp(0, 8) as usize;
     if s >= 6 {
@@ -600,10 +602,36 @@ pub fn elevation_level(strength: i64) -> usize {
     }
 }
 
+/// State-only elevation projector `M(x)`: the largest whitelist level in
+/// `{0,1,2,3,4,6}` not greater than `clamp(round_half_up(x), 0, 6)`.
+/// Accepts only state-delta values or in-flight interpolated scalars (already
+/// round-half-up by `AnimValue::lerp`), never an authored `elevation`, which is
+/// whitelist-validated at parse time. Distinct from [`elevation_level`] so the
+/// shadow-strength and state-elevation semantics cannot be conflated.
+pub fn project_state_level(x: i64) -> usize {
+    match x.clamp(0, 6) {
+        6 => 6,
+        5 => 4,
+        r => r as usize,
+    }
+}
+
 /// Draw a material elevation shadow for `n` at `level`, far-to-near. Uses the
 /// existing deterministic box blur and integer compositing; no floats, no wall
 /// clock. Called only when the backend elevation switch is on and not capturing,
 /// so the default path and the display-list command stream are untouched.
+/// Record one material-elevation display command for capture replay. The
+/// replay backend expands `level` via [`ELEVATION_TABLE`]; level 0 is never
+/// recorded (no shadow).
+pub(crate) fn emit_elevation_command(canvas: &mut Canvas, n: &LaidOut, level: i64) {
+    canvas.emit(Command::EffectElevation {
+        rect: n.rect,
+        radius: shape_radius(n),
+        level,
+        color: DARK,
+    });
+}
+
 pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
     let Some(layers) = ELEVATION_TABLE.get(level).copied().flatten() else {
         return;

@@ -272,6 +272,10 @@ pub struct LaidOut {
     pub image_src: Option<String>,
     pub image_fit: ImageFit,
     pub effects: Effects,
+    /// Resolved M3 material elevation level (0/1/2/3/4/6, 0 = none).
+    /// Authored `elevation` for the default path; M-projected for state-driven
+    /// and in-flight values. Draws the material shadow when > 0.
+    pub elevation: i64,
     /// Typed software effects, in IR array order.
     pub visual_effects: Vec<VisualEffect>,
     /// Opt-in deterministic particle field for this node's rect.
@@ -1352,6 +1356,10 @@ fn place(
         shadow,
         opacity,
     };
+    // Authored elevation is already a legal level (whitelist-validated at parse
+    // time); the default path uses it unchanged. State deltas are projected by
+    // style_node / StatePaint::apply.
+    let authored_elevation = n.props.elevation.unwrap_or(0);
 
     // The icon glyph is drawn from the declared name; the fallback glyph is
     // only a safety net for a name the language layer failed to reject. A
@@ -1408,6 +1416,7 @@ fn place(
             image_src: None,
             image_fit: n.props.fit,
             effects: target_effects,
+            elevation: authored_elevation,
             visual_effects: target_visual_effects,
             particles: n.props.particles,
             control: None,
@@ -1497,6 +1506,7 @@ fn place(
         },
         image_fit: n.props.fit,
         effects,
+        elevation: authored_elevation,
         visual_effects,
         particles: n.props.particles,
         control: control_of(n, state),

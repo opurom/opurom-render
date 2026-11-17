@@ -1,22 +1,22 @@
-//! Press elevation (DEFAULT_UI_GLASS_REFINEMENT.md §12.5, ANIMATION §8): with
-//! the elevation switch on, a pressed node with shadow>0 draws one level up;
-//! disabled/no-press/shadow-0 and switch-off paths are byte-identical.
+//! State-driven per-node elevation (ELEVATION_PER_NODE_PROPOSAL.md §3.4):
+//! authored elevation + Flutter state deltas (disabled 0, pressed +6,
+//! hovered/focused +2) projected through M; idle/default stays byte-identical.
 
-use opurom_render::{digest_hex, parse_ir, PressPhase, Renderer, StateView};
+use opurom_render::{digest_hex, parse_ir, NodeState, PressPhase, Renderer, StateView};
 
 const COUNTER: &str = "../opurom-examples/golden/counter.opuir.json";
 
-fn node_ir(shadow: i64, state: Option<&str>) -> String {
+fn node_ir(elevation: i64, state: Option<&str>) -> String {
     let state_prop = state
         .map(|s| format!(",\"state\":\"{s}\""))
         .unwrap_or_default();
     format!(
         r##"{{
-        "ir": "0.1.0", "app": "PressElev", "state": [],
+        "ir": "0.1.0", "app": "StateElev", "state": [],
         "tree": {{ "id": 0, "kind": "Column", "props": {{ "gap": 2 }},
             "children": [ {{ "id": 1, "kind": "Button", "props": {{
                 "color": "#102030", "width": 60, "height": 40, "radius": 4,
-                "shadow": {shadow}{state_prop} }},
+                "elevation": {elevation}{state_prop} }},
                 "children": [], "events": {{}} }} ], "events": {{}} }},
         "theme": {{ "mode": "light", "accent": "#097FEB", "radius": 4 }}
     }}"##
@@ -32,124 +32,76 @@ fn phase() -> PressPhase {
     }
 }
 
-fn render(
-    ir_text: &str,
-    elevation: bool,
-    press: Option<&PressPhase>,
-    incremental: bool,
-) -> Vec<u8> {
+fn render_press(ir_text: &str, press: Option<&PressPhase>) -> Vec<u8> {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut r = Renderer::new(240, 200);
-    r.set_elevation_shadows(elevation);
-    let frame = if incremental {
-        r.render_with_press_incremental(&ir, &state, 0, press)
-    } else {
-        r.render_with_press(&ir, &state, 0, press)
-    };
-    frame.pixels
+    Renderer::new(240, 200)
+        .render_with_press(&ir, &state, 0, press)
+        .pixels
 }
 
 #[test]
-fn press_raises_the_elevation_level() {
-    let ir_text = node_ir(4, None);
-    let idle = render(&ir_text, true, None, false);
-    let pressed = render(&ir_text, true, Some(&phase()), false);
-    assert_ne!(
-        digest_hex(&idle),
-        digest_hex(&pressed),
-        "press with elevation on raises the shadow one level"
-    );
-    // Without the elevation switch, press changes only the Active fill/inset,
-    // not a material shadow; still differs from idle but is a different path.
-    let plain_press = render(&ir_text, false, Some(&phase()), false);
-    assert_ne!(digest_hex(&pressed), digest_hex(&plain_press));
-}
-
-#[test]
-fn disabled_node_is_not_elevated_by_press() {
-    let ir_text = node_ir(4, Some("disabled"));
-    let idle = render(&ir_text, true, None, false);
-    let pressed = render(&ir_text, true, Some(&phase()), false);
-    assert_eq!(
-        digest_hex(&idle),
-        digest_hex(&pressed),
-        "authored disabled wins: no press elevation"
-    );
-}
-
-#[test]
-fn shadow_zero_and_switch_off_are_no_ops() {
-    let no_shadow = node_ir(0, None);
-    // shadow 0 has no shadow to raise: elevation on/off under press are equal
-    // (both show only the ordinary Active appearance, no material shadow).
-    let elev_on = render(&no_shadow, true, Some(&phase()), false);
-    let elev_off = render(&no_shadow, false, Some(&phase()), false);
-    assert_eq!(
-        digest_hex(&elev_on),
-        digest_hex(&elev_off),
-        "shadow 0: no elevation to raise"
-    );
-
-    // Switch off: press equals the ordinary legacy press path with switch off.
-    let ir_text = node_ir(4, None);
-    let off_press = render(&ir_text, false, Some(&phase()), false);
-    let ir = parse_ir(&ir_text).unwrap();
-    let state = StateView::from_ir(&ir);
-    let mut r = Renderer::new(240, 200);
-    let expected = r.render_with_press(&ir, &state, 0, Some(&phase())).pixels;
-    assert_eq!(
-        digest_hex(&off_press),
-        digest_hex(&expected),
-        "switch off is default"
-    );
-}
-
-#[test]
-fn level_fallback_stays_defined_under_press() {
-    // Strength 5 falls back to level 4; press asks for 6 (min(5+1,6)=6).
-    // Strength 8 already at 6; press keeps 6. Both must be deterministic.
-    for s in [5, 8] {
-        let ir_text = node_ir(s, None);
-        let a = render(&ir_text, true, Some(&phase()), false);
-        let b = render(&ir_text, true, Some(&phase()), false);
-        assert_eq!(
-            digest_hex(&a),
-            digest_hex(&b),
-            "strength {s} press deterministic"
-        );
+fn press_raises_authored_elevation() {
+    // Exact state->level mapping (Chief's pinned cases), independent of the
+    // fill/tint pixels a press also changes.
+    assert_eq!(NodeState::Default.elevation(1), 1);
+    assert_eq!(NodeState::Active.elevation(1), 6); // 1+6=7 -> M=6
+    assert_eq!(NodeState::Active.elevation(3), 6); // 3+6=9 -> M=6
+    assert_eq!(NodeState::Disabled.elevation(3), 0);
+    // A node with no declared elevation stays shadowless in every state.
+    for s in [
+        NodeState::Default,
+        NodeState::Hover,
+        NodeState::Active,
+        NodeState::Focus,
+        NodeState::Disabled,
+    ] {
+        assert_eq!(s.elevation(0), 0, "no authored elevation stays 0");
     }
 }
 
 #[test]
-fn full_and_incremental_paths_agree() {
-    for s in [1, 4, 5, 6, 8] {
-        let ir_text = node_ir(s, None);
-        let full = render(&ir_text, true, Some(&phase()), false);
-        let incr = render(&ir_text, true, Some(&phase()), true);
-        assert_eq!(
-            digest_hex(&full),
-            digest_hex(&incr),
-            "full == incremental under press elevation at strength {s}"
-        );
-    }
+fn disabled_node_has_no_elevation() {
+    // Authored disabled wins: M(0)=0 regardless of press. Both frames equal.
+    let ir_text = node_ir(3, Some("disabled"));
+    let idle = render_press(&ir_text, None);
+    let pressed = render_press(&ir_text, Some(&phase()));
+    assert_eq!(
+        digest_hex(&idle),
+        digest_hex(&pressed),
+        "authored disabled suppresses state elevation"
+    );
 }
 
 #[test]
-fn capture_command_stream_unchanged_with_press_elevation() {
-    let ir_text = node_ir(4, None);
+fn hover_and_active_project_to_legal_levels() {
+    // hovered/focused -> M(e+2); active/pressed -> M(e+6).
+    assert_eq!(NodeState::Hover.elevation(1), 3); // 1+2=3
+    assert_eq!(NodeState::Focus.elevation(1), 3);
+    assert_eq!(NodeState::Hover.elevation(3), 4); // 3+2=5 -> M=4
+    assert_eq!(NodeState::Active.elevation(1), 6); // 1+6=7 -> M=6
+                                                   // Business states keep the authored base level.
+    assert_eq!(NodeState::Loading.elevation(2), 2);
+    assert_eq!(NodeState::Success.elevation(4), 4);
+    assert_eq!(NodeState::Error.elevation(6), 6);
+}
+
+#[test]
+fn state_elevation_is_deterministic_and_incremental_agrees() {
+    let ir_text = node_ir(2, None);
+    let a = render_press(&ir_text, Some(&phase()));
+    let b = render_press(&ir_text, Some(&phase()));
+    assert_eq!(digest_hex(&a), digest_hex(&b), "deterministic");
+
     let ir = parse_ir(&ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut off = Renderer::new(240, 200);
-    off.set_elevation_shadows(false);
-    let mut on = Renderer::new(240, 200);
-    on.set_elevation_shadows(true);
-    let d_off = off.display_list(&ir, &state);
-    let d_on = on.display_list(&ir, &state);
+    let incr = Renderer::new(240, 200)
+        .render_with_press_incremental(&ir, &state, 0, Some(&phase()))
+        .pixels;
     assert_eq!(
-        format!("{:?}", d_off.commands),
-        format!("{:?}", d_on.commands),
-        "display-list command stream ignores elevation switch"
+        digest_hex(&a),
+        digest_hex(&incr),
+        "full == incremental under state elevation"
     );
 }
 
