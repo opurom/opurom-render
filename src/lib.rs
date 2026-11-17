@@ -584,6 +584,7 @@ impl Renderer {
             canvas.set_edge_aa(self.edge_aa);
             canvas.set_suppress_text(self.suppress_text);
             canvas.set_elevation_shadows(self.elevation_shadows);
+            canvas.set_press_elevate(press.map(|p| p.node_id));
             canvas.set_render_quality(ir.render_quality.as_ref());
             canvas.clip = Some(region);
             canvas.fill_rect(region, pal.stage);
@@ -690,6 +691,7 @@ impl Renderer {
         canvas.set_edge_aa(self.edge_aa);
         canvas.set_suppress_text(self.suppress_text);
         canvas.set_elevation_shadows(self.elevation_shadows);
+        canvas.set_press_elevate(press.map(|p| p.node_id));
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
             // A tappable Text has no authored fill, so Active darkening has

@@ -70,6 +70,9 @@ pub struct Canvas {
     /// Opt-in material elevation table for node shadows. Off by default so the
     /// strength-derived shadow path stays byte-identical; capture ignores it.
     elevation_shadows: bool,
+    /// Node id currently press-elevated (one level up). Set only on press paths;
+    /// `draw_shadow` rechecks the node state and shadow strength.
+    press_elevate: Option<u32>,
     capture: bool,
     commands: Vec<Command>,
 }
@@ -93,6 +96,7 @@ impl Canvas {
             gradient_bits: 10,
             suppress_text: false,
             elevation_shadows: false,
+            press_elevate: None,
             capture: false,
             commands: Vec::new(),
         }
@@ -122,6 +126,13 @@ impl Canvas {
     /// its command stream byte-identical, so this is a no-op while recording.
     pub fn set_elevation_shadows(&mut self, on: bool) {
         self.elevation_shadows = on && !self.capture;
+    }
+
+    /// Mark a node for one-level elevation while pressed. Only meaningful with
+    /// the elevation switch on; the node's state and shadow are rechecked in
+    /// `draw_shadow`. Ignored in capture mode.
+    pub fn set_press_elevate(&mut self, node: Option<u32>) {
+        self.press_elevate = if self.capture { None } else { node };
     }
 
     /// Apply the root `renderQuality` opt-in signals. Capture ignores every
@@ -219,6 +230,7 @@ impl Canvas {
             gradient_bits: 10,
             suppress_text: false,
             elevation_shadows: false,
+            press_elevate: None,
             capture: false,
             commands: Vec::new(),
         }
@@ -776,7 +788,9 @@ fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
         return;
     }
     if canvas.elevation_shadows && !canvas.is_capturing() {
-        crate::effects::draw_elevation(canvas, n, crate::effects::elevation_level(s));
+        let pressed = canvas.press_elevate == Some(n.id) && n.state != NodeState::Disabled;
+        let level = crate::effects::elevation_level(if pressed { s + 1 } else { s });
+        crate::effects::draw_elevation(canvas, n, level);
         return;
     }
     let dx = s / 2 + 1;
