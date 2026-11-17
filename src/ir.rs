@@ -452,6 +452,9 @@ pub struct Props {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub radius: Option<i64>,
+    /// Semantic design-token colour carried through the IR; resolved against
+    /// the theme palette after `theme.mode` is known.
+    pub color_role: Option<String>,
     pub color: Option<Rgba>,
     /// Explicit text colour, independent of the fill (Button foreground).
     pub text_color: Option<Rgba>,
@@ -852,10 +855,53 @@ fn opt_bool(o: &Map<String, Value>, key: &str, what: &str) -> Result<bool, IrErr
 
 fn color_prop(o: &Map<String, Value>, key: &str, what: &str) -> Result<Option<Rgba>, IrError> {
     match opt_string(o, key, what)? {
+        // Semantic role strings resolve after theme parsing; see
+        // `resolve_color_roles`. Keeping them out of `Rgba` preserves the
+        // light/dark choice until the palette is known.
+        Some(s) if s.starts_with("@md-sys-color-") => Ok(None),
         Some(s) => Ok(Some(Rgba::from_hex(&s).ok_or_else(|| {
             bad(format!("{what}.{key} must be #RRGGBB, got {s:?}"))
         })?)),
         None => Ok(None),
+    }
+}
+
+fn color_role_prop(
+    o: &Map<String, Value>,
+    key: &str,
+    what: &str,
+) -> Result<Option<String>, IrError> {
+    let Some(s) = opt_string(o, key, what)? else {
+        return Ok(None);
+    };
+    let Some(role) = s.strip_prefix("@md-sys-color-") else {
+        return Ok(None);
+    };
+    if role != "primary" {
+        return Err(bad(format!(
+            "{what}.{key} has unsupported design token role 'md-sys-color-{role}'"
+        )));
+    }
+    Ok(Some(s))
+}
+
+/// Minimal M3 palette closure: one role, both modes. `System` uses the light
+/// baseline so every mode resolves deterministically. Flutter authority:
+/// `color_scheme.dart:449` (light `0xff6200ee`) and `:542` (dark `0xffbb86fc`).
+fn m3_color(role: &str, mode: ThemeMode) -> Option<Rgba> {
+    match (role, mode) {
+        ("@md-sys-color-primary", ThemeMode::Dark) => Some(Rgba::rgb(0xbb, 0x86, 0xfc)),
+        ("@md-sys-color-primary", _) => Some(Rgba::rgb(0x62, 0x00, 0xee)),
+        _ => None,
+    }
+}
+
+fn resolve_color_roles(n: &mut Node, mode: ThemeMode) {
+    if let Some(role) = &n.props.color_role {
+        n.props.color = m3_color(role, mode);
+    }
+    for child in &mut n.children {
+        resolve_color_roles(child, mode);
     }
 }
 
@@ -1373,6 +1419,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         width: opt_integer(o, "width", what)?,
         height: opt_integer(o, "height", what)?,
         radius: opt_integer(o, "radius", what)?,
+        color_role: color_role_prop(o, "color", what)?,
         color: color_prop(o, "color", what)?,
         text_color: color_prop(o, "textColor", what)?,
         value: opt_text(o, "value", what)?,
@@ -1890,7 +1937,7 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
     // Multi-page IR is additive: a `routes` object replaces the top-level
     // tree and `tree` mirrors the initial route, so single-tree consumers
     // keep working; without it the document is exactly the 0.1.0 single page.
-    let (tree, routes, initial_route) = if o.contains_key("routes") {
+    let (mut tree, mut routes, initial_route) = if o.contains_key("routes") {
         if o.get("tree").is_some() {
             return Err(bad(
                 "IR root must not declare both \"routes\" and a top-level \"tree\"",
@@ -1919,6 +1966,13 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
         (tree, BTreeMap::new(), None)
     };
     let theme = theme(required(o, "theme", "IR root")?)?;
+    // Semantic colour roles survive lowering as names; resolve them once here,
+    // after the mode is known. Existing hex colours are untouched, so committed
+    // frames keep their bytes.
+    for route in routes.values_mut() {
+        resolve_color_roles(&mut route.tree, theme.mode);
+    }
+    resolve_color_roles(&mut tree, theme.mode);
     // Optional page-transition key; unparsable values are rejected by name.
     let transition = match o.get("transition") {
         Some(v) => {
@@ -2142,6 +2196,23 @@ mod tests {
                  "children": [], "events": {}},
         "theme": {"mode": "light", "accent": "#097FEB", "radius": 8}
     }"##;
+
+    #[test]
+    fn design_token_color_resolves_by_theme_mode() {
+        let with_role = SAMPLE_IR.replace(
+            "\"value\": \"{count}\"",
+            "\"value\": \"{count}\", \"color\": \"@md-sys-color-primary\"",
+        );
+        let light = parse_ir(&with_role).unwrap();
+        assert_eq!(
+            light.tree.props.color_role.as_deref(),
+            Some("@md-sys-color-primary")
+        );
+        assert_eq!(light.tree.props.color, Some(Rgba::rgb(0x62, 0x00, 0xee)));
+        let dark =
+            parse_ir(&with_role.replace("\"mode\": \"light\"", "\"mode\": \"dark\"")).unwrap();
+        assert_eq!(dark.tree.props.color, Some(Rgba::rgb(0xbb, 0x86, 0xfc)));
+    }
 
     #[test]
     fn interpolation_handles_escapes_and_unknown_names() {
