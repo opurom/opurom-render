@@ -52,12 +52,39 @@ const LIGHT: Rgba = Rgba::rgb(0xff, 0xff, 0xff);
 const LAND: Rgba = Rgba::rgb(0xdf, 0xe6, 0xd8);
 const BUBBLE: Rgba = Rgba::rgb(0x24, 0x2a, 0x38);
 
+/// Rounded boundary of a surface clip, carried from the container to its
+/// children. This is internal seam consistency only, NOT Flutter parity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClipShape {
+    pub rect: Rect,
+    pub radii: RoundingRadii,
+}
+
+/// Clip shape is raster presentation state, not layout identity; neutral
+/// equality keeps settled layout comparisons byte-identical.
+#[derive(Clone, Debug, Default, Eq)]
+pub struct ClipShapeSlot(pub Option<ClipShape>);
+
+impl PartialEq for ClipShapeSlot {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl ClipShapeSlot {
+    pub fn as_ref(&self) -> Option<&ClipShape> {
+        self.0.as_ref()
+    }
+}
+
 pub struct Canvas {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
     /// Optional clip rectangle (`Scroll` viewport).
     pub clip: Option<Rect>,
+    /// Rounded container boundary for opt-in content clip coverage.
+    clip_shape: Option<ClipShape>,
     /// Opt-in 4x sub-pixel coverage on geometric edges. Off by default so the
     /// pinned golden frames stay byte-identical; capture mode ignores it so the
     /// display-list/GPU command stream is never altered.
@@ -107,6 +134,7 @@ impl Canvas {
             height,
             pixels,
             clip: None,
+            clip_shape: None,
             edge_aa: false,
             gradient_bits: 10,
             suppress_text: false,
@@ -311,6 +339,7 @@ impl Canvas {
             height,
             pixels,
             clip: None,
+            clip_shape: None,
             edge_aa: false,
             gradient_bits: 10,
             suppress_text: false,
@@ -377,6 +406,26 @@ impl Canvas {
                 return false;
             }
         }
+        let clip_cov = if self.edge_aa {
+            self.clip_shape
+                .map(|s| Self::radii_coverage(s.rect, x, y, s.radii))
+                .unwrap_or(255)
+        } else {
+            255
+        };
+        if clip_cov == 0 {
+            return false;
+        }
+        let c = if clip_cov == 255 {
+            c
+        } else {
+            let mut soft = c;
+            soft.a = ((c.a as i64 * clip_cov as i64) / 255) as u8;
+            if soft.a == 0 {
+                return false;
+            }
+            soft
+        };
         let i = (y as usize * self.width as usize + x as usize) * 4;
         if c.a == 0 {
             return false;
@@ -1249,6 +1298,14 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
         (Some(o), None) => Some(o),
         (None, p) => p,
     };
+    // Closure A: only content drawn inside a rounded surface gets the
+    // container's coverage. Capture ignores edge_aa, so command bytes are safe.
+    let outer_shape = canvas.clip_shape;
+    canvas.clip_shape = if canvas.edge_aa {
+        n.clip_shape.as_ref().copied()
+    } else {
+        None
+    };
     let backdrop = if !canvas.is_capturing() && crate::effects::has_local_effects(n) {
         Some(canvas.pixels.clone())
     } else {
@@ -1278,6 +1335,7 @@ pub fn draw(canvas: &mut Canvas, n: &LaidOut) {
         crate::effects::apply_node(canvas, n, &backdrop);
     }
     canvas.clip = outer;
+    canvas.clip_shape = outer_shape;
 }
 
 /// Brand-coloured 2 px stroke confined to the two pixel bands outside the

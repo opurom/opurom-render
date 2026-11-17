@@ -279,6 +279,8 @@ pub struct LaidOut {
     pub control: Option<Control>,
     /// Clip rectangle inherited from a `Scroll` viewport.
     pub clip: Option<Rect>,
+    /// Rounded boundary for opt-in content clip coverage.
+    pub clip_shape: crate::raster::ClipShapeSlot,
     /// Absolute glyph origin, used when the text is not centred in the box.
     pub text_origin: Option<(i64, i64)>,
     /// Exact text typography for the system-font span layer; none of these
@@ -898,6 +900,7 @@ pub fn layout_animated_at(
         Align::Start,
         elapsed_ms,
         None,
+        crate::raster::ClipShapeSlot(None),
         &ir.icons,
         anim,
         &mut out,
@@ -947,6 +950,7 @@ pub fn layout_cached_at(
         Align::Start,
         elapsed_ms,
         None,
+        crate::raster::ClipShapeSlot(None),
         &ir.icons,
         &mut anim,
         &mut out,
@@ -1083,6 +1087,7 @@ fn place(
     inherited_align: Align,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    clip_shape: crate::raster::ClipShapeSlot,
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
@@ -1407,6 +1412,7 @@ fn place(
             particles: n.props.particles,
             control: None,
             clip: None,
+            clip_shape: crate::raster::ClipShapeSlot(None),
             text_origin: None,
             text_weight: None,
             text_letter_spacing: None,
@@ -1495,6 +1501,7 @@ fn place(
         particles: n.props.particles,
         control: control_of(n, state),
         clip,
+        clip_shape: clip_shape.clone(),
         text_origin: None,
         text_weight: n.props.weight.clone(),
         text_letter_spacing: n.props.letter_spacing,
@@ -1517,6 +1524,27 @@ fn place(
     });
 
     if !n.children.is_empty() && rect.w > 0 && rect.h > 0 {
+        // Closure A (internal seam consistency, NOT Flutter parity): pass the
+        // rounded surface boundary to clipped children so their content uses
+        // the same coverage as the container edge instead of a binary cut.
+        let child_clip_shape = if surface_node(n) {
+            let max_r = radius
+                .max(n.props.corner_radii.as_ref().map_or(0, |c| {
+                    c.top_left
+                        .map_or(0, |v| v.0.max(v.1))
+                        .max(c.top_right.map_or(0, |v| v.0.max(v.1)))
+                        .max(c.bottom_left.map_or(0, |v| v.0.max(v.1)))
+                        .max(c.bottom_right.map_or(0, |v| v.0.max(v.1)))
+                }))
+                .min(rect.w.min(rect.h).max(0) / 2);
+            if max_r > 0 {
+                crate::raster::ClipShapeSlot(Some(crate::raster::ClipShape { rect, radii }))
+            } else {
+                clip_shape.clone()
+            }
+        } else {
+            clip_shape.clone()
+        };
         match n.kind {
             Kind::Grid => place_grid(
                 n,
@@ -1527,6 +1555,7 @@ fn place(
                 rtl,
                 elapsed_ms,
                 clip,
+                child_clip_shape.clone(),
                 padding,
                 icons,
                 anim,
@@ -1542,6 +1571,7 @@ fn place(
                 rtl,
                 elapsed_ms,
                 padding,
+                child_clip_shape.clone(),
                 icons,
                 anim,
                 out,
@@ -1556,6 +1586,7 @@ fn place(
                 rtl,
                 elapsed_ms,
                 clip,
+                child_clip_shape.clone(),
                 padding,
                 icons,
                 anim,
@@ -1571,6 +1602,7 @@ fn place(
                 rtl,
                 elapsed_ms,
                 clip,
+                child_clip_shape.clone(),
                 padding,
                 icons,
                 anim,
@@ -1586,6 +1618,7 @@ fn place(
                 rtl,
                 elapsed_ms,
                 clip,
+                child_clip_shape.clone(),
                 padding,
                 icons,
                 anim,
@@ -1717,6 +1750,7 @@ fn place_children(
     rtl: bool,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    clip_shape: crate::raster::ClipShapeSlot,
     padding: i64,
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
@@ -1943,6 +1977,7 @@ fn place_children(
             n.props.align,
             elapsed_ms,
             child_clip,
+            clip_shape.clone(),
             icons,
             anim,
             out,
@@ -1969,6 +2004,7 @@ fn place_grid(
     rtl: bool,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    clip_shape: crate::raster::ClipShapeSlot,
     padding: i64,
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
@@ -2067,6 +2103,7 @@ fn place_grid(
                     n.props.align,
                     elapsed_ms,
                     clip,
+                    clip_shape.clone(),
                     icons,
                     anim,
                     out,
@@ -2141,6 +2178,7 @@ fn place_grid(
                 n.props.align,
                 elapsed_ms,
                 clip,
+                clip_shape.clone(),
                 icons,
                 anim,
                 out,
@@ -2167,6 +2205,7 @@ fn place_scroll(
     rtl: bool,
     elapsed_ms: i64,
     padding: i64,
+    clip_shape: crate::raster::ClipShapeSlot,
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
     out: &mut Vec<LaidOut>,
@@ -2201,6 +2240,7 @@ fn place_scroll(
             n.props.align,
             elapsed_ms,
             clip,
+            clip_shape.clone(),
             icons,
             anim,
             out,
@@ -2226,6 +2266,7 @@ fn place_for(
     rtl: bool,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    clip_shape: crate::raster::ClipShapeSlot,
     padding: i64,
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
@@ -2319,6 +2360,7 @@ fn place_for(
                     n.props.align,
                     elapsed_ms,
                     clip,
+                    clip_shape.clone(),
                     icons,
                     anim,
                     out,
@@ -2358,6 +2400,7 @@ fn place_dialog(
     rtl: bool,
     elapsed_ms: i64,
     clip: Option<Rect>,
+    clip_shape: crate::raster::ClipShapeSlot,
     padding: i64,
     icons: &std::collections::BTreeMap<String, crate::icons::IconPaths>,
     anim: &mut AnimTable,
@@ -2400,6 +2443,7 @@ fn place_dialog(
             n.props.align,
             elapsed_ms,
             clip,
+            clip_shape.clone(),
             icons,
             anim,
             out,
