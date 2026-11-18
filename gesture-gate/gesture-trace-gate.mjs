@@ -45,6 +45,7 @@ const TESTS = [
   'converter_parity.rs',
   'eager_recognizer.rs',
   'gesture_details_parity.rs',
+  'hit_target_geometry.rs',
   'nested_scroll_coordinator.rs',
   'nested_scroll_coordination.rs',
   'parallel_pointer_arenas.rs',
