@@ -41,6 +41,7 @@ const ARCHIVE_FILES = [
   'semantics.json',
   'nested.json',
   'parallel.json',
+  'advanced.json',
   'replay.json',
 ];
 
@@ -203,6 +204,16 @@ function runRegression(archiveDir) {
   record('parallel_evidence_stable',
     stableJson(archivedParallel.metrics ?? {}) === stableJson(jointParallelMetrics) ? 'PASS' : 'FAIL',
     `metrics=${Object.keys(archivedParallel.metrics ?? {}).length}`);
+
+  // The archived advanced gesture evidence must carry the same metrics as the
+  // joint verdict it was built from.
+  const archivedAdvanced = JSON.parse(readFileSync(join(archiveDir, 'advanced.json'), 'utf8'));
+  const jointAdvancedMetrics = Object.fromEntries(
+    (evidence.json.advanced?.results ?? []).map((item) => [item.metric, item.detail]),
+  );
+  record('advanced_evidence_stable',
+    stableJson(archivedAdvanced.metrics ?? {}) === stableJson(jointAdvancedMetrics) ? 'PASS' : 'FAIL',
+    `metrics=${Object.keys(archivedAdvanced.metrics ?? {}).length}`);
 
   // Replay: regenerate the verdict from a fresh run and compare it with the
   // archived one. A deterministic gate must produce an identical verdict.

@@ -12,7 +12,8 @@ native ABI, or renderer sources.
 | `gesture-semantics-gate.mjs` | semantics and focus verdict | `SEMANTICS_GATE.md` |
 | `gesture-nested-gate.mjs` | nested scroll coordination verdict | `NESTED_GATE.md` |
 | `gesture-parallel-gate.mjs` | parallel pointer arena verdict | `PARALLEL_GATE.md` |
-| `gesture-fairness-perf-gate.mjs` | joint fairness + performance + bounce + semantics + nested + parallel verdict | `JOINT_GATE.md` |
+| `gesture-advanced-gate.mjs` | rotation and drag-start verdict | `ADVANCED_GATE.md` |
+| `gesture-fairness-perf-gate.mjs` | joint fairness + performance + bounce + semantics + nested + parallel + advanced verdict | `JOINT_GATE.md` |
 | `gesture-evidence-archive.mjs` | SHA-256 evidence archive | `EVIDENCE_ARCHIVE.md` |
 | `gesture-e2e-regression.mjs` | end-to-end regression over the stack | `E2E_REGRESSION.md` |
 

@@ -21,6 +21,7 @@ const BOUNCE_GATE = join(ROOT, 'gesture-gate', 'gesture-bounce-gate.mjs');
 const SEMANTICS_GATE = join(ROOT, 'gesture-gate', 'gesture-semantics-gate.mjs');
 const NESTED_GATE = join(ROOT, 'gesture-gate', 'gesture-nested-gate.mjs');
 const PARALLEL_GATE = join(ROOT, 'gesture-gate', 'gesture-parallel-gate.mjs');
+const ADVANCED_GATE = join(ROOT, 'gesture-gate', 'gesture-advanced-gate.mjs');
 const FAIRNESS_TEST = 'multi_pointer_fairness';
 const FAIRNESS_CASES = [
   'simultaneous_downs_open_independent_arenas',
@@ -38,6 +39,7 @@ const BOUNCE_SCHEMA = 'opurom.gesture.bounce.gate/1';
 const SEMANTICS_SCHEMA = 'opurom.gesture.semantics.gate/1';
 const NESTED_SCHEMA = 'opurom.gesture.nested.gate/1';
 const PARALLEL_SCHEMA = 'opurom.gesture.parallel.gate/1';
+const ADVANCED_SCHEMA = 'opurom.gesture.advanced.gate/1';
 const JOINT_SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 
 function parseArgs(argv) {
@@ -48,6 +50,7 @@ function parseArgs(argv) {
     semantics: null,
     nested: null,
     parallel: null,
+    advanced: null,
     baseline: null,
     writeBaseline: null,
     selfTest: null,
@@ -61,6 +64,7 @@ function parseArgs(argv) {
     else if (arg === '--semantics') args.semantics = argv[++i];
     else if (arg === '--nested') args.nested = argv[++i];
     else if (arg === '--parallel') args.parallel = argv[++i];
+    else if (arg === '--advanced') args.advanced = argv[++i];
     else if (arg === '--baseline') args.baseline = argv[++i];
     else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
     else if (arg === '--self-test') args.selfTest = argv[++i];
@@ -169,7 +173,19 @@ function generateParallelReport() {
   return readJsonFromText(output, PARALLEL_SCHEMA, 'parallel gate output');
 }
 
-function makeJoint(perf, fairness, bounce, semantics, nested, parallel) {
+function generateAdvancedReport() {
+  const child = spawnSync(process.execPath, [ADVANCED_GATE], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
+  if (child.status !== 0) throw new Error(`advanced gate failed (${child.status}): ${output.slice(-800)}`);
+  return readJsonFromText(output, ADVANCED_SCHEMA, 'advanced gate output');
+}
+
+function makeJoint(perf, fairness, bounce, semantics, nested, parallel, advanced) {
   return {
     schema: JOINT_SCHEMA,
     source: JOINT_SOURCE,
@@ -180,6 +196,7 @@ function makeJoint(perf, fairness, bounce, semantics, nested, parallel) {
     semantics,
     nested,
     parallel,
+    advanced,
   };
 }
 
@@ -268,6 +285,20 @@ function evaluate(joint, baseline) {
     detail: `results=${Array.isArray(parallelResults) ? parallelResults.length : 0}`,
     reason: 'machine-readable parallel pointer evidence must be present',
   });
+  const advancedStatus = joint?.advanced?.status;
+  results.push({
+    check: 'advanced_gate_status',
+    verdict: advancedStatus === 'PASS' || advancedStatus === 'N/A' ? 'PASS' : 'FAIL',
+    detail: `status=${advancedStatus ?? 'missing'}`,
+    reason: 'the advanced gesture gate must not FAIL',
+  });
+  const advancedResults = joint?.advanced?.results ?? [];
+  results.push({
+    check: 'advanced_machine_report',
+    verdict: Array.isArray(advancedResults) && advancedResults.length > 0 ? 'PASS' : 'FAIL',
+    detail: `results=${Array.isArray(advancedResults) ? advancedResults.length : 0}`,
+    reason: 'machine-readable advanced gesture evidence must be present',
+  });
   if (baseline) {
     const bCases = baseline?.fairness?.cases ?? [];
     const bResults = baseline?.perf?.results ?? [];
@@ -280,6 +311,8 @@ function evaluate(joint, baseline) {
     const currentNested = joint?.nested?.results ?? [];
     const bParallel = baseline?.parallel?.results ?? [];
     const currentParallel = joint?.parallel?.results ?? [];
+    const bAdvanced = baseline?.advanced?.results ?? [];
+    const currentAdvanced = joint?.advanced?.results ?? [];
     const bMetrics = new Map(bResults.map((item) => [item.metric, item.detail]));
     const currentMetrics = new Map(currentResults.map((item) => [item.metric, item.detail]));
     const bBounceMetrics = new Map(bBounce.map((item) => [item.metric, item.detail]));
@@ -302,13 +335,18 @@ function evaluate(joint, baseline) {
     const currentParallelMetrics = new Map(currentParallel.map((item) => [item.metric, item.detail]));
     const sameParallel = bParallelMetrics.size > 0
       && [...bParallelMetrics.keys()].every((key) => currentParallelMetrics.has(key));
+    const bAdvancedMetrics = new Map(bAdvanced.map((item) => [item.metric, item.detail]));
+    const currentAdvancedMetrics = new Map(currentAdvanced.map((item) => [item.metric, item.detail]));
+    const sameAdvanced = bAdvancedMetrics.size > 0
+      && [...bAdvancedMetrics.keys()].every((key) => currentAdvancedMetrics.has(key));
     results.push({
       check: 'baseline_comparability',
-      verdict: sameCases && sameMetrics && sameBounce && sameSemantics && sameNested && sameParallel
-        ? 'PASS' : 'FAIL',
-      detail: sameCases && sameMetrics && sameBounce && sameSemantics && sameNested && sameParallel
+      verdict: sameCases && sameMetrics && sameBounce && sameSemantics && sameNested
+        && sameParallel && sameAdvanced ? 'PASS' : 'FAIL',
+      detail: sameCases && sameMetrics && sameBounce && sameSemantics && sameNested
+        && sameParallel && sameAdvanced
         ? 'baseline schema and fields match'
-        : 'baseline lacks matching fairness, perf, bounce, semantics, nested or parallel results',
+        : 'baseline lacks matching fairness, perf, bounce, semantics, nested, parallel or advanced results',
       reason: 'a frozen baseline must carry the same evidence fields',
     });
   }
@@ -331,6 +369,7 @@ function emit(status, joint, baseline, results, note, raw = false) {
     payload.semantics = joint.semantics;
     payload.nested = joint.nested;
     payload.parallel = joint.parallel;
+    payload.advanced = joint.advanced;
   }
   console.log(JSON.stringify(payload, null, 2));
 }
@@ -344,7 +383,8 @@ function main() {
     const semantics = generateSemanticsReport();
     const nested = generateNestedReport();
     const parallel = generateParallelReport();
-    const joint = makeJoint(perf, fairness, bounce, semantics, nested, parallel);
+    const advanced = generateAdvancedReport();
+    const joint = makeJoint(perf, fairness, bounce, semantics, nested, parallel, advanced);
     if (args.selfTest === 'pass') {
       const results = evaluate(joint, null);
       const ok = results.every((r) => r.verdict === 'PASS');
@@ -378,7 +418,10 @@ function main() {
   const parallel = args.parallel
     ? readJson(args.parallel, 'parallel report', PARALLEL_SCHEMA)
     : generateParallelReport();
-  const joint = makeJoint(perf, fairness, bounce, semantics, nested, parallel);
+  const advanced = args.advanced
+    ? readJson(args.advanced, 'advanced report', ADVANCED_SCHEMA)
+    : generateAdvancedReport();
+  const joint = makeJoint(perf, fairness, bounce, semantics, nested, parallel, advanced);
   if (args.writeBaseline) {
     const path = resolve(args.writeBaseline);
     mkdirSync(dirname(path), { recursive: true });

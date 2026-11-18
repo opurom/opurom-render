@@ -27,6 +27,7 @@ Given `--out <dir>`, the archiver writes:
 - `semantics.json` — canonical semantics and focus chain metrics.
 - `nested.json` — canonical nested scroll coordination metrics.
 - `parallel.json` — canonical parallel pointer arena metrics.
+- `advanced.json` — canonical rotation and drag start metrics.
 - `replay.json` — `opurom.gesture.replay/1` canonical case/order projection.
 - `manifest.json` — `opurom.gesture.manifest/1` with sorted-key JSON, byte
   count and SHA-256 for every file.
