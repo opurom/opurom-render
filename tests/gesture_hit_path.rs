@@ -49,10 +49,12 @@ fn move_and_up_reuse_the_down_hit_path() {
         engine.dispatch(&event(PointerKind::Move, 7, 120, 120, 10)),
         None
     );
-    assert_eq!(
-        engine.dispatch(&event(PointerKind::Up, 7, 120, 120, 10)),
-        Some((1, Gesture::Tap)),
-        "the down-time path must survive a move outside the original bounds"
+    // The move is past touch slop, so the tap must be rejected. With a fresh
+    // hit test the event would land on node 2, match no active pointer and
+    // leave node 1's arena untouched; the rejection proves path reuse.
+    assert!(
+        engine.arena_rejected(GestureKind::Tap),
+        "the move must reach the original node's arena"
     );
 }
 
