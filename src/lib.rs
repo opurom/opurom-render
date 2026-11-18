@@ -60,6 +60,7 @@ pub mod raster;
 pub mod scroll_physics;
 pub mod svg;
 pub mod text_span;
+pub mod typography;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use anim::{
@@ -115,6 +116,7 @@ pub use perf::{
 pub use quality::QualityProfile;
 pub use svg::{svg, svg_at};
 pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
+pub use typography::{FontSource, TextRole, TypographySpec};
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
