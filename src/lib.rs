@@ -50,6 +50,7 @@ pub mod interaction;
 pub mod ir;
 pub mod layer;
 pub mod layout;
+pub mod motion;
 pub mod nav;
 pub mod particles;
 pub mod path_ops;
@@ -108,6 +109,7 @@ pub use layout::{
     Direction, Effects, FluidGrid, LaidOut, Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH,
     SETTLED_MS,
 };
+pub use motion::{MotionEvent, MotionSpec};
 pub use nav::{NavError, Navigation, Navigator, MAX_STACK_DEPTH};
 pub use particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 pub use perf::{
