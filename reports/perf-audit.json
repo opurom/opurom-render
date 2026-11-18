@@ -97,7 +97,11 @@
       "title": "press path falls back to full raster after a ripple",
       "evidence": "src/lib.rs:769-773 disables reuse whenever prev_press_disc was set, even when the current frame has no press.",
       "risk": "one extra full raster per press release.",
-      "recommendation": "Track the previous disc region and clear it inside the incremental region instead of invalidating the whole frame; pixel parity must be proven against the full path."
+      "recommendation": "Track the previous disc region and clear it inside the incremental region instead of invalidating the whole frame; pixel parity must be proven against the full path.",
+      "status": "parity evidence landed in tests/press_incremental.rs; default path still falls back to full raster (no opt-in implemented)",
+      "parity_evidence": "tests/press_incremental.rs::press_release_clear_is_byte_identical_and_skips_full_raster",
+      "parity_scope": "events fixture, press release after a sequence of held frames, no effect layout",
+      "implementation_gate": "parity is established; a future opt-in may clear only prev_press_disc inside a computed region, with the same test and golden gate"
     }
   ],
   "no_pixel_path_changed": true,

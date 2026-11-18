@@ -177,3 +177,43 @@ fn switching_touch_position_clears_the_previous_disc() {
         "old disc at the first touch point must be cleared"
     );
 }
+
+/// PERF-004 parity evidence: after a press sequence, releasing the press must
+/// restore the exact settled frame. The current default path takes a full
+/// raster for this case; the byte comparison is the gate any future local
+/// prev_press_disc clearing must pass before it can be enabled.
+#[test]
+fn press_release_clear_is_byte_identical_and_skips_full_raster() {
+    let text = std::fs::read_to_string(COUNTER_PATH).unwrap();
+    let ir = opurom_render::parse_ir(&text).unwrap();
+    let state = StateView::from_ir(&ir);
+    let mut target = 0u32;
+    find_event_node(&ir.tree, &mut target);
+    assert!(target != 0, "fixture needs an event-bound node");
+    let press = PressPhase {
+        node_id: target,
+        press_start_tick: 0,
+        confirm_tick: None,
+        touch: Some((12, 9)),
+    };
+    let (w, h) = (320u32, 240u32);
+    let mut incr = Renderer::new(w, h);
+    let _ = incr.render_at(&ir, &state, 4000);
+    for &ms in &[0i64, 75, 225, 375] {
+        let _ = incr.render_with_press_incremental(&ir, &state, ms, Some(&press));
+    }
+    let cleared = incr.render_incremental_at(&ir, &state, 4000);
+    let expected = Renderer::new(w, h).render_at(&ir, &state, 4000);
+    assert_eq!(
+        digest_hex(&cleared.pixels),
+        digest_hex(&expected.pixels),
+        "press release must match the full-raster settled frame byte for byte"
+    );
+    // Document the audit claim: the clear frame currently reports a full
+    // viewport redraw, so a local clear has measurable room to improve.
+    assert_eq!(
+        incr.redraw_stats().1,
+        w as u64 * h as u64,
+        "current default falls back to a full raster after a press release"
+    );
+}
