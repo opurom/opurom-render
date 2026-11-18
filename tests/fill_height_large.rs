@@ -4,6 +4,12 @@
 
 use opurom_render::{digest, layout, parse_ir, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 fn calc_ir(fill: bool) -> String {
     let mut keys = String::new();
     for id in 4..24u32 {
@@ -95,8 +101,8 @@ fn default_goldens_are_unchanged() {
     let counter = std::fs::read_to_string("../opurom-examples/golden/counter.opuir.json").unwrap();
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
-    let a = Renderer::new(320, 240).render(&ir, &state).pixels;
-    let b = Renderer::new(800, 600).render(&ir, &state).pixels;
+    let a = compat_renderer(320, 240).render(&ir, &state).pixels;
+    let b = compat_renderer(800, 600).render(&ir, &state).pixels;
     assert_eq!(format!("{:016x}", digest(&a)), "8d45f412996a99c6");
     assert_eq!(format!("{:016x}", digest(&b)), "318beb1dd337bc4e");
 }

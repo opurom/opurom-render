@@ -1,14 +1,20 @@
 //! Eight-state matrix, variant/tone matrix, CLI override and golden regressions.
 
 use opurom_render::{
-    digest_hex, layout, parse_ir, Node, NodeState, Renderer, StateValue, StateView, CYAN,
-    FOCUS_RING, PRIMARY, SUCCESS,
+    digest_hex, layout, parse_ir, Node, NodeState, StateValue, StateView, CYAN, FOCUS_RING,
+    PRIMARY, SUCCESS,
 };
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 const W: u32 = 160;
 const H: u32 = 96;
@@ -123,7 +129,7 @@ fn matrix_ir(state: Option<&str>, disabled: Option<bool>) -> String {
 fn render(kind: &str, extra: Value) -> Vec<u8> {
     let ir = parse_ir(&ir_for(kind, extra)).unwrap();
     let state = StateView::from_ir(&ir);
-    Renderer::new(W, H).pixels(&ir, &state)
+    compat_renderer(W, H).pixels(&ir, &state)
 }
 
 fn digest(kind: &str, extra: Value) -> String {
@@ -461,16 +467,16 @@ fn canonical_golden_digests_are_unchanged_without_new_inputs() {
     assert!(no_new_props(&ir.tree));
     let mut state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(320, 240).pixels(&ir, &state)),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "318beb1dd337bc4e"
     );
     state.set("count", StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "40073cb95c912d80"
     );
 }
@@ -483,7 +489,7 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
     let exe = env!("CARGO_BIN_EXE_opurom-render");
     let expected_ir = parse_ir(&matrix_ir(Some("hover"), None)).unwrap();
     let expected =
-        digest_hex(&Renderer::new(W, H).pixels(&expected_ir, &StateView::from_ir(&expected_ir)));
+        digest_hex(&compat_renderer(W, H).pixels(&expected_ir, &StateView::from_ir(&expected_ir)));
     let first_ppm = dir.join("interaction-matrix-1.ppm");
     let second_ppm = dir.join("interaction-matrix-2.ppm");
     let first = stdout(cli(
@@ -492,7 +498,7 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
         "160",
         "96",
         &first_ppm,
-        &["--interactive-state", "hover"],
+        &["--interactive-state", "hover", "--quality", "compat"],
     ));
     let second = stdout(cli(
         exe,
@@ -500,7 +506,7 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
         "160",
         "96",
         &second_ppm,
-        &["--interactive-state", "hover"],
+        &["--interactive-state", "hover", "--quality", "compat"],
     ));
     assert_eq!(first, second);
     assert_eq!(first, format!("digest={expected}\ndirty=1\n"));
@@ -514,14 +520,14 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
     fs::write(&disabled_path, matrix_ir(None, Some(true))).unwrap();
     let disabled_ir = parse_ir(&matrix_ir(Some("disabled"), Some(true))).unwrap();
     let disabled_expected =
-        digest_hex(&Renderer::new(W, H).pixels(&disabled_ir, &StateView::from_ir(&disabled_ir)));
+        digest_hex(&compat_renderer(W, H).pixels(&disabled_ir, &StateView::from_ir(&disabled_ir)));
     let disabled = stdout(cli(
         exe,
         &disabled_path,
         "160",
         "96",
         &dir.join("interaction-disabled.ppm"),
-        &["--interactive-state", "hover"],
+        &["--interactive-state", "hover", "--quality", "compat"],
     ));
     assert_eq!(disabled, format!("digest={disabled_expected}\ndirty=1\n"));
 
@@ -551,7 +557,7 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
         let expected = format!(
             "digest={}\ndirty=1\n",
             digest_hex(
-                &Renderer::new(W, H).pixels(&expected_ir, &StateView::from_ir(&expected_ir))
+                &compat_renderer(W, H).pixels(&expected_ir, &StateView::from_ir(&expected_ir))
             )
         );
         let out = stdout(cli(
@@ -578,7 +584,7 @@ fn cli_state_variables_and_interactive_state_do_not_collide() {
         "800",
         "600",
         &dir.join("interaction-counter-base.ppm"),
-        &[],
+        &["--quality", "compat"],
     ));
     assert_eq!(no_flag, "digest=318beb1dd337bc4e\ndirty=1\n");
     let state_only = stdout(cli(
@@ -587,7 +593,7 @@ fn cli_state_variables_and_interactive_state_do_not_collide() {
         "800",
         "600",
         &dir.join("interaction-counter-state.ppm"),
-        &["--state", "count=7"],
+        &["--state", "count=7", "--quality", "compat"],
     ));
     assert_eq!(state_only, "digest=40073cb95c912d80\ndirty=1\n");
     let combined = stdout(cli(
@@ -596,7 +602,14 @@ fn cli_state_variables_and_interactive_state_do_not_collide() {
         "800",
         "600",
         &dir.join("interaction-counter-combined.ppm"),
-        &["--state", "count=7", "--interactive-state", "focus"],
+        &[
+            "--state",
+            "count=7",
+            "--interactive-state",
+            "focus",
+            "--quality",
+            "compat",
+        ],
     ));
     assert_eq!(combined.lines().count(), 2);
     assert_ne!(combined, state_only);

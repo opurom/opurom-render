@@ -3,6 +3,12 @@
 
 use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn data_uri() -> String {
@@ -55,7 +61,7 @@ fn default_image_corners_are_hard_clipped() {
     let plain = render(false);
     let ir = parse_ir(&ir()).unwrap();
     let state = StateView::from_ir(&ir);
-    assert_eq!(plain, Renderer::new(80, 80).render(&ir, &state).pixels);
+    assert_eq!(plain, compat_renderer(80, 80).render(&ir, &state).pixels);
 }
 
 #[test]

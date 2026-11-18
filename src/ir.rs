@@ -527,6 +527,14 @@ pub struct Props {
     /// 0 = proportional (default), 1 = even/half-leading. Opt-in; absent keeps
     /// the historical proportional baseline byte-identical.
     pub leading_distribution: Option<u8>,
+    /// Flutter `TextHeightBehavior.applyHeightToFirstAscent`
+    /// (`ui/text.dart:1500-1523`): when false, lineHeight does not scale the
+    /// first line's ascent. Defaults to true; absent keeps legacy geometry.
+    pub apply_height_to_first_ascent: Option<bool>,
+    /// Flutter `TextHeightBehavior.applyHeightToLastDescent`
+    /// (`ui/text.dart:1525-1547`): when false, lineHeight does not scale the
+    /// last line's descent. Defaults to true; absent keeps legacy geometry.
+    pub apply_height_to_last_descent: Option<bool>,
     /// Baseline selector; absent = alphabetic.
     pub baseline_kind: Option<BaselineKind>,
     /// Grid: distribute surplus box height across rows (deterministic i128).
@@ -1606,6 +1614,12 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
                 )))
             }
         },
+        apply_height_to_first_ascent: opt_bool(o, "applyHeightToFirstAscent", what)?.then_some(true).or_else(|| {
+            if o.contains_key("applyHeightToFirstAscent") { Some(false) } else { None }
+        }),
+        apply_height_to_last_descent: opt_bool(o, "applyHeightToLastDescent", what)?.then_some(true).or_else(|| {
+            if o.contains_key("applyHeightToLastDescent") { Some(false) } else { None }
+        }),
         baseline_kind: match opt_string(o, "baselineKind", what)?.as_deref() {
             None => None,
             Some(s) => Some(BaselineKind::parse(s).ok_or_else(|| {

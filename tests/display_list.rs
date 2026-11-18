@@ -7,6 +7,12 @@ use opurom_render::{
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command as ProcessCommand};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const RECT_GRADIENT_IR: &str = include_str!("fixtures/rect-gradient.opuir.json");
 
 fn fixture() -> (Ir, StateView) {
@@ -18,11 +24,11 @@ fn fixture() -> (Ir, StateView) {
 #[test]
 fn command_json_is_deterministic_and_records_all_command_kinds() {
     let (ir, state) = fixture();
-    let first = Renderer::new(96, 64)
+    let first = compat_renderer(96, 64)
         .display_list(&ir, &state)
         .to_json()
         .unwrap();
-    let second = Renderer::new(96, 64)
+    let second = compat_renderer(96, 64)
         .display_list(&ir, &state)
         .to_json()
         .unwrap();
@@ -75,6 +81,7 @@ fn gradient_commands_keep_stop_and_draw_order() {
         width: 4,
         height: 2,
         background: Rgba::rgb(0, 0, 0),
+        quality: opurom_render::QualityProfile::Compat,
         commands: vec![
             RasterCommand::Gradient {
                 rect,
@@ -120,6 +127,7 @@ fn empty_display_list_serializes_as_empty_commands() {
         width: 2,
         height: 1,
         background: Rgba::rgb(7, 8, 9),
+        quality: opurom_render::QualityProfile::Compat,
         commands: Vec::new(),
     };
     let json = list.to_json().unwrap();
@@ -146,8 +154,11 @@ fn cli_commands_dump_keeps_golden_stdout_and_ppm() {
             .unwrap()
     };
 
-    let plain = run(&plain_ppm, &[]);
-    let with_commands = run(&commands_ppm, &["--commands", commands_arg]);
+    let plain = run(&plain_ppm, &["--quality", "compat"]);
+    let with_commands = run(
+        &commands_ppm,
+        &["--commands", commands_arg, "--quality", "compat"],
+    );
     assert!(
         plain.status.success(),
         "{}",
@@ -203,6 +214,7 @@ fn cli_commands_argument_errors_are_readable() {
 
     let transition = base()
         .args(["--commands", commands_arg, "--transition", "slide"])
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert_eq!(transition.status.code(), Some(1));
@@ -236,6 +248,7 @@ fn software_bounds_clipping_matches_recorded_command() {
         width: 4,
         height: 2,
         background: Rgba::rgb(0, 0, 0),
+        quality: opurom_render::QualityProfile::Compat,
         commands,
     };
     let doc: Value = serde_json::from_str(&list.to_json().unwrap()).unwrap();
@@ -253,4 +266,103 @@ fn software_bounds_clipping_matches_recorded_command() {
         }
     }
     assert_eq!(pixels, expected);
+}
+
+#[test]
+fn zero_and_oversized_display_views_fail_closed() {
+    let list = |w: u32, h: u32| DisplayList {
+        unsupported: None,
+        width: w,
+        height: h,
+        background: Rgba::rgb(0, 0, 0),
+        quality: opurom_render::QualityProfile::Compat,
+        commands: Vec::new(),
+    };
+    for (w, h) in [(0, 10), (10, 0), (0, 0), (4097, 10)] {
+        assert!(
+            list(w, h).to_json().is_err(),
+            "invalid viewport {w}x{h} was serialized"
+        );
+    }
+    assert!(list(4096, 4096).to_json().is_ok());
+}
+
+#[test]
+fn command_count_above_the_wire_limit_is_rejected() {
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+    };
+    let list = DisplayList {
+        unsupported: None,
+        width: 2,
+        height: 2,
+        background: Rgba::rgb(0, 0, 0),
+        quality: opurom_render::QualityProfile::Compat,
+        commands: vec![
+            RasterCommand::Solid {
+                rect,
+                clip: rect,
+                color: Rgba::rgb(1, 2, 3),
+            };
+            opurom_render::display::MAX_COMMANDS + 1
+        ],
+    };
+    let err = list.to_json().unwrap_err().to_string();
+    assert!(err.contains("too many commands"), "{err}");
+}
+
+#[test]
+fn extreme_theme_tokens_are_rejected_with_typed_diagnostics() {
+    let doc = |theme: serde_json::Value| {
+        format!(
+            r#"{{"ir":"0.1.0","app":"Stress","state":[],"tree":{{"id":0,"kind":"Column","props":{{"padding":0}},"children":[],"events":{{}}}},"theme":{theme}}}"#
+        )
+    };
+    for theme in [
+        serde_json::json!({"mode":"light","accent":"#097FEB","radius":-1}),
+        serde_json::json!({"mode":"dark","accent":"not-a-color","radius":4}),
+        serde_json::json!({"mode":"solarized","accent":"#097FEB","radius":4}),
+    ] {
+        assert!(
+            parse_ir(&doc(theme.clone())).is_err(),
+            "extreme theme was accepted: {theme}"
+        );
+    }
+    // A very large but non-negative radius is a legal authored value; layout
+    // clamps it to the viewport before the display-list wire boundary.
+    let legal = parse_ir(&doc(
+        serde_json::json!({"mode":"dark","accent":"#097FEB","radius":1_000_000}),
+    ))
+    .unwrap();
+    Renderer::new(32, 32)
+        .display_list(&legal, &StateView::from_ir(&legal))
+        .to_json()
+        .unwrap();
+}
+
+#[test]
+fn quality_profile_is_frozen_in_the_renderer_state() {
+    let (ir, state) = fixture();
+    let compat = compat_renderer(96, 64)
+        .display_list(&ir, &state)
+        .to_json()
+        .unwrap();
+    assert!(!compat.contains("\"quality\""), "{compat}");
+
+    let mut renderer = compat_renderer(96, 64);
+    renderer.set_quality(opurom_render::QualityProfile::Product);
+    let product = renderer.display_list(&ir, &state).to_json().unwrap();
+    assert_eq!(
+        compat, product,
+        "product visual differences are raster-side"
+    );
+    assert_eq!(renderer.quality(), opurom_render::QualityProfile::Product);
+    assert!(renderer.quality().edge_coverage());
+
+    let mut probe = compat_renderer(96, 64);
+    probe.set_quality(opurom_render::QualityProfile::Compat);
+    assert_eq!(probe.quality(), opurom_render::QualityProfile::Compat);
 }

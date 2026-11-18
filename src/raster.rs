@@ -805,7 +805,8 @@ impl Canvas {
                     (y - r.y) as i128 * UNIT as i128 / last.max(1) as i128
                 };
                 let mut c = crate::layout::lerp_color(top, bottom, t as i64);
-                c.a = ((c.a as i64 * alpha_u8 as i64 + 127) / 255) as u8;
+                debug_assert_eq!(c.a, 255, "gradient stops must stay opaque");
+                c.a = alpha_u8;
                 if self.edge_aa {
                     self.set_covered(x, y, c, cov);
                 } else {
@@ -897,6 +898,13 @@ impl Canvas {
                     };
                     crate::layout::lerp_color(top, bottom, t)
                 };
+                // Impeller blend modes assume premultiplied inputs
+                // (color.h:56-58). The gradient's two colour stops are
+                // interpolated with lerp_color, which always emits alpha=255,
+                // so this path is already effectively opaque. Keep the
+                // assertion explicit so a future alpha-bearing stop cannot
+                // silently enter the src-over path unpremultiplied.
+                debug_assert_eq!(c.a, 255, "gradient stops must stay opaque");
                 let c = with_alpha(c, alpha);
                 if self.edge_aa {
                     let cov = Self::round_coverage(r, x, y, rad);
@@ -1684,6 +1692,12 @@ fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
             if alpha == 0 {
                 continue;
             }
+            // Impeller `Color::Blend(kSrcOver)` premultiplies the source
+            // before blending (engine 371f772, impeller/geometry/color.cc:165-168).
+            // `Canvas::set_quiet` already performs that src-over product on
+            // the straight-alpha byte triple, so pre-multiplying here as well
+            // would square the alpha at translucent edges. Keep the stored
+            // PNG RGB straight and let the single blend apply coverage once.
             canvas.set(
                 x,
                 y,

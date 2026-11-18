@@ -7,6 +7,12 @@ use opurom_render::{
 };
 use std::fs;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const POLICY_IR: &str = r##"{
   "ir": "0.1.0", "app": "Perf", "state": [],
   "tree": {
@@ -297,10 +303,10 @@ fn state_machine_and_policy_are_deterministic() {
 fn auto_render_restores_full_complexity_after_recovery() {
     let ir = policy_ir();
     let state = StateView::from_ir(&ir);
-    let full_digest = digest_hex(&Renderer::new(64, 48).pixels(&ir, &state));
+    let full_digest = digest_hex(&compat_renderer(64, 48).pixels(&ir, &state));
     let mut config = RenderConfig::new(ir.clone());
     let mut budget = FrameBudget::new(FrameRate::Hz60);
-    let mut renderer = Renderer::new(64, 48);
+    let mut renderer = compat_renderer(64, 48);
 
     let first_slow = render_window(&mut renderer, &mut config, &state, &mut budget, 30);
     assert_eq!(budget.tier(), QualityTier::Reduced);
@@ -328,14 +334,14 @@ fn auto_render_restores_full_complexity_after_recovery() {
     assert_eq!(config.ir(), &ir);
 
     let recovered =
-        Renderer::new(64, 48).render_auto_at(&mut config, &state, SETTLED_MS, 10, &mut budget);
+        compat_renderer(64, 48).render_auto_at(&mut config, &state, SETTLED_MS, 10, &mut budget);
     assert_eq!(digest_hex(&recovered.pixels), full_digest);
 }
 
 fn automatic_digest(ir: &Ir, state: &StateView, width: u32, height: u32) -> (String, String) {
     let mut config = RenderConfig::new(ir.clone());
     let mut budget = FrameBudget::new(FrameRate::Hz60);
-    let mut renderer = Renderer::new(width, height);
+    let mut renderer = compat_renderer(width, height);
     let mut frame = None;
     for _ in 0..WINDOW_FRAMES {
         frame = Some(renderer.render_auto_at(&mut config, state, SETTLED_MS, 10, &mut budget));
@@ -343,7 +349,7 @@ fn automatic_digest(ir: &Ir, state: &StateView, width: u32, height: u32) -> (Str
     assert_eq!(budget.tier(), QualityTier::Full);
     assert_eq!(config.ir(), ir);
     assert_eq!(budget.report().p95_ms, 10);
-    let baseline = digest_hex(&Renderer::new(width, height).pixels(ir, state));
+    let baseline = digest_hex(&compat_renderer(width, height).pixels(ir, state));
     (baseline, digest_hex(&frame.unwrap().pixels))
 }
 

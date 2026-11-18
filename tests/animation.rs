@@ -4,10 +4,16 @@
 
 use opurom_render::{
     choose_quality, digest_hex, parse_ir, Animator, Frame, FrameRate, GestureAnim, ParticleSystem,
-    Quality, Renderer, StateValue, StateView, Transition, TransitionKind, ONE, PARTICLE_FIELD,
+    Quality, StateValue, StateView, Transition, TransitionKind, ONE, PARTICLE_FIELD,
     PARTICLE_MAX_LIFE, TRANSITION_MS,
 };
 use std::{fs, path::PathBuf, process::Command};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 fn solid_frame(width: u32, height: u32, pixel: [u8; 4]) -> Frame {
     let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
@@ -390,10 +396,10 @@ fn frame_rate_render_at_matches_the_ticked_clock() {
     for frame in 1..=24 {
         let ticked = animator.tick_frame(FrameRate::Hz60);
         assert_eq!(ticked, FrameRate::Hz60.frame_ms(frame));
-        let expected = Renderer::new(320, 240).pixels_at(&ir, &state, ticked);
+        let expected = compat_renderer(320, 240).pixels_at(&ir, &state, ticked);
         assert_eq!(
             digest_hex(&expected),
-            digest_hex(&Renderer::new(320, 240).pixels_at(
+            digest_hex(&compat_renderer(320, 240).pixels_at(
                 &ir,
                 &state,
                 FrameRate::Hz60.frame_ms(frame)
@@ -525,17 +531,17 @@ fn v0_1_golden_digests_are_unchanged_by_pipeline() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
     let mut count_7 = state.clone();
     count_7.set("count", StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &count_7).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &count_7).pixels),
         "40073cb95c912d80"
     );
 }

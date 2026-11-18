@@ -790,9 +790,17 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
                 // Without it the rounded corner's cut-out keeps full shadow
                 // alpha while clipped content is erased: a dark fringe.
                 let clip_cov = canvas.clip_coverage(x, y);
-                let a = ((a as i64 * clip_cov as i64 + 127) / 255).clamp(0, 255) as u8;
-                let shadow_color = n.shadow_color;
-                composite(canvas, x, y, shadow_color, a);
+                // Impeller's shadow shader multiplies the shadow colour by
+                // the Gaussian CDF (`impeller/entity/shaders/shadow_vertices.frag:19-25`);
+                // the colour's own alpha is part of that product. Fold the
+                // theme shadow alpha into the effective coverage instead of
+                // dropping it. Default opaque black is unchanged.
+                let color_alpha = i64::from(n.shadow_color.a);
+                let a = ((a as i64 * clip_cov as i64 + 127) / 255)
+                    .saturating_mul(color_alpha + 127)
+                    / 255;
+                let a = a.clamp(0, 255) as u8;
+                composite(canvas, x, y, n.shadow_color, a);
             }
         }
     }
@@ -952,5 +960,22 @@ mod tests {
             changed > 20,
             "elliptical elevation shadow must differ from circular, got {changed} px"
         );
+    }
+}
+
+#[cfg(test)]
+mod boundary_level_tests {
+    use super::{elevation_level, project_state_level};
+
+    #[test]
+    fn strength_and_state_levels_are_total_over_i64() {
+        for v in [i64::MIN, -1, 0, 1, 5, 6, 7, 8, 9, i64::MAX] {
+            assert!(elevation_level(v) <= 6, "{v}");
+            assert!(project_state_level(v) <= 6, "{v}");
+        }
+        assert_eq!(elevation_level(i64::MIN), 0);
+        assert_eq!(elevation_level(i64::MAX), 6);
+        assert_eq!(project_state_level(5), 4);
+        assert_eq!(elevation_level(5), 4);
     }
 }

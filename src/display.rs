@@ -142,6 +142,10 @@ pub struct DisplayList {
     pub width: u32,
     pub height: u32,
     pub background: Rgba,
+    /// Frozen visual profile for this frame. Compat keeps the historical
+    /// wire header unchanged; Product uses the same header so sibling
+    /// encoders can stay compatible with older parsers.
+    pub quality: crate::QualityProfile,
     pub commands: Vec<Command>,
     /// Unsupported geometry encountered while recording. Carried out of band
     /// so the JSON wire format is unchanged; `to_json` reports it as an error.
@@ -297,6 +301,67 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
         validate_coord(value, what)?;
     }
     Ok(())
+}
+
+/// Merge adjacent `Solid` commands that paint the exact same colour and clip.
+/// Flutter 3.50.0 keeps display-list ops in draw order and derives paint
+/// results from the recorded geometry, not from the number of list entries;
+/// merging two abutting rects of one solid paint is therefore a pure
+/// canonicalisation of the list. Only full-width horizontal strips or
+/// full-height vertical strips touching by an edge are merged, so the painted
+/// pixel set (and the src-over result for every opaque/transparent colour) is
+/// unchanged. Effect commands and all other geometry are hard barriers.
+/// This kernel is opt-in: the frozen default display-list fixture stays
+/// byte-identical (PERF-002 in `reports/perf-audit.json`).
+///
+/// A merge is only legal when the resulting coordinates stay inside the GPU
+/// protocol's signed range. Rejected pairs are kept as two distinct commands
+/// (fail closed) instead of wrapping or overflowing in debug builds.
+pub fn coalesce_solids(commands: Vec<Command>) -> Vec<Command> {
+    let mut out: Vec<Command> = Vec::with_capacity(commands.len());
+    for command in commands {
+        let mut merged = false;
+        if let Some(Command::Solid { rect, clip, color }) = out.last_mut() {
+            if let Command::Solid {
+                rect: next_rect,
+                clip: next_clip,
+                color: next_color,
+            } = &command
+            {
+                if clip == next_clip
+                    && color == next_color
+                    && rect.w == next_rect.w
+                    && rect.x == next_rect.x
+                    && rect.y.saturating_add(rect.h) == next_rect.y
+                {
+                    // Vertical merge: only the height grows.
+                    if let Some(h) = rect.h.checked_add(next_rect.h) {
+                        if h <= COORD_LIMIT {
+                            rect.h = h;
+                            merged = true;
+                        }
+                    }
+                } else if clip == next_clip
+                    && color == next_color
+                    && rect.h == next_rect.h
+                    && rect.y == next_rect.y
+                    && rect.x.saturating_add(rect.w) == next_rect.x
+                {
+                    // Horizontal merge: only the width grows.
+                    if let Some(w) = rect.w.checked_add(next_rect.w) {
+                        if w <= COORD_LIMIT {
+                            rect.w = w;
+                            merged = true;
+                        }
+                    }
+                }
+            }
+        }
+        if !merged {
+            out.push(command);
+        }
+    }
+    out
 }
 
 impl DisplayList {
@@ -655,5 +720,140 @@ impl DisplayList {
             out.push_str("\n]}\n");
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod coalescing_tests {
+    use super::{coalesce_solids, Command};
+    use crate::{Rect, Rgba};
+
+    fn solid(x: i64, y: i64, w: i64, h: i64) -> Command {
+        Command::Solid {
+            rect: Rect { x, y, w, h },
+            clip: Rect {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 100,
+            },
+            color: Rgba::rgb(7, 11, 19),
+        }
+    }
+
+    #[test]
+    fn adjacent_vertical_strips_merge_into_one_rect() {
+        let merged = coalesce_solids(vec![solid(0, 0, 10, 5), solid(0, 5, 10, 7)]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], solid(0, 0, 10, 12));
+    }
+
+    #[test]
+    fn adjacent_horizontal_strips_merge_into_one_rect() {
+        let merged = coalesce_solids(vec![solid(0, 0, 4, 9), solid(4, 0, 6, 9)]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], solid(0, 0, 10, 9));
+    }
+
+    #[test]
+    fn different_colours_clips_and_gaps_do_not_merge() {
+        let mut other = solid(0, 5, 10, 3);
+        if let Command::Solid { color, .. } = &mut other {
+            *color = Rgba::rgb(1, 2, 3);
+        }
+        assert_eq!(coalesce_solids(vec![solid(0, 0, 10, 5), other]).len(), 2);
+        assert_eq!(
+            coalesce_solids(vec![solid(0, 0, 10, 5), solid(0, 6, 10, 3)]).len(),
+            2
+        );
+        let mut clipped = solid(0, 5, 10, 3);
+        if let Command::Solid { clip, .. } = &mut clipped {
+            clip.w = 50;
+        }
+        assert_eq!(coalesce_solids(vec![solid(0, 0, 10, 5), clipped]).len(), 2);
+    }
+
+    #[test]
+    fn effect_commands_are_barriers() {
+        let merged = coalesce_solids(vec![
+            solid(0, 0, 10, 5),
+            Command::EffectBackdrop,
+            solid(0, 5, 10, 7),
+        ]);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn merge_is_transitive_over_a_run() {
+        let merged = coalesce_solids(vec![
+            solid(0, 0, 10, 3),
+            solid(0, 3, 10, 4),
+            solid(0, 7, 10, 5),
+        ]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], solid(0, 0, 10, 12));
+    }
+
+    #[test]
+    fn vertical_merge_within_the_coordinate_limit_is_allowed() {
+        let half = super::COORD_LIMIT / 2;
+        let mut first = solid(0, 0, 2, half);
+        let mut second = solid(0, half, 2, half);
+        if let (Command::Solid { rect: a, .. }, Command::Solid { rect: b, .. }) =
+            (&mut first, &mut second)
+        {
+            a.h = half;
+            b.h = half;
+        }
+        let merged = coalesce_solids(vec![first, second]);
+        assert_eq!(merged.len(), 1);
+        if let Command::Solid { rect, .. } = &merged[0] {
+            assert_eq!(rect.h, 2 * half);
+        } else {
+            panic!("expected a solid command");
+        }
+    }
+
+    #[test]
+    fn overflow_would_be_rejected_and_commands_kept_distinct() {
+        // A vertical pair whose heights sum past COORD_LIMIT but below i64::MAX.
+        let big = super::COORD_LIMIT;
+        let mut first = solid(0, 0, 2, big);
+        let mut second = solid(0, big, 2, big);
+        if let (Command::Solid { rect: a, .. }, Command::Solid { rect: b, .. }) =
+            (&mut first, &mut second)
+        {
+            a.h = big;
+            b.h = big;
+        }
+        let merged = coalesce_solids(vec![first, second]);
+        assert_eq!(merged.len(), 2, "oversized merge must fail closed");
+    }
+
+    #[test]
+    fn i64_overflow_pair_is_kept_distinct_without_panicking() {
+        // Heights near i64::MAX: summing would overflow in debug builds.
+        let near_max = i64::MAX - 1;
+        let mut first = solid(0, 0, 1, near_max);
+        let mut second = solid(0, near_max, 1, near_max);
+        if let (Command::Solid { rect: a, .. }, Command::Solid { rect: b, .. }) =
+            (&mut first, &mut second)
+        {
+            a.h = near_max;
+            b.h = near_max;
+        }
+        let merged = coalesce_solids(vec![first, second]);
+        assert_eq!(merged.len(), 2, "overflowing merge must fail closed");
+    }
+
+    #[test]
+    fn horizontal_overflow_is_also_rejected() {
+        let big = super::COORD_LIMIT;
+        let merged = coalesce_solids(vec![solid(0, 0, big, 2), solid(big, 0, big, 2)]);
+        assert_eq!(
+            merged.len(),
+            2,
+            "oversized horizontal merge must fail closed"
+        );
     }
 }

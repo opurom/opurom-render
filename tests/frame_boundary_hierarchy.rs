@@ -25,7 +25,9 @@
 //! These tests are a deterministic host projection: they add no ABI or IR
 //! field and never mutate shared sources or CI files.
 
-use opurom_render::{a11y_json, a11y_tree, digest_hex, parse_ir, Ir, Role, StateView};
+use opurom_render::{
+    a11y_json, a11y_tree, digest_hex, parse_ir, Ir, QualityProfile, Role, StateView,
+};
 
 const TRUNCATION_IR: &str = r##"{
   "ir": "0.1.0", "app": "Truncation", "state": [],
@@ -83,8 +85,8 @@ fn truncation_is_byte_deterministic_and_differs_by_cap() {
     // the ellipsis is part of the same fixed frame.
     let ir = parse(TRUNCATION_IR);
     let state = StateView::from_ir(&ir);
-    let first = opurom_render::Renderer::new(480, 480).pixels(&ir, &state);
-    let second = opurom_render::Renderer::new(480, 480).pixels(&ir, &state);
+    let first = compat_renderer(480, 480).pixels(&ir, &state);
+    let second = compat_renderer(480, 480).pixels(&ir, &state);
     assert_eq!(first, second, "the fixed frame must be reproducible");
     assert_eq!(
         digest_hex(&first),
@@ -95,7 +97,7 @@ fn truncation_is_byte_deterministic_and_differs_by_cap() {
     let plain_state = StateView::from_ir(&plain);
     assert_ne!(
         first,
-        opurom_render::Renderer::new(480, 480).pixels(&plain, &plain_state),
+        compat_renderer(480, 480).pixels(&plain, &plain_state),
         "a line cap must change an overflowing text frame"
     );
 }
@@ -147,7 +149,7 @@ fn truncation_respects_the_zero_cap() {
     let nodes = truncation_nodes(&ir);
     assert_eq!(nodes[3].max_lines, Some(0));
     let state = StateView::from_ir(&ir);
-    let pixels = opurom_render::Renderer::new(480, 480).pixels(&ir, &state);
+    let pixels = compat_renderer(480, 480).pixels(&ir, &state);
     let mut node3 = nodes[3].clone();
     node3.rect.y = 0;
     node3.rect.x = 0;
@@ -157,6 +159,15 @@ fn truncation_respects_the_zero_cap() {
     // the same frame rendered from an IR whose fourth node has no cap.
     let uncapped = parse(TRUNCATION_IR.replace(",\"maxLines\":0}", "}").as_str());
     let uncapped_state = StateView::from_ir(&uncapped);
-    let uncapped_pixels = opurom_render::Renderer::new(480, 480).pixels(&uncapped, &uncapped_state);
+    let uncapped_pixels = compat_renderer(480, 480).pixels(&uncapped, &uncapped_state);
     assert_ne!(pixels, uncapped_pixels, "a zero cap must suppress all ink");
+}
+
+/// The truncation pins are bitmap-text pixels. Product's default system-font
+/// overlay suppresses bitmap text, so these assertions pin Compat explicitly,
+/// the same convention every golden test uses.
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(QualityProfile::Compat);
+    renderer
 }

@@ -1,9 +1,13 @@
 //! Tests for the inverted conditional visibility node field.
 
-use opurom_render::{
-    a11y_tree, digest_hex, layout, parse_ir, svg, Ir, Renderer, StateValue, StateView,
-};
+use opurom_render::{a11y_tree, digest_hex, layout, parse_ir, svg, Ir, StateValue, StateView};
 use std::process::Command;
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 fn ir_of(text: &str) -> Ir {
     parse_ir(text).expect("fixture IR must parse")
@@ -56,7 +60,7 @@ fn unless_inverts_when_and_hides_the_subtree() {
 fn unless_changes_the_frame_and_keeps_dirty_rects_bounded() {
     let ir = ir_of(UNLESS_IR);
     let mut state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(200, 120);
+    let mut renderer = compat_renderer(200, 120);
     let before = renderer.render(&ir, &state);
     state.set("dark", StateValue::Bool(true));
     let after = renderer.render(&ir, &state);
@@ -167,17 +171,17 @@ fn unless_leaves_the_golden_digests_unchanged() {
     let ir = ir_of(&counter);
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(320, 240).pixels(&ir, &state)),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "318beb1dd337bc4e"
     );
     let mut overridden = state.clone();
     overridden.set("count", StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &overridden)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &overridden)),
         "40073cb95c912d80"
     );
 }
@@ -193,7 +197,7 @@ fn the_cli_accepts_unless_and_state_overrides() {
             .arg(&ir_path)
             .args(["200", "120"])
             .arg(dir.join("unless.ppm"))
-            .args(["--state", value])
+            .args(["--state", value, "--quality", "compat"])
             .output()
             .unwrap();
         assert!(

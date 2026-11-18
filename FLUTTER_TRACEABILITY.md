@@ -33,6 +33,18 @@
   6-pass 展开与非法级别拒绝）。2026-11-18：render 666 项、GPU 112 项全过，
   `cargo fmt --check` 通过。
 
+## 2026-11-18 深度轮次内核自检
+
+机器可读摘要：`reports/render-self-audit.json`（11 项：9 全通过、2 通过但带 Skia 子模块缺失说明、0 失败）。
+
+- PERF-001 `bf59321`：行 diff 按机器字比较；`rendering/object.dart:1263-1326,3344-3368`；2 个新测试。
+- StrokeJoin `8fe45be`：`ui/painting.dart:1136-1178` 的 miter/round/bevel 与 4x 限制；5 个新测试；Skia 像素级规则待源码可用后复核。
+- PERF-002 `10a6fb3`：同色同 clip 相邻 Solid 的 opt-in 合并；按 Flutter display-list 绘制顺序保持语义；5 个新测试；默认字节不变。
+- PERF-003 `c09a18a`：`rendering/layer.dart:351-372,374-389,409,444-478,860-912,1158-1168`；跨帧 RGBA 缓存架构说明，未接线。
+- PERF-004 `890b5b6`：`material/ink_ripple.dart:43`；press 释放逐字节 parity 证据，默认全栅格回退未改。
+- 鲁棒性 `b3080cd`/`a1353d1`/`e48243e`/`3f4ec91`/`b59bac2`：极值几何、畸形 IR、display-list 上限、时序确定性、src-over 顺序与预乘输入；对应 `ui/painting.dart`、`animation.dart`、`impeller/geometry/color.*` 源码与 19 个新测试。
+- GPU 命令面 `1e3a299`：15 种 wire kind 全解析、软件回放确定性、跨仓 display/effects 字节 parity。
+
 ## 待办与已知差距（按模块优先级）
 
 1. AAA：Skia `SkScan_AAAPath.cpp`、`SkAnalyticEdge.{h,cpp}` 子模块未拉取；

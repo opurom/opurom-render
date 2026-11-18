@@ -3,14 +3,20 @@
 
 use opurom_render::image::{self, ImageFit};
 use opurom_render::{
-    digest_hex, font, layout, parse_ir, Align, Ir, Kind, LaidOut, Rect, Renderer, StateValue,
-    StateView, CACHE_CAPACITY,
+    digest_hex, font, layout, parse_ir, Align, Ir, Kind, LaidOut, Rect, StateValue, StateView,
+    CACHE_CAPACITY,
 };
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -667,10 +673,10 @@ fn image_nodes_load_lazily_and_missing_resources_are_deterministic() {
     assert_eq!(laid.image_fit, ImageFit::Fill);
 
     image::clear_cache();
-    let first = Renderer::new(32, 16).pixels(&ir, &state);
+    let first = compat_renderer(32, 16).pixels(&ir, &state);
     assert_eq!(image::cache_stats().hits, 0);
     assert_eq!(image::cache_stats().misses, 1);
-    let second = Renderer::new(32, 16).pixels(&ir, &state);
+    let second = compat_renderer(32, 16).pixels(&ir, &state);
     assert_eq!(first, second, "cached image frames are identical");
     assert_eq!(image::cache_stats().hits, 1);
     assert_eq!(image::cache_stats().misses, 1);
@@ -680,8 +686,8 @@ fn image_nodes_load_lazily_and_missing_resources_are_deterministic() {
     let missing_parsed = parse_ir(&missing_ir).expect("parse missing image IR");
     let missing_state = StateView::from_ir(&missing_parsed);
     image::clear_cache();
-    let placeholder1 = Renderer::new(32, 16).pixels(&missing_parsed, &missing_state);
-    let placeholder2 = Renderer::new(32, 16).pixels(&missing_parsed, &missing_state);
+    let placeholder1 = compat_renderer(32, 16).pixels(&missing_parsed, &missing_state);
+    let placeholder2 = compat_renderer(32, 16).pixels(&missing_parsed, &missing_state);
     assert_eq!(placeholder1, placeholder2, "placeholder is deterministic");
     assert_eq!(image::cache_stats().hits, 1);
     assert_eq!(image::cache_stats().misses, 1);
@@ -700,10 +706,10 @@ fn image_nodes_load_lazily_and_missing_resources_are_deterministic() {
     let invalid_parsed = parse_ir(&invalid_ir).expect("parse invalid image IR");
     let invalid_state = StateView::from_ir(&invalid_parsed);
     image::clear_cache();
-    let invalid = Renderer::new(32, 16).pixels(&invalid_parsed, &invalid_state);
+    let invalid = compat_renderer(32, 16).pixels(&invalid_parsed, &invalid_state);
     assert_eq!(
         invalid,
-        Renderer::new(32, 16).pixels(&invalid_parsed, &invalid_state)
+        compat_renderer(32, 16).pixels(&invalid_parsed, &invalid_state)
     );
     assert_eq!(
         pixel(&invalid, 32, cx, cy),
@@ -789,8 +795,8 @@ fn default_image_fit_is_contain() {
         ImageFit::Contain
     );
     assert_eq!(
-        Renderer::new(32, 16).pixels(&default, &default_state),
-        Renderer::new(32, 16).pixels(&explicit, &explicit_state),
+        compat_renderer(32, 16).pixels(&default, &default_state),
+        compat_renderer(32, 16).pixels(&explicit, &explicit_state),
         "the default must preserve the source aspect ratio"
     );
 }
@@ -823,7 +829,7 @@ fn fit_modes_scale_and_crop_with_nearest_neighbour_sampling() {
                 _ => ImageFit::Fill,
             }
         );
-        Renderer::new(32, 16).pixels(&ir, &state)
+        compat_renderer(32, 16).pixels(&ir, &state)
     };
     let fill = render("fill");
     let contain = render("contain");
@@ -866,7 +872,7 @@ fn text_align_offsets_and_max_lines_are_opt_in() {
             Align::Center => node.rect.x + ((node.rect.w - tw) / 2).max(2),
             Align::End => node.rect.x + (node.rect.w - tw - 2).max(2),
         };
-        let pixels = Renderer::new(96, 40).pixels(&ir, &state);
+        let pixels = compat_renderer(96, 40).pixels(&ir, &state);
         offsets.push(dark_ink_min_x(&pixels, 96, 40) - origin);
     }
     assert_eq!(
@@ -887,16 +893,16 @@ fn text_align_offsets_and_max_lines_are_opt_in() {
         text_node(&capped_ir, &capped_state, 96, 80).max_lines,
         Some(1)
     );
-    let capped_pixels = Renderer::new(96, 80).pixels(&capped_ir, &capped_state);
+    let capped_pixels = compat_renderer(96, 80).pixels(&capped_ir, &capped_state);
     assert_eq!(
         capped_pixels,
-        Renderer::new(96, 80).pixels(&capped_ir, &capped_state),
+        compat_renderer(96, 80).pixels(&capped_ir, &capped_state),
         "maxLines rendering is deterministic"
     );
     let plain_state = StateView::from_ir(&plain_ir);
     assert_ne!(
         capped_pixels,
-        Renderer::new(96, 80).pixels(&plain_ir, &plain_state),
+        compat_renderer(96, 80).pixels(&plain_ir, &plain_state),
         "maxLines must change an overflowing text node"
     );
     assert!(parse_ir(&text_ir("A", 40, 20, Some("sideways"), None)).is_err());
@@ -916,16 +922,16 @@ fn canonical_counter_without_new_props_keeps_three_golden_digests() {
     let mut state = StateView::from_ir(&ir);
     state.set("count", StateValue::Int(0));
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(320, 240).pixels(&ir, &state)),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "318beb1dd337bc4e"
     );
     state.set("count", StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "40073cb95c912d80"
     );
 }

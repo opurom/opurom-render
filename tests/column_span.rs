@@ -1,8 +1,14 @@
 //! Opt-in grid columnSpan: a cell spans N columns and consumes N cells.
 //! Spec: opurom-spec/IR_SCHEMA.md and LANG_SPEC.md ("columnSpan").
 
-use opurom_render::{digest_hex, layout, parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, layout, parse_ir, StateView};
 use serde_json::json;
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 fn grid(span: Option<i64>, rtl: bool, compact: bool) -> String {
     let cols = 4;
@@ -46,7 +52,7 @@ fn find(v: &[(u32, i64, i64, i64, i64)], id: u32) -> (i64, i64, i64, i64) {
 fn digest(ir_text: &str, w: u32, h: u32) -> String {
     let ir = parse_ir(ir_text).expect("grid IR must parse");
     let state = StateView::from_ir(&ir);
-    digest_hex(&Renderer::new(w, h).pixels(&ir, &state))
+    digest_hex(&compat_renderer(w, h).pixels(&ir, &state))
 }
 
 #[test]

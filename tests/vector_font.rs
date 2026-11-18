@@ -3,7 +3,13 @@
 //! many coverage levels, and the block-font path (scale 1..=3) keeps the three
 //! pinned golden frames byte-identical.
 
-use opurom_render::{digest_hex, font, layout, parse_ir, Renderer, StateValue, StateView};
+use opurom_render::{digest_hex, font, layout, parse_ir, StateValue, StateView};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 fn text_ir(value: &str, size: i64) -> String {
     format!(
@@ -57,8 +63,8 @@ fn every_common_ascii_glyph_renders_deterministically() {
         "sample must exercise the high-resolution path"
     );
 
-    let first = Renderer::new(1200, 120).pixels(&ir, &state);
-    let second = Renderer::new(1200, 120).pixels(&ir, &state);
+    let first = compat_renderer(1200, 120).pixels(&ir, &state);
+    let second = compat_renderer(1200, 120).pixels(&ir, &state);
     assert_eq!(first, second, "smooth text must be deterministic");
     assert!(
         sub_background_levels(&first) > 3,
@@ -70,8 +76,8 @@ fn every_common_ascii_glyph_renders_deterministically() {
         let one = text_ir(&ch.to_string(), 32);
         let one_ir = parse_ir(&one).expect("parse single glyph");
         let one_state = StateView::from_ir(&one_ir);
-        let a = Renderer::new(120, 120).pixels(&one_ir, &one_state);
-        let b = Renderer::new(120, 120).pixels(&one_ir, &one_state);
+        let a = compat_renderer(120, 120).pixels(&one_ir, &one_state);
+        let b = compat_renderer(120, 120).pixels(&one_ir, &one_state);
         assert_eq!(a, b, "glyph {ch:?} render must be stable");
         assert!(sub_background_levels(&a) > 0, "glyph {ch:?} must paint ink");
     }
@@ -85,7 +91,7 @@ fn scale_four_glyph_is_smoothly_anti_aliased() {
     let ir = parse_ir(&src).expect("parse");
     let state = StateView::from_ir(&ir);
     assert_eq!(scale_of(&ir, &state, 200, 120), 4);
-    let pixels = Renderer::new(200, 120).pixels(&ir, &state);
+    let pixels = compat_renderer(200, 120).pixels(&ir, &state);
 
     // Count pixels that are neither full background (>=250) nor fully dark
     // (<=24): these are the anti-aliased edge pixels.
@@ -125,16 +131,16 @@ fn pinned_golden_frames_are_stable() {
     let mut state = StateView::from_ir(&ir);
     state.set("count", StateValue::Int(0));
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(320, 240).pixels(&ir, &state)),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "318beb1dd337bc4e"
     );
     state.set("count", StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "40073cb95c912d80"
     );
 }

@@ -1,6 +1,12 @@
 //! Global `theme.fontScale` is the default for nodes without a local prop.
 
-use opurom_render::{a11y_tree, layout, parse_ir, Renderer, StateView};
+use opurom_render::{a11y_tree, layout, parse_ir, StateView};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 const BASE: &str = r##"{
   "ir": "0.1.0",
@@ -25,7 +31,7 @@ fn with_theme(extra: &str) -> String {
 fn digest(text: &str) -> u64 {
     let ir = parse_ir(text).expect("parse theme IR");
     let state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(320, 240);
+    let mut renderer = compat_renderer(320, 240);
     let frame = renderer.render(&ir, &state);
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in &frame.pixels {

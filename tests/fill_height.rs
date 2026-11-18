@@ -3,6 +3,12 @@
 
 use opurom_render::{digest, digest_hex, layout, parse_ir, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 /// Grid of twenty keys: four compact columns, five rows. `extra` is injected
 /// into the grid props; `key_props` into every key (for centering checks).
 fn grid_ir(extra: &str, key_props: &str) -> String {
@@ -96,12 +102,12 @@ fn fill_height_is_a_real_negative_probe() {
     );
     let sa = StateView::from_ir(&a);
     let sb = StateView::from_ir(&b);
-    let pa = Renderer::new(320, 640).render(&a, &sa).pixels;
-    let pb = Renderer::new(320, 640).render(&b, &sb).pixels;
+    let pa = compat_renderer(320, 640).render(&a, &sa).pixels;
+    let pb = compat_renderer(320, 640).render(&b, &sb).pixels;
     assert_ne!(pa, pb, "flag must reach the raster output");
     // Determinism: identical inputs render byte-identically.
-    assert_eq!(pa, Renderer::new(320, 640).render(&a, &sa).pixels);
-    assert_eq!(pb, Renderer::new(320, 640).render(&b, &sb).pixels);
+    assert_eq!(pa, compat_renderer(320, 640).render(&a, &sa).pixels);
+    assert_eq!(pb, compat_renderer(320, 640).render(&b, &sb).pixels);
 }
 
 #[test]
@@ -109,11 +115,11 @@ fn default_path_keeps_all_pinned_goldens() {
     let counter = std::fs::read_to_string("../opurom-examples/golden/counter.opuir.json").unwrap();
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
-    let a = Renderer::new(320, 240).render(&ir, &state).pixels;
-    let b = Renderer::new(800, 600).render(&ir, &state).pixels;
+    let a = compat_renderer(320, 240).render(&ir, &state).pixels;
+    let b = compat_renderer(800, 600).render(&ir, &state).pixels;
     assert_eq!(format!("{:016x}", digest(&a)), "8d45f412996a99c6");
     assert_eq!(format!("{:016x}", digest(&b)), "318beb1dd337bc4e");
-    assert_eq!(a, Renderer::new(320, 240).render(&ir, &state).pixels);
+    assert_eq!(a, compat_renderer(320, 240).render(&ir, &state).pixels);
 
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let ppm = dir.join("fill-height-effects.ppm");
@@ -121,6 +127,7 @@ fn default_path_keeps_all_pinned_goldens() {
         .arg("tests/fixtures/effects.opuir.json")
         .args(["96", "160"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(

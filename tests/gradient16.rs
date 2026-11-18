@@ -5,6 +5,12 @@ use opurom_render::{digest_hex, parse_ir, raster::Canvas, Rect, Renderer, Rgba, 
 use serde_json::json;
 use std::{fs, path::PathBuf, process::Command};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 /// Documented no-banding limit: on the pinned 256-sample ramp, no run of
 /// identical RGBA8 colours may exceed this many adjacent pixels.
 const MAX_RAMP_BAND: usize = 12;
@@ -96,19 +102,19 @@ fn ten_bit_default_bands_wider_and_flag_changes_pixels() {
         qsrc.render_quality.as_ref().unwrap().gradient_bits,
         Some(16)
     );
-    let a = Renderer::new(96, 96).pixels(&src, &state);
-    let b = Renderer::new(96, 96).pixels(&qsrc, &qstate);
+    let a = compat_renderer(96, 96).pixels(&src, &state);
+    let b = compat_renderer(96, 96).pixels(&qsrc, &qstate);
     assert_ne!(
         digest_hex(&a),
         digest_hex(&b),
         "renderQuality.gradientBits must change the raster frame"
     );
     assert_eq!(
-        Renderer::new(96, 96)
+        compat_renderer(96, 96)
             .display_list(&src, &state)
             .to_json()
             .unwrap(),
-        Renderer::new(96, 96)
+        compat_renderer(96, 96)
             .display_list(&qsrc, &qstate)
             .to_json()
             .unwrap(),
@@ -123,11 +129,11 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 
@@ -136,6 +142,7 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
         .arg("tests/fixtures/effects.opuir.json")
         .args(["96", "160"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(

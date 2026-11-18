@@ -5,6 +5,12 @@ use opurom_render::{cubic_bezier, digest_hex, parse_ir, Renderer, StateView};
 use serde_json::json;
 use std::{fs, path::PathBuf, process::Command};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const P0: (i64, i64) = (0, 0);
 const P1: (i64, i64) = (0, 100);
 const P2: (i64, i64) = (100, 100);
@@ -84,11 +90,11 @@ fn default_path_bytes_and_command_stream_stay_identical() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 
@@ -97,6 +103,7 @@ fn default_path_bytes_and_command_stream_stay_identical() {
         .arg("tests/fixtures/effects.opuir.json")
         .args(["96", "160"])
         .arg(&effects_ppm)
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(
@@ -131,11 +138,11 @@ fn default_path_bytes_and_command_stream_stay_identical() {
         Some("bezier")
     );
     assert_eq!(
-        Renderer::new(64, 64)
+        compat_renderer(64, 64)
             .display_list(&a, &sa)
             .to_json()
             .unwrap(),
-        Renderer::new(64, 64)
+        compat_renderer(64, 64)
             .display_list(&b, &sb)
             .to_json()
             .unwrap()

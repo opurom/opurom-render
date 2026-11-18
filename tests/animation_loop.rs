@@ -4,8 +4,14 @@
 //! bounded sequence of distinct ticks produces distinct frames and distinct
 //! display lists. Everything is integer-only and tick-driven: no wall clock.
 
-use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, parse_ir, StateView};
 use std::fs;
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 /// Ticks used by the GPU animation loop; settled at the last one.
 pub const TICKS: [i64; 4] = [0, 96, 192, 4000];
@@ -21,7 +27,7 @@ fn fixture() -> String {
 fn frames() -> Vec<(String, String)> {
     let ir = parse_ir(&fixture()).unwrap();
     let state = StateView::from_ir(&ir);
-    let renderer = Renderer::new(200, 150);
+    let renderer = compat_renderer(200, 150);
     TICKS
         .iter()
         .map(|&tick| {
@@ -85,7 +91,7 @@ fn display_list_queries_are_pure_and_match_the_frame_tick() {
     let text = fixture();
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
-    let renderer = Renderer::new(200, 150);
+    let renderer = compat_renderer(200, 150);
     for &tick in &TICKS {
         let first = renderer
             .display_list_at(&ir, &state, tick)

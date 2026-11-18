@@ -5,6 +5,12 @@ use opurom_render::{digest_hex, parse_ir, RenderQuality, Renderer, StateView};
 use serde_json::json;
 use std::{fs, path::PathBuf, process::Command};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 fn ir_with(quality: Option<serde_json::Value>) -> String {
     let mut doc = json!({
         "ir": "0.1.0", "app": "RQ", "state": [],
@@ -85,11 +91,11 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
     assert!(ir.render_quality.is_none());
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 
@@ -101,6 +107,7 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
         .arg("tests/fixtures/effects.opuir.json")
         .args(["96", "160"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(
