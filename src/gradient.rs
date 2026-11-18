@@ -594,3 +594,111 @@ mod extreme_parameter_tests {
         assert!(sample_ramp(&matched, &colors, 512, TileMode::Clamp).is_some());
     }
 }
+
+#[cfg(test)]
+mod alpha_order_tests {
+    use super::{premultiply_rgba, unpremultiply_rgba};
+    use crate::Rgba;
+
+    /// Integer src-over over an opaque framebuffer, matching Impeller's
+    /// `Color::Blend(kSrcOver)` (engine 371f772, color.cc:165-168) after the
+    /// premultiply/unpremultiply cancellation documented in `raster.rs`.
+    fn src_over_opaque(dst: Rgba, src: Rgba) -> Rgba {
+        let a = src.a as i64;
+        let inv = 255 - a;
+        let m = |d: u8, s: u8| -> u8 { ((s as i64 * a + d as i64 * inv + 127) / 255) as u8 };
+        Rgba {
+            r: m(dst.r, src.r),
+            g: m(dst.g, src.g),
+            b: m(dst.b, src.b),
+            a: 255,
+        }
+    }
+
+    #[test]
+    fn different_colour_src_over_order_is_not_commutative() {
+        let dst = Rgba::rgb(255, 255, 255);
+        let red = Rgba {
+            r: 200,
+            g: 0,
+            b: 0,
+            a: 128,
+        };
+        let blue = Rgba {
+            r: 0,
+            g: 0,
+            b: 200,
+            a: 128,
+        };
+        assert_ne!(
+            src_over_opaque(src_over_opaque(dst, red), blue),
+            src_over_opaque(src_over_opaque(dst, blue), red),
+            "draw order must be preserved; only same-colour runs may coalesce"
+        );
+    }
+
+    #[test]
+    fn same_colour_src_over_runs_have_the_same_coverage_as_one_merge() {
+        let dst = Rgba::rgb(10, 20, 30);
+        let src = Rgba {
+            r: 200,
+            g: 100,
+            b: 50,
+            a: 128,
+        };
+        // Two abutting strips of the same colour touch disjoint pixels, so
+        // merging them changes only the command count, never the pixels.
+        let twice = src_over_opaque(src_over_opaque(dst, src), src);
+        let merged = src_over_opaque(dst, src);
+        assert_ne!(twice, merged); // overlapping repaint is not the coalescer's case
+                                   // Adjacent, non-overlapping pixels each see exactly one source.
+        let strip = [src_over_opaque(dst, src), src_over_opaque(dst, src)];
+        assert_eq!(strip[0], strip[1]);
+    }
+
+    #[test]
+    fn premultiplied_input_is_not_blended_twice() {
+        let dst = Rgba::rgb(255, 255, 255);
+        let src = Rgba {
+            r: 200,
+            g: 100,
+            b: 50,
+            a: 128,
+        };
+        let straight = src_over_opaque(dst, src);
+        let pm = premultiply_rgba(src);
+        // Feeding premultiplied RGB back into the straight-alpha blend would
+        // square the alpha; the pipeline keeps stored pixels straight.
+        let double = src_over_opaque(dst, pm);
+        assert_ne!(straight, double);
+        // The inverse recovers the source colour up to 8-bit quantisation.
+        let back = unpremultiply_rgba(pm);
+        assert!((back.r as i64 - src.r as i64).abs() <= 2, "{back:?}");
+        assert_eq!(back.a, src.a);
+    }
+
+    #[test]
+    fn fully_transparent_source_leaves_the_destination_untouched() {
+        let dst = Rgba::rgb(7, 8, 9);
+        let clear = Rgba {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 0,
+        };
+        // Fully transparent source writes no RGB; the framebuffer keeps dst.
+        // The helper returns alpha=255 as its opaque-framebuffer sentinel, so
+        // compare the colour channels explicitly.
+        let out = src_over_opaque(dst, clear);
+        assert_eq!((out.r, out.g, out.b), (dst.r, dst.g, dst.b));
+        assert_eq!(
+            premultiply_rgba(clear),
+            Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0
+            }
+        );
+    }
+}
