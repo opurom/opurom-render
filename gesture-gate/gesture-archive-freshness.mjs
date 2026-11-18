@@ -14,7 +14,6 @@
 // Exit codes: 0 PASS, 1 FAIL, 2 usage/IO error.
 import { spawnSync } from 'node:child_process';
 import {
-  cpSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -162,9 +161,13 @@ function main() {
         return result.status === 'PASS' ? 0 : 1;
       }
       if (args.selfTest === 'relabel') {
-        // Reuse the previous manifest over the current documents: this is a
-        // stale label that the verifier must reject.
-        cpSync(join(previousDir, 'advanced.json'), join(currentDir, 'advanced.json'));
+        // Restamp an archived document with a foreign schema version. The
+        // verifier must reject it even when both clean builds are byte
+        // identical, which is the deterministic-builder case.
+        const documentPath = join(currentDir, 'advanced.json');
+        const document = JSON.parse(readFileSync(documentPath, 'utf8'));
+        document.schema = 'opurom.gesture.advanced.gate/0';
+        writeFileSync(documentPath, `${JSON.stringify(document, null, 2)}\n`);
         const verify = spawnSync(process.execPath, [ARCHIVER, '--verify', currentDir], {
           cwd: ROOT,
           encoding: 'utf8',

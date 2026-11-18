@@ -19,8 +19,10 @@ native ABI, or renderer sources.
 | `gesture-schema-consistency.mjs` | archive schema/source parity | `SCHEMA_CONSISTENCY.md` |
 | `gesture-baseline-loop.mjs` | baseline freeze/compare fault loop | `BASELINE_LOOP.md` |
 | `gesture-archive-freshness.mjs` | stale archive relabel detection | `ARCHIVE_FRESHNESS.md` |
+| `gesture-release-report.mjs` | release-readiness aggregate | `RELEASE_REPORT.md` |
 | `gesture-trace-gate.mjs` | test anchor source trace + coverage report | `TRACE_GATE.md` |
 | `gesture-archive-freshness.mjs` | stale archive relabel detection | `ARCHIVE_FRESHNESS.md` |
+| `gesture-release-report.mjs` | release-readiness aggregate | `RELEASE_REPORT.md` |
 
 ## Why these metrics
 

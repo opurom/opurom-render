@@ -13,8 +13,8 @@ satisfy:
   verdict and a `<name>_status` field in the archived documents;
 - the joint verdict is terminal (`PASS` or `N/A`);
 - the manifest self-hash is a 64-hex SHA-256;
-- a stale document copied from the previous archive is rejected by the
-  archiver's `--verify` path;
+- a relabelled document carrying a foreign schema version is rejected by
+  the archiver's `--verify` path;
 - a shortened verdict chain is rejected by the consistency comparison.
 
 Flutter 3.50.0 source pin:
