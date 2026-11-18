@@ -94,6 +94,12 @@ pub enum Command {
         rect: Rect,
         clip: Rect,
         radius: i64,
+        /// Non-uniform or elliptical corner radii in GPU wire order
+        /// (TL,TR,BL,BR), each `[rx,ry]`. `None` selects the historical scalar
+        /// `radius` path so default frames stay byte-identical. Flutter
+        /// `_paintShadows` -> `_paintBox` paints the shadow with the node's
+        /// `borderRadius.toRRect`, so the silhouette must follow per-corner radii.
+        radii: Option<[[i64; 2]; 4]>,
         level: i64,
         color: Rgba,
     },
@@ -222,6 +228,7 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
             rect,
             clip,
             radius,
+            radii,
             level,
             ..
         } => {
@@ -233,6 +240,17 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
             push_rect(&mut values, rect);
             push_rect(&mut values, clip);
             values.extend_from_slice(&[radius, level]);
+            if let Some(radii) = radii {
+                for (corner, pair) in radii.iter().enumerate() {
+                    for (axis, value) in pair.iter().enumerate() {
+                        let label = format!("{what}.radii[{corner}][{axis}]");
+                        validate_coord(*value, &label)?;
+                        if *value < 0 || *value > GPU_RADIUS_LIMIT {
+                            return Err(bad(format!("{label} must be 0..={GPU_RADIUS_LIMIT}")));
+                        }
+                    }
+                }
+            }
         }
         Command::EffectGlow {
             bounds,
@@ -546,6 +564,7 @@ impl DisplayList {
                     rect,
                     clip,
                     radius,
+                    radii,
                     level,
                     color,
                 } => {
@@ -553,7 +572,18 @@ impl DisplayList {
                     write_rect(&mut out, "rect", *rect).map_err(fmt_err)?;
                     out.push(',');
                     write_rect(&mut out, "clip", *clip).map_err(fmt_err)?;
-                    write!(&mut out, ",\"radius\":{radius},\"level\":{level},").map_err(fmt_err)?;
+                    write!(&mut out, ",\"radius\":{radius},").map_err(fmt_err)?;
+                    if let Some(radii) = radii {
+                        out.push_str("\"radii\":[");
+                        for (i, pair) in radii.iter().enumerate() {
+                            if i > 0 {
+                                out.push(',');
+                            }
+                            write!(&mut out, "[{},{}]", pair[0], pair[1]).map_err(fmt_err)?;
+                        }
+                        out.push_str("],");
+                    }
+                    write!(&mut out, "\"level\":{level},").map_err(fmt_err)?;
                     write_rgba(&mut out, "color", *color, color.a).map_err(fmt_err)?;
                     out.push('}');
                 }

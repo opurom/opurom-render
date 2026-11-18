@@ -5,6 +5,7 @@
 //! no effect commands, so the effect-free command stream stays byte-identical.
 
 use crate::display::Command;
+use crate::geometry::{CornerRadii, RoundingRadii};
 use crate::raster::Canvas;
 use crate::{LaidOut, Rect, Rgba};
 
@@ -479,6 +480,32 @@ fn shape_radius(n: &LaidOut) -> i64 {
     n.radius.max(0).min(n.rect.w.min(n.rect.h).max(0) / 2)
 }
 
+/// True only when the node's radial geometry came from `cornerRadii` rather
+/// than the scalar `radius`. Uniform/elliptical nodes keep the byte-identical
+/// scalar shadow path; any explicit per-corner data takes the new path.
+fn has_per_corner_radii(n: &LaidOut) -> bool {
+    n.radii != RoundingRadii::all(shape_radius(n))
+}
+
+/// Per-layer shadow radii: grow by positive spread and clamp each axis into
+/// the layer box, mirroring the scalar `lrad` rule. Flutter `_paintShadows`
+/// offsets/inflates the rect then `_paintBox` reuses the same borderRadius.
+fn shadow_layer_radii(radii: RoundingRadii, spread: i64, box_r: Rect) -> RoundingRadii {
+    let grow = spread.max(0);
+    let max_x = (box_r.w / 2).max(0);
+    let max_y = (box_r.h / 2).max(0);
+    let grow_corner = |r: CornerRadii| CornerRadii {
+        x: r.x.saturating_add(grow).clamp(0, max_x),
+        y: r.y.saturating_add(grow).clamp(0, max_y),
+    };
+    RoundingRadii {
+        top_left: grow_corner(radii.top_left),
+        top_right: grow_corner(radii.top_right),
+        bottom_left: grow_corner(radii.bottom_left),
+        bottom_right: grow_corner(radii.bottom_right),
+    }
+}
+
 fn inside_shape(n: &LaidOut, x: i64, y: i64, rad: i64) -> bool {
     if x < n.rect.x
         || y < n.rect.y
@@ -621,10 +648,18 @@ pub fn project_state_level(x: i64) -> usize {
 /// recorded (no shadow).
 pub(crate) fn emit_elevation_command(canvas: &mut Canvas, n: &LaidOut, level: i64) {
     let clip = canvas.effective_clip();
+    // Elliptical/per-corner nodes carry their radii; uniform nodes keep the
+    // scalar `radius` only so the default command stream stays byte-identical.
+    let radii = if has_per_corner_radii(n) {
+        Some(Canvas::gpu_radii(n.radii))
+    } else {
+        None
+    };
     canvas.emit(Command::EffectElevation {
         rect: n.rect,
         clip,
         radius: shape_radius(n),
+        radii,
         level,
         color: DARK,
     });
@@ -639,6 +674,7 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
     };
     let clip = canvas.effective_clip();
     let rad = shape_radius(n);
+    let per_corner = has_per_corner_radii(n);
     for (dx, dy, blur, spread, alpha) in layers {
         // Layer box: node rect expanded by spread (negative shrinks), shifted
         // by the layer offset. Clamp radius into the (possibly smaller) box.
@@ -670,6 +706,11 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
             .saturating_add(spread.max(0))
             .max(0)
             .min(box_r.w.min(box_r.h) / 2);
+        let layer_radii = if per_corner {
+            Some(shadow_layer_radii(n.radii, spread, box_r))
+        } else {
+            None
+        };
         for iy in 0..bh {
             let y = bounds.y + iy as i64;
             for ix in 0..bw {
@@ -685,9 +726,16 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
                     && y >= box_r.y
                     && x < box_r.x.saturating_add(box_r.w)
                     && y < box_r.y.saturating_add(box_r.h)
-                    && !Canvas::outside_round(box_r, x, y, lrad)
                 {
-                    mask[iy * bw + ix] = 255;
+                    let inside = match layer_radii {
+                        Some(lr) => crate::geometry::round_rect_contains(
+                            x, y, box_r.x, box_r.y, box_r.w, box_r.h, lr,
+                        ),
+                        None => !Canvas::outside_round(box_r, x, y, lrad),
+                    };
+                    if inside {
+                        mask[iy * bw + ix] = 255;
+                    }
                 }
             }
         }
@@ -697,12 +745,19 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
             for ix in 0..bw {
                 let x = bounds.x + ix as i64;
                 // Skip pixels under the node's own body: the shadow is behind it.
-                if !Canvas::outside_round(n.rect, x, y, rad)
-                    && x >= n.rect.x
-                    && y >= n.rect.y
-                    && x < n.rect.x.saturating_add(n.rect.w)
-                    && y < n.rect.y.saturating_add(n.rect.h)
-                {
+                let under_body = match layer_radii {
+                    Some(_) => crate::geometry::round_rect_contains(
+                        x, y, n.rect.x, n.rect.y, n.rect.w, n.rect.h, n.radii,
+                    ),
+                    None => {
+                        x >= n.rect.x
+                            && y >= n.rect.y
+                            && x < n.rect.x.saturating_add(n.rect.w)
+                            && y < n.rect.y.saturating_add(n.rect.h)
+                            && !Canvas::outside_round(n.rect, x, y, rad)
+                    }
+                };
+                if under_body {
                     continue;
                 }
                 let cov = soft[iy * bw + ix] as i64;
@@ -837,5 +892,40 @@ mod tests {
         assert_eq!(e.dy(), EFFECT_MAX_OFFSET);
         assert_eq!(e.alpha(), EFFECT_UNIT);
         assert_eq!(e.pad(), EFFECT_MAX_RADIUS + EFFECT_MAX_OFFSET);
+    }
+
+    /// Shadow-only: `draw_elevation` rasterizes no body, so any pixel delta
+    /// between elliptical and circular radii comes from the shadow silhouette.
+    /// Mutating the per-corner branch to scalar makes both renders identical.
+    #[test]
+    fn shadow_silhouette_follows_per_corner_radii() {
+        fn shadow(elliptical: bool) -> Vec<u8> {
+            let radii = if elliptical {
+                r#","cornerRadii":{"topLeft":[40,10],"topRight":[40,10],"bottomLeft":[40,10],"bottomRight":[40,10]}"#
+            } else {
+                ""
+            };
+            let text = format!(
+                r##"{{"ir":"0.1.0","app":"S","state":[],"tree":{{"id":0,"kind":"Column","props":{{"padding":20,"color":"#FFFFFF","border":"#FFFFFF"}},"events":{{}},"children":[{{"id":1,"kind":"Container","props":{{"width":80,"height":60,"color":"#FFFFFF","border":"#FFFFFF","radius":30{radii},"elevation":3}},"events":{{}},"children":[]}}]}},"theme":{{"mode":"light","accent":"#097FEB","radius":4}}}}"##
+            );
+            let ir = crate::parse_ir(&text).unwrap();
+            let laid = crate::layout::layout(&ir, &crate::StateView::from_ir(&ir), 160, 140);
+            let node = laid.iter().find(|n| n.id == 1).unwrap().clone();
+            let mut canvas = Canvas::new(160, 140, Rgba::rgb(255, 255, 255));
+            draw_elevation(&mut canvas, &node, 3);
+            canvas.pixels
+        }
+        let ell = shadow(true);
+        let cir = shadow(false);
+        let changed = ell
+            .iter()
+            .zip(cir.iter())
+            .step_by(4)
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(
+            changed > 20,
+            "elliptical elevation shadow must differ from circular, got {changed} px"
+        );
     }
 }
