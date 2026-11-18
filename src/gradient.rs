@@ -70,7 +70,7 @@ pub fn sample_rgba(
         return None;
     }
     let mut i = 0usize;
-    while i + 1 < stops.len() && t > stops[i + 1] {
+    while i + 1 < stops.len() && t >= stops[i + 1] {
         i += 1;
     }
     if i + 1 >= stops.len() {
@@ -476,5 +476,78 @@ mod sweep_tests {
         // Above the end angle clamps to stop 1.
         let above = sweep_position(-(1 << 20), 1, 0, 0, start, end, TileMode::Clamp);
         assert_eq!(above, Some(1024));
+    }
+}
+
+/// Flutter 3.50.0 `Gradient._validateColorStops`
+/// (`ui/painting.dart:5325-5335`): when stops are omitted the colour list must
+/// contain exactly two entries; when present, stops and colours must have the
+/// same length. This pure validator mirrors that contract without a runtime
+/// exception model; the renderer can map the error to its IR diagnostic.
+pub fn validate_color_stop_lengths(
+    colors_len: usize,
+    stops_len: Option<usize>,
+) -> Result<(), &'static str> {
+    match stops_len {
+        None if colors_len != 2 => {
+            Err("\"colors\" must have length 2 if \"colorStops\" is omitted.")
+        }
+        Some(n) if n != colors_len => {
+            Err("\"colors\" and \"colorStops\" arguments must have equal length.")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Multi-stop colour ramp with Flutter stop semantics. Stops are clamped to
+/// `[0,1]`, monotone non-decreasing (`colorStops[i+1] = max(colorStops[i],
+/// raw[i+1])`, painting.dart:5091-5098), and the colour at parameter `t` is
+/// linearly interpolated between the surrounding stop colours. Equal stops
+/// use the right-hand colour (a zero-width interval contributes nothing).
+pub fn sample_ramp(
+    stops: &[i64],
+    colors: &[crate::Rgba],
+    t: i64,
+    mode: TileMode,
+) -> Option<crate::Rgba> {
+    validate_color_stop_lengths(colors.len(), (!stops.is_empty()).then_some(stops.len())).ok()?;
+    sample_rgba(stops, colors, t, mode)
+}
+
+#[cfg(test)]
+mod stop_parity_tests {
+    use super::{normalize_stops, sample_ramp, validate_color_stop_lengths, TileMode};
+    use crate::Rgba;
+
+    #[test]
+    fn flutter_color_stop_length_contract() {
+        assert!(validate_color_stop_lengths(2, None).is_ok());
+        assert!(validate_color_stop_lengths(3, None).is_err());
+        assert!(validate_color_stop_lengths(3, Some(3)).is_ok());
+        assert!(validate_color_stop_lengths(3, Some(2)).is_err());
+    }
+
+    #[test]
+    fn multi_stop_ramp_is_monotone_and_zero_width_uses_right_color() {
+        // Flutter clamps out-of-range stops and rounds a decreasing stop up to
+        // the previous one (painting.dart:5094-5098).
+        let stops = normalize_stops(&[-20, 300, 200, 1200]);
+        assert_eq!(stops, vec![0, 300, 300, 1024]);
+        let colors = [
+            Rgba::rgb(0, 0, 0),
+            Rgba::rgb(100, 100, 100),
+            Rgba::rgb(200, 200, 200),
+            Rgba::rgb(255, 255, 255),
+        ];
+        // At t=300 the two equal stops collapse to the right-hand colour.
+        let at = sample_ramp(&stops, &colors, 300, TileMode::Clamp).unwrap();
+        assert_eq!(at.r, 200);
+        // Between stops 300 and 1024 the ramp continues toward the last colour.
+        let mid = sample_ramp(&stops, &colors, 662, TileMode::Clamp).unwrap();
+        assert!(mid.r > 200 && mid.r < 255, "mid {mid:?}");
+        assert_eq!(
+            sample_ramp(&stops[1..], &colors[1..], 2048, TileMode::Decal),
+            None
+        );
     }
 }
