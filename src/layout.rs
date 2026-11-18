@@ -300,6 +300,9 @@ pub struct LaidOut {
     pub text_line_height: Option<i64>,
     /// Flutter `TextLeadingDistribution`: 0 proportional, 1 even.
     pub text_leading_distribution: Option<u8>,
+    /// Flutter `TextHeightBehavior` first-ascent / last-descent switches.
+    pub text_apply_height_to_first_ascent: Option<bool>,
+    pub text_apply_height_to_last_descent: Option<bool>,
     /// Animation clock phase in milliseconds (drives the spinner).
     pub phase: i64,
     pub accent: Rgba,
@@ -883,11 +886,19 @@ fn apply_text_baselines(out: &mut [LaidOut], theme: &Theme) {
                 // Flutter `TextLeadingDistribution` (ui/text.dart:1445-1467):
                 // proportional splits leading by ascent/descent, even splits
                 // it half above and half below. Default stays proportional.
-                let leading_units = if n.text_leading_distribution == Some(1) {
+                let mut leading_units = if n.text_leading_distribution == Some(1) {
                     (line_units - natural_units) / 2
                 } else {
                     (line_units - natural_units) * m.ascent as i128 / denom
                 };
+                // Flutter `TextHeightBehavior.applyHeightToFirstAscent`:
+                // false keeps the font's default ascent, so the height
+                // multiplier's leading must not be added above the baseline.
+                // This renderer models one line per Text node; the same rule
+                // is applied to the first (only) line.
+                if n.text_apply_height_to_first_ascent == Some(false) {
+                    leading_units = 0;
+                }
                 let scaled = m.ascent as i128 * px as i128 + leading_units;
                 let rounded = if scaled >= 0 {
                     (scaled + 512) / 1024
@@ -1466,6 +1477,8 @@ fn place(
             text_baseline: None,
             text_line_height: None,
             text_leading_distribution: None,
+            text_apply_height_to_first_ascent: None,
+            text_apply_height_to_last_descent: None,
             phase: elapsed_ms,
             accent: pal.accent,
             on_accent: pal.on_accent,
@@ -1558,6 +1571,8 @@ fn place(
         text_baseline: None,
         text_line_height: n.props.line_height,
         text_leading_distribution: n.props.leading_distribution,
+        text_apply_height_to_first_ascent: n.props.apply_height_to_first_ascent,
+        text_apply_height_to_last_descent: n.props.apply_height_to_last_descent,
         phase: elapsed_ms,
         accent: pal.accent,
         on_accent: pal.on_accent,

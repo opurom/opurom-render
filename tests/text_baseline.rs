@@ -180,3 +180,37 @@ fn leading_distribution_is_opt_in_and_validated() {
         "unknown leading distribution must fail"
     );
 }
+
+#[test]
+fn text_height_behavior_first_ascent_switch_matches_flutter_default() {
+    // Flutter 3.50.0 `TextHeightBehavior.applyHeightToFirstAscent`
+    // (engine 371f772, lib/ui/text.dart:1500-1523): true applies the height
+    // multiplier to the first ascent; false keeps the font's default ascent.
+    // With Roboto metrics 928/244 and lineHeight 2.0 at px 24, the default
+    // baseline is 38; disabling first-ascent scaling returns it to 22.
+    let mut props = json!({"value":"Hi","fontPx":24,"lineHeight":2.0});
+    let default = span(props.clone(), true);
+    assert!(default.contains("\"baseline\":38"), "{default}");
+    props["applyHeightToFirstAscent"] = json!(false);
+    let disabled = span(props.clone(), true);
+    assert!(disabled.contains("\"baseline\":22"), "{disabled}");
+    assert_ne!(default, disabled);
+
+    // Last descent affects bottom metrics, not the alphabetic baseline. This
+    // renderer has one line per Text node, so the clause is wire-accepted and
+    // must never move the glyph origin; it stays available for a future
+    // multi-line paragraph without changing default frames.
+    props["applyHeightToFirstAscent"] = json!(true);
+    props["applyHeightToLastDescent"] = json!(false);
+    let last = span(props, true);
+    assert!(last.contains("\"baseline\":38"), "{last}");
+}
+
+#[test]
+fn text_height_behavior_last_descent_is_absent_by_default() {
+    // The wire field is opt-in; absence must retain the pinned default path.
+    let plain = doc(json!({"value":"Hi","fontPx":24}), true);
+    let ir = parse_ir(&plain).unwrap();
+    assert_eq!(ir.tree.props.apply_height_to_first_ascent, None);
+    assert_eq!(ir.tree.props.apply_height_to_last_descent, None);
+}
