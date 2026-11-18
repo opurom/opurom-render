@@ -616,12 +616,8 @@ pub fn project_state_level(x: i64) -> usize {
     }
 }
 
-/// Draw a material elevation shadow for `n` at `level`, far-to-near. Uses the
-/// existing deterministic box blur and integer compositing; no floats, no wall
-/// clock. Called only when the backend elevation switch is on and not capturing,
-/// so the default path and the display-list command stream are untouched.
-/// Record one material-elevation display command for capture replay. The
-/// replay backend expands `level` via [`ELEVATION_TABLE`]; level 0 is never
+/// Record one material-elevation display command for capture replay.
+/// The replay backend expands `level` via [`ELEVATION_TABLE`]; level 0 is never
 /// recorded (no shadow).
 pub(crate) fn emit_elevation_command(canvas: &mut Canvas, n: &LaidOut, level: i64) {
     let clip = canvas.effective_clip();
@@ -634,6 +630,9 @@ pub(crate) fn emit_elevation_command(canvas: &mut Canvas, n: &LaidOut, level: i6
     });
 }
 
+/// Draw a material elevation shadow for `n` at `level`, far-to-near. Uses
+/// deterministic box blur and integer compositing; no floats, no wall clock.
+/// The software path runs only outside capture; no global switch remains.
 pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
     let Some(layers) = ELEVATION_TABLE.get(level).copied().flatten() else {
         return;
