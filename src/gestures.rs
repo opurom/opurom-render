@@ -21,6 +21,10 @@
 //!   `:806` acceptGesture. Blob fe3cdf27a414de2f112c58ad5d633831f7f1536e.
 //! - `constants.dart:65` kTouchSlop 18px, `:80` kScaleSlop == kTouchSlop.
 //!   Blob ae23eac1178aff50cbb5b0f29566a0e45589dd99.
+//! - `recognizer.dart:48-56` DragStartBehavior (blob
+//!   f3f88766dfda22c6138eece1df4fdd1d6f3a3aeb) and `monodrag.dart:87,103-125`
+//!   (blob 6acbf98b5158d8b4d8bb200d6133ce26fda253be): the start behavior
+//!   chooses the down position or the arena-win position.
 //!
 //! The five live phases are down -> pending -> triggered -> cancelled -> up:
 //! a down enters pending, a tick at the deadline triggers, leaving the hit
@@ -200,6 +204,16 @@ pub enum Phase {
     Up,
 }
 
+/// Flutter's `DragStartBehavior` (`gestures/recognizer.dart:48-56`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DragStartBehavior {
+    /// Start the drag at the down position (the Opurom default).
+    #[default]
+    Down,
+    /// Start the drag at the position where the recognizer won the arena.
+    Start,
+}
+
 /// One arena member: a recognizer on one node of the hit path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Member {
@@ -326,6 +340,9 @@ struct Down {
 struct PointerState {
     down: Down,
     phase: Phase,
+    /// The origin used for drag deltas; it differs from `down` only when the
+    /// recognizer wins the arena after the pointer has already moved.
+    drag_origin: (i64, i64),
 }
 
 /// Two-finger span tracker for the active sequence. All coordinates are the
@@ -480,6 +497,8 @@ pub struct GestureEngine {
     /// Opt-in long-press drag updates; off keeps the legacy post-trigger moves
     /// silent, so existing arena fingerprints stay byte-identical.
     long_press_move_update: bool,
+    /// Where the drag origin is taken from (`gestures/recognizer.dart:48-56`).
+    drag_start_behavior: DragStartBehavior,
     phase: Phase,
     /// The pending tap series, one entry per pointer that lifted into the
     /// double-tap window (`gestures/multitap.dart:328-337`).
@@ -495,6 +514,14 @@ impl GestureEngine {
     /// after `LongPress` so existing consumers see no new gesture stream.
     pub fn enable_long_press_move_update(&mut self) {
         self.long_press_move_update = true;
+    }
+
+    /// Selects whether the drag origin is the down point or the point where
+    /// the recognizer won the arena (`gestures/recognizer.dart:48-56`,
+    /// `gestures/monodrag.dart:103-125`). The default stays `Down` so the
+    /// existing gesture stream is byte-identical.
+    pub fn set_drag_start_behavior(&mut self, behavior: DragStartBehavior) {
+        self.drag_start_behavior = behavior;
     }
 
     /// The arena of one pointer id (`gestures/arena.dart:117-129`).
@@ -804,6 +831,7 @@ impl GestureEngine {
                     origin_t: event.time_ms,
                 },
                 phase: Phase::Pending,
+                drag_origin: (event.global_x, event.global_y),
             },
         ));
         self.sync_phase();
@@ -893,9 +921,10 @@ impl GestureEngine {
         }
         if let Some(winner) = self.arena_ref(event.pointer_id).and_then(|a| a.winner()) {
             if winner.kind == GestureKind::Drag {
+                let origin = self.pointers[index].1.drag_origin;
                 return Some(Gesture::Drag {
-                    dx: event.global_x.saturating_sub(down.global_x),
-                    dy: event.global_y.saturating_sub(down.global_y),
+                    dx: event.global_x.saturating_sub(origin.0),
+                    dy: event.global_y.saturating_sub(origin.1),
                 });
             }
             return None;
@@ -940,9 +969,13 @@ impl GestureEngine {
                 None => false,
             };
             if accepted {
+                if self.drag_start_behavior == DragStartBehavior::Start {
+                    self.pointers[index].1.drag_origin = (event.global_x, event.global_y);
+                }
+                let origin = self.pointers[index].1.drag_origin;
                 return Some(Gesture::Drag {
-                    dx: event.global_x.saturating_sub(down.global_x),
-                    dy: event.global_y.saturating_sub(down.global_y),
+                    dx: event.global_x.saturating_sub(origin.0),
+                    dy: event.global_y.saturating_sub(origin.1),
                 });
             }
         }
