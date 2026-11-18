@@ -39,13 +39,19 @@ fn move_and_up_reuse_the_down_hit_path() {
         Some(GestureKind::Tap),
     );
 
-    assert_eq!(engine.dispatch(&event(PointerKind::Down, 7, 20, 20, 0)), None);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 7, 20, 20, 0)),
+        None
+    );
     // Moving outside node 1 must still dispatch to node 1's sequence; a
     // re-hit-test would find nothing or pick node 2 and lose the tap.
-    assert_eq!(engine.dispatch(&event(PointerKind::Move, 7, 120, 120, 10)), None);
     assert_eq!(
-        engine.on_tick(300),
-        Some(Gesture::Tap),
+        engine.dispatch(&event(PointerKind::Move, 7, 120, 120, 10)),
+        None
+    );
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Up, 7, 120, 120, 10)),
+        Some((1, Gesture::Tap)),
         "the down-time path must survive a move outside the original bounds"
     );
 }
@@ -76,14 +82,19 @@ fn pointer_paths_are_independent_and_released_on_up() {
         Some(GestureKind::Tap),
     );
 
-    assert_eq!(engine.dispatch(&event(PointerKind::Down, 1, 20, 20, 0)), None);
-    assert_eq!(engine.dispatch(&event(PointerKind::Down, 2, 120, 120, 1)), None);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 1, 20, 20, 0)),
+        None
+    );
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 2, 120, 120, 1)),
+        None
+    );
     // Each pointer stays on the node it pressed even when the coordinates
     // cross; the arena is per pointer (`arena.dart:117-129`).
-    assert_eq!(engine.dispatch(&event(PointerKind::Up, 1, 120, 120, 10)), None);
     assert_eq!(
-        engine.on_tick(310),
-        Some(Gesture::Tap),
+        engine.dispatch(&event(PointerKind::Up, 1, 120, 120, 10)),
+        Some((1, Gesture::Tap)),
         "pointer 1 must resolve on node 1, not on the node under its lift point"
     );
 }
