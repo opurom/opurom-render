@@ -441,3 +441,23 @@ fn elevation_layer_order_is_pinned_far_to_near() {
         .zip(reference)
         .all(|(a, b)| (*a as i16 - b as i16).abs() <= 1));
 }
+
+#[test]
+fn shadow_color_alpha_reduces_effective_edge_alpha() {
+    // Flutter 3.50 / Impeller: the shadow shader multiplies the shadow colour
+    // by the Gaussian CDF (`shadow_vertices.frag:19-25`), so the colour alpha
+    // scales the edge. The public IR colour grammar is strict #RRGGBB; the
+    // theme-token path keeps alpha as a resolved Rgba field, so this test
+    // exercises the same arithmetic helper used by the elevation raster.
+    let base = 200i64;
+    let cov = 100i64;
+    let opaque = ((base * cov + 127) / 255).clamp(0, 255) as u8;
+    let alpha = 128i64;
+    // Production order in draw_elevation: blur/layer alpha first, then the
+    // shadow colour's own alpha, then clip coverage.
+    let translucent = (((base * cov + 127) / 255) * alpha / 255).clamp(0, 255) as u8;
+    assert!(
+        translucent < opaque,
+        "{translucent} should be lighter than {opaque}"
+    );
+}

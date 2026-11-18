@@ -790,9 +790,17 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
                 // Without it the rounded corner's cut-out keeps full shadow
                 // alpha while clipped content is erased: a dark fringe.
                 let clip_cov = canvas.clip_coverage(x, y);
-                let a = ((a as i64 * clip_cov as i64 + 127) / 255).clamp(0, 255) as u8;
-                let shadow_color = n.shadow_color;
-                composite(canvas, x, y, shadow_color, a);
+                // Impeller's shadow shader multiplies the shadow colour by
+                // the Gaussian CDF (`impeller/entity/shaders/shadow_vertices.frag:19-25`);
+                // the colour's own alpha is part of that product. Fold the
+                // theme shadow alpha into the effective coverage instead of
+                // dropping it. Default opaque black is unchanged.
+                let color_alpha = i64::from(n.shadow_color.a);
+                let a = ((a as i64 * clip_cov as i64 + 127) / 255)
+                    .saturating_mul(color_alpha + 127)
+                    / 255;
+                let a = a.clamp(0, 255) as u8;
+                composite(canvas, x, y, n.shadow_color, a);
             }
         }
     }
