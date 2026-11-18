@@ -172,6 +172,9 @@ pub const DOUBLE_TAP_INTERVAL_MS: i64 = 300;
 pub const DOUBLE_TAP_MIN_MS: i64 = 40;
 /// Maximum distance between the two taps of a double tap (`constants.dart:49`).
 pub const DOUBLE_TAP_SLOP: i64 = 100;
+/// Maximum travel of the first touch before the double-tap series is reset;
+/// `kDoubleTapTouchSlop == kTouchSlop` (`constants.dart:41-44`).
+pub const DOUBLE_TAP_TOUCH_SLOP: i64 = DRAG_THRESHOLD;
 /// Distance past which a move becomes a drag (`constants.dart:65`).
 pub const DRAG_THRESHOLD: i64 = 18;
 /// Scale fixed point: 1024 == 1.0, matching the IR/raster unit convention.
@@ -445,6 +448,9 @@ struct TapMark {
     x: i64,
     y: i64,
     t: i64,
+    /// Cleared when the first touch travels more than `kDoubleTapTouchSlop`
+    /// (`multitap.dart:943-946`).
+    valid: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -586,11 +592,15 @@ impl GestureEngine {
             PointerKind::Move => self.on_move(node, event),
             PointerKind::Up => self.on_up(node, event),
             PointerKind::Cancel => self.on_cancel(node, event),
-        }?;
-        if event.kind == PointerKind::Up {
+        };
+        // Flutter removes the cached hit test on up/cancel regardless of
+        // whether a recognizer produced a gesture (`binding.dart:428-431`). A
+        // double-tap first up deliberately emits nothing, but its path must
+        // still be released before the next pointer starts.
+        if matches!(event.kind, PointerKind::Up | PointerKind::Cancel) {
             self.forget_path(event.pointer_id);
         }
-        Some((node, gesture))
+        gesture.map(|g| (node, g))
     }
 
     /// Stores a leaf-to-root hit path for the lifetime of one pointer.
@@ -656,7 +666,8 @@ impl GestureEngine {
         }
         if let Some(mark) = self.last_tap {
             let gap = event.time_ms.saturating_sub(mark.t);
-            if mark.node != node_id
+            if !mark.valid
+                || mark.node != node_id
                 || gap > DOUBLE_TAP_INTERVAL_MS
                 || gap < DOUBLE_TAP_MIN_MS
                 || !within(
@@ -732,6 +743,20 @@ impl GestureEngine {
         let Some(down) = self.down else { return None };
         if down.node != node_id || down.pointer_id != event.pointer_id {
             return None;
+        }
+        // Flutter resets the pending double-tap series as soon as the first
+        // touch leaves its 18 px global tolerance (`multitap.dart:266,943-946`,
+        // `constants.dart:41-44`). This is independent of drag acceptance.
+        if let Some(mark) = self.last_tap.as_mut() {
+            if !within(
+                event.global_x,
+                event.global_y,
+                mark.x,
+                mark.y,
+                DOUBLE_TAP_TOUCH_SLOP,
+            ) {
+                mark.valid = false;
+            }
         }
         if self.long_press_move_update
             && self.phase == Phase::Triggered
@@ -837,7 +862,8 @@ impl GestureEngine {
         let double_ok = tap_ok
             && self.last_tap.is_some_and(|mark| {
                 let gap = down.t.saturating_sub(mark.t);
-                gap >= DOUBLE_TAP_MIN_MS
+                mark.valid
+                    && gap >= DOUBLE_TAP_MIN_MS
                     && gap <= DOUBLE_TAP_INTERVAL_MS
                     && mark.node == node_id
                     && within(
@@ -864,9 +890,10 @@ impl GestureEngine {
             // Wait for the 300ms window; a tick awards the tap by sweep.
             self.last_tap = Some(TapMark {
                 node: node_id,
-                x: event.local_x,
-                y: event.local_y,
+                x: event.global_x,
+                y: event.global_y,
                 t: down.t,
+                valid: true,
             });
             self.arena.hold();
             return None;

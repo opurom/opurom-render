@@ -98,10 +98,7 @@ fn short_event_loss_recovers_from_the_last_committed_position() {
     // still under touch slop, so no drag is fabricated from the gap.
     assert_eq!(e.dispatch(&ev(PointerKind::Move, 3, 67, 60, 60)), None);
     assert_eq!(e.dispatch(&ev(PointerKind::Up, 3, 84, 60, 60)), None);
-    assert_eq!(
-        e.on_tick(84 + DOUBLE_TAP_INTERVAL_MS),
-        Some(Gesture::Tap)
-    );
+    assert_eq!(e.on_tick(84 + DOUBLE_TAP_INTERVAL_MS), Some(Gesture::Tap));
 }
 
 #[test]
@@ -112,10 +109,7 @@ fn duplicate_and_compensating_moves_do_not_win_drag() {
     assert_eq!(e.dispatch(&ev(PointerKind::Move, 4, 1, 118, 100)), None);
     assert_eq!(e.dispatch(&ev(PointerKind::Move, 4, 2, 100, 100)), None);
     assert_eq!(e.dispatch(&ev(PointerKind::Up, 4, 3, 100, 100)), None);
-    assert_eq!(
-        e.on_tick(DOUBLE_TAP_INTERVAL_MS + 3),
-        Some(Gesture::Tap)
-    );
+    assert_eq!(e.on_tick(DOUBLE_TAP_INTERVAL_MS + 3), Some(Gesture::Tap));
 }
 
 #[test]

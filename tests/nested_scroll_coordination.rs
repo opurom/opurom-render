@@ -77,8 +77,14 @@ fn parent_child_competition_hands_off_at_the_inner_edge() {
         .iter()
         .map(|dt| inner.offset_px(START_MS + dt))
         .collect();
-    assert!(timeline.windows(2).all(|w| w[0] >= w[1]), "offset must decrease");
-    assert!(timeline.iter().all(|x| (0..=100).contains(x)), "inner extent is clamped");
+    assert!(
+        timeline.windows(2).all(|w| w[0] >= w[1]),
+        "offset must decrease"
+    );
+    assert!(
+        timeline.iter().all(|x| (0..=100).contains(x)),
+        "inner extent is clamped"
+    );
     // Flutter's nested coordinator uses outer range once the inner position
     // reaches an edge (`nested_scroll_view.dart:809-903`). The outer fling
     // starts only from the handed-off velocity sign.
@@ -104,7 +110,11 @@ fn notifications_bubble_child_to_parent_and_stop_when_consumed() {
     assert_eq!(all[0].event, ScrollEvent::Update { offset: 42 });
 
     let consumed = bubble(&chain, note, Some(Axis::Inner));
-    assert_eq!(consumed.len(), 1, "a consumed notification must not reach parent");
+    assert_eq!(
+        consumed.len(),
+        1,
+        "a consumed notification must not reach parent"
+    );
     assert_eq!(consumed[0].axis, Axis::Inner);
 }
 
@@ -142,9 +152,15 @@ fn overscroll_event_sequence_is_deterministic() {
     let driver = fling(20, 1600.0, 0, 100);
     let first = sequence(&driver);
     let second = sequence(&driver);
-    assert_eq!(first, second, "identical event streams must be byte-identical");
+    assert_eq!(
+        first, second,
+        "identical event streams must be byte-identical"
+    );
     assert_eq!(first.first().unwrap().event, ScrollEvent::Start);
-    assert!(matches!(first.last().unwrap().event, ScrollEvent::End { .. }));
+    assert!(matches!(
+        first.last().unwrap().event,
+        ScrollEvent::End { .. }
+    ));
     assert!(first.iter().all(|n| n.depth == 0));
 }
 

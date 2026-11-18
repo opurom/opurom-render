@@ -64,10 +64,7 @@ enum DragOutcome {
     Rejected,
 }
 
-fn delayed_drag(
-    start: (i64, i64),
-    move_before_deadline: Option<(i64, i64)>,
-) -> DragOutcome {
+fn delayed_drag(start: (i64, i64), move_before_deadline: Option<(i64, i64)>) -> DragOutcome {
     if let Some(point) = move_before_deadline {
         let dx = point.0 - start.0;
         let dy = point.1 - start.1;
