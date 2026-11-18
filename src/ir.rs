@@ -703,6 +703,10 @@ pub struct ThemeTokens {
     /// Optional brand tokens; reserved for callers that paint from them.
     pub primary: Option<Rgba>,
     pub secondary: Option<Rgba>,
+    /// Flutter `ColorScheme.shadow` (color_scheme.dart:1098-1099).
+    pub shadow: Option<Rgba>,
+    /// Flutter `ColorScheme.surfaceTint` (color_scheme.dart:1132-1133).
+    pub surface_tint: Option<Rgba>,
     pub font: Option<String>,
     pub contrast: Contrast,
 }
@@ -2058,7 +2062,21 @@ fn tokens(v: &Value) -> Result<ThemeTokens, IrError> {
             )));
         }
     };
+    let mut m3 = BTreeMap::new();
+    for (key, value) in o {
+        if let Some(role) = key.strip_prefix("md-sys-color-") {
+            if let Some(text) = value.as_str() {
+                if let Some(color) = Rgba::from_hex(text) {
+                    m3.insert(role.to_string(), color);
+                }
+            }
+        }
+    }
+    let shadow = color_prop(o, "shadow", "theme.tokens")?.or_else(|| m3.get("shadow").copied());
+    let surface_tint =
+        color_prop(o, "surfaceTint", "theme.tokens")?.or_else(|| m3.get("surface-tint").copied());
     Ok(ThemeTokens {
+        m3,
         surface: color_prop(o, "surface", "theme.tokens")?,
         on_surface: color_prop(o, "onSurface", "theme.tokens")?,
         stage: color_prop(o, "stage", "theme.tokens")?,
@@ -2068,6 +2086,8 @@ fn tokens(v: &Value) -> Result<ThemeTokens, IrError> {
         info: color_prop(o, "info", "theme.tokens")?,
         primary: color_prop(o, "primary", "theme.tokens")?,
         secondary: color_prop(o, "secondary", "theme.tokens")?,
+        shadow,
+        surface_tint,
         font: opt_string(o, "font", "theme.tokens")?,
         contrast,
     })

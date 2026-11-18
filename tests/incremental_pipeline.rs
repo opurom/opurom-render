@@ -401,3 +401,49 @@ fn key_diff_default_aligns_by_index_and_key_matches_across_positions() {
     assert_eq!(next[0].static_id, 1);
     assert_eq!(next[1].static_id, 2);
 }
+
+/// Flutter 3.50.0 `RenderObject.markNeedsLayout` stops propagation at a
+/// relayout boundary (`rendering/object.dart:2682-2700`), and `markNeedsPaint`
+/// stops at a repaint boundary (`:3344-3368`). The dirty marker itself stays
+/// on the boundary node, so the boundary still redraws while its parent and
+/// siblings do not. This pins the two boundaries independently: a layout
+/// boundary must not implicitly stop paint, and vice versa.
+#[test]
+fn layout_and_paint_boundaries_stop_independently() {
+    use std::collections::BTreeSet;
+
+    let ir = parse_ir(r##"{
+        "ir":"0.1.0","app":"B","state":[],
+        "tree":{"id":0,"kind":"Column","props":{},"children":[
+            {"id":1,"kind":"Container","props":{"relayoutBoundary":true},
+             "children":[{"id":2,"kind":"Text","props":{"value":"{x}"},"children":[],"events":{}}],"events":{}},
+            {"id":3,"kind":"Container","props":{"repaintBoundary":true},
+             "children":[{"id":4,"kind":"Text","props":{"value":"{y}"},"children":[],"events":{}}],"events":{}}
+        ],"events":{}},"theme":{"mode":"light","accent":"#097FEB","radius":0}
+    }"##).unwrap();
+    let mut changed = BTreeSet::new();
+    changed.insert("x".to_string());
+    let (layout, paint) = plan_dirty(&ir.tree, &changed);
+    // The relayout boundary consumes layout and paint because layout implies
+    // paint. Its parent (root) is still marked for paint: with no repaint
+    // boundary in that branch, Flutter propagates paint past the layout-only
+    // boundary.
+    assert!(layout.contains(&"1".to_string()));
+    assert!(!layout.contains(&"0".to_string()));
+    assert!(paint.contains(&"0".to_string()));
+    assert!(!paint.contains(&"3".to_string()));
+    assert!(!paint.contains(&"4".to_string()));
+
+    let mut changed = BTreeSet::new();
+    changed.insert("y".to_string());
+    let (layout, paint) = plan_dirty(&ir.tree, &changed);
+    // A repaint boundary stops paint at the boundary itself; the root is
+    // nevertheless painted because the repaint boundary's own layout change
+    // makes its parent repaint (Flutter: layout change implies markNeedsPaint,
+    // object.dart:2789). Layout itself still reaches the root because this
+    // branch has no relayout boundary.
+    assert!(paint.contains(&"3".to_string()));
+    assert!(paint.contains(&"0".to_string()));
+    assert!(layout.contains(&"0".to_string()));
+    assert!(!layout.contains(&"1".to_string()));
+}

@@ -431,7 +431,11 @@ pub fn plan_dirty(
         if paint_dirty {
             paint.push(format!("{}", node.id));
         }
-        // A boundary consumes the mark: it does not escape to the parent.
+        // Flutter 3.50.0 RenderObject: markNeedsLayout stops at a relayout
+        // boundary (rendering/object.dart:2682-2700) but markNeedsPaint stops
+        // independently at a repaint boundary (:3344-3368). A layout-only
+        // boundary must not swallow the paint mark; a paint-only boundary
+        // must not swallow the layout mark.
         let up_layout = layout_dirty && !node.props.relayout_boundary;
         let up_paint = paint_dirty && !node.props.repaint_boundary;
         (up_layout, up_paint)
