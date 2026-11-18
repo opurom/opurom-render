@@ -66,6 +66,12 @@ pub enum RectOpResult {
 /// Boolean combine of two rectangles under `op`. The overlap test uses the
 /// same right/bottom-exclusive boundary as `Rect::contains`.
 pub fn combine_rects(a: &Rect, b: &Rect, op: PathOperation) -> RectOpResult {
+    // A non-positive rectangle has no points. Flutter/Skia path ops on an
+    // empty geometry stay empty regardless of the boolean operator; without
+    // this guard `Difference` would return the degenerate input as a result.
+    if a.w <= 0 || a.h <= 0 || b.w <= 0 || b.h <= 0 {
+        return RectOpResult::Empty;
+    }
     let overlap = a.intersect(b);
     match op {
         PathOperation::Intersect => overlap.map_or(RectOpResult::Empty, RectOpResult::One),
@@ -218,6 +224,71 @@ mod tests {
         assert_eq!(
             combine_rects(&a, &top, PathOperation::ReverseDifference),
             combine_rects(&top, &a, PathOperation::Difference)
+        );
+    }
+}
+
+#[cfg(test)]
+mod extreme_rect_tests {
+    use super::{combine_rects, PathOperation, Rect, RectOpResult};
+
+    #[test]
+    fn zero_and_negative_rects_produce_no_geometry() {
+        let a = Rect {
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 10,
+        };
+        let b = Rect {
+            x: -5,
+            y: -5,
+            w: 10,
+            h: 10,
+        };
+        for op in [
+            PathOperation::Difference,
+            PathOperation::Intersect,
+            PathOperation::Union,
+            PathOperation::Xor,
+            PathOperation::ReverseDifference,
+        ] {
+            assert_eq!(combine_rects(&a, &b, op), RectOpResult::Empty, "{op:?}");
+            assert_eq!(combine_rects(&b, &a, op), RectOpResult::Empty, "{op:?}");
+        }
+        let neg = Rect {
+            x: 0,
+            y: 0,
+            w: -4,
+            h: -9,
+        };
+        assert_eq!(
+            combine_rects(&neg, &b, PathOperation::Union),
+            RectOpResult::Empty
+        );
+    }
+
+    #[test]
+    fn i64_extreme_coordinates_do_not_overflow_the_kernel() {
+        let a = Rect {
+            x: i64::MIN / 4,
+            y: i64::MIN / 4,
+            w: 100,
+            h: 100,
+        };
+        let b = Rect {
+            x: i64::MAX / 4,
+            y: i64::MAX / 4,
+            w: 100,
+            h: 100,
+        };
+        assert_eq!(
+            combine_rects(&a, &b, PathOperation::Intersect),
+            RectOpResult::Empty
+        );
+        assert_eq!(
+            combine_rects(&a, &b, PathOperation::Union),
+            RectOpResult::Empty
         );
     }
 }

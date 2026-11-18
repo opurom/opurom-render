@@ -551,3 +551,46 @@ mod stop_parity_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod extreme_parameter_tests {
+    use super::{
+        normalize_stops, sample_ramp, tile_position, validate_color_stop_lengths, TileMode,
+    };
+    use crate::Rgba;
+
+    #[test]
+    fn extreme_t_positions_fail_closed_in_every_tile_mode() {
+        // i64 extremes exercise rem_euclid/period maths without overflow.
+        assert_eq!(tile_position(i64::MIN, TileMode::Clamp), Some(0));
+        assert_eq!(tile_position(i64::MAX, TileMode::Clamp), Some(1024));
+        for mode in [TileMode::Repeat, TileMode::Mirror] {
+            let t = tile_position(i64::MIN, mode).unwrap();
+            assert!((0..=1024).contains(&t), "mode {mode:?}: {t}");
+            let t = tile_position(i64::MAX, mode).unwrap();
+            assert!((0..=1024).contains(&t), "mode {mode:?}: {t}");
+        }
+        assert_eq!(tile_position(i64::MIN, TileMode::Decal), None);
+    }
+
+    #[test]
+    fn extreme_stops_are_clamped_and_monotone_without_panics() {
+        let stops = vec![i64::MIN, 0, i64::MAX, -1, 1025];
+        let out = normalize_stops(&stops);
+        assert_eq!(out, vec![0, 0, 1024, 1024, 1024]);
+        let colors = vec![Rgba::rgb(1, 2, 3); out.len()];
+        assert!(sample_ramp(&out, &colors, i64::MIN, TileMode::Clamp).is_some());
+        assert!(sample_ramp(&out, &colors, i64::MAX, TileMode::Repeat).is_some());
+    }
+
+    #[test]
+    fn oversized_color_stop_arrays_obey_the_flutter_length_contract() {
+        let colors = vec![Rgba::rgb(1, 2, 3); 4097];
+        let stops = vec![0i64; 4096];
+        assert!(validate_color_stop_lengths(colors.len(), Some(stops.len())).is_err());
+        assert!(sample_ramp(&stops, &colors, 512, TileMode::Clamp).is_none());
+        let mut matched = stops;
+        matched.push(1024);
+        assert!(sample_ramp(&matched, &colors, 512, TileMode::Clamp).is_some());
+    }
+}
