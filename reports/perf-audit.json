@@ -32,7 +32,10 @@
       "detail": "commands are appended per draw call during capture; no coalescing of adjacent same-colour rects, no per-node deduplication; MAX_COMMANDS=1_000_000 (src/display.rs:13)"
     },
     "layer_cache": {
-      "files": ["src/layer.rs", "src/incremental.rs"],
+      "files": [
+        "src/layer.rs",
+        "src/incremental.rs"
+      ],
       "detail": "retained-layer dirty rules and StaticLayerIdentity exist as pure kernels (src/layer.rs:15-63,170-190) but are not yet wired into the frame loop; LayoutCache memoizes layout (src/incremental.rs:273-396)"
     }
   },
@@ -79,7 +82,14 @@
       "title": "static subtrees redraw when any sibling changes",
       "evidence": "src/lib.rs:793-801 redraws every node intersecting the union region; there is no per-repaint-boundary layer reuse, and src/layer.rs kernels are not connected.",
       "risk": "a large changed region forces a full redraw of static content inside it.",
-      "recommendation": "Wire StaticLayerIdentity into the incremental path: nodes whose subtree hash is unchanged and whose rect is inside the region can copy from a cached layer instead of re-rastering. Requires an architecture note (cross-frame pixel cache) before implementation."
+      "recommendation": "Wire StaticLayerIdentity into the incremental path: nodes whose subtree hash is unchanged and whose rect is inside the region can copy from a cached layer instead of re-rastering. Requires an architecture note (cross-frame pixel cache) before implementation.",
+      "status": "architecture note landed: reports/static-layer-reuse-architecture.md; no frame-loop wiring, default pixel path unchanged",
+      "architecture_note": "reports/static-layer-reuse-architecture.md",
+      "opt_in_conditions": [
+        "StaticLayerIdentity::can_reuse requires clean dirty state, identical subtree hash, and both frames static",
+        "cached copy is a full RGBA rect copy from the completed previous framebuffer, never a retained engine layer",
+        "effect-bearing nodes and any node crossing a repaint boundary remain excluded until parity evidence exists"
+      ]
     },
     {
       "id": "PERF-004",
@@ -99,5 +109,6 @@
     "grep -n 'fn changed_region' src/lib.rs",
     "grep -n 'fn diff_strided' src/lib.rs"
   ],
-  "next_action": "P2 performance: implement PERF-001 (vectorized row diff) first as the smallest measurable win; PERF-002/003 need opt-in flags and architecture notes; PERF-004 needs pixel-parity evidence against the full path."
+  "next_action": "P2 performance: implement PERF-001 (vectorized row diff) first as the smallest measurable win; PERF-002/003 need opt-in flags and architecture notes; PERF-004 needs pixel-parity evidence against the full path.",
+  "updated_at_utc": "2026-11-18"
 }
