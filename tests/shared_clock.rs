@@ -3,7 +3,7 @@
 //! Default paths keep every pinned golden byte-for-byte.
 
 use opurom_render::{
-    digest_hex, layout_animated_at, parse_ir, AnimSpec, AnimTable, Curve, Renderer, StateView, ONE,
+    digest_hex, layout_animated_at, parse_ir, AnimSpec, AnimTable, Curve, StateView, ONE,
 };
 use serde_json::json;
 

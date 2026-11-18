@@ -8,7 +8,7 @@ fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     renderer
 }
 
-use opurom_render::{parse_ir, Renderer, StateValue, StateView, SETTLED_MS};
+use opurom_render::{parse_ir, StateValue, StateView, SETTLED_MS};
 
 const IR: &str = r##"{
   "ir": "0.1.0", "app": "IncrementalProof",

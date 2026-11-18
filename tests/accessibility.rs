@@ -2,8 +2,8 @@
 //! the data-only accessibility tree (pre-order roles, labels, bounds, hidden).
 
 use opurom_render::{
-    a11y_json, a11y_tree, digest_hex, layout, parse_ir, Contrast, Ir, LaidOut, Renderer, Rgba,
-    Role, StateValue, StateView,
+    a11y_json, a11y_tree, digest_hex, layout, parse_ir, Contrast, Ir, LaidOut, Rgba, Role,
+    StateValue, StateView,
 };
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command};

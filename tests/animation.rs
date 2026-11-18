@@ -4,7 +4,7 @@
 
 use opurom_render::{
     choose_quality, digest_hex, parse_ir, Animator, Frame, FrameRate, GestureAnim, ParticleSystem,
-    Quality, Renderer, StateValue, StateView, Transition, TransitionKind, ONE, PARTICLE_FIELD,
+    Quality, StateValue, StateView, Transition, TransitionKind, ONE, PARTICLE_FIELD,
     PARTICLE_MAX_LIFE, TRANSITION_MS,
 };
 use std::{fs, path::PathBuf, process::Command};

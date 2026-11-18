@@ -2,7 +2,7 @@
 //! and the single-page backward-compatibility guard.
 
 use opurom_render::{
-    digest_hex, parse_ir, Navigator, Op, Renderer, StateView, TransitionKind, ONE, TRANSITION_MS,
+    digest_hex, parse_ir, Navigator, Op, StateView, TransitionKind, ONE, TRANSITION_MS,
 };
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

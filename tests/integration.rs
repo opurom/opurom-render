@@ -1,6 +1,5 @@
 use opurom_render::{
-    digest_hex, layout, parse_ir, Breakpoint, Direction, Ir, LaidOut, Renderer, Rgba, StateValue,
-    StateView,
+    digest_hex, layout, parse_ir, Breakpoint, Direction, Ir, LaidOut, Rgba, StateValue, StateView,
 };
 use std::{fs, process::Command};
 

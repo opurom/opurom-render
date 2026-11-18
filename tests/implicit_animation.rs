@@ -8,7 +8,7 @@
 
 use opurom_render::{
     animate_progress, layout_animated_at, layout_at, lerp, lerp_rgba, parse_ir, AnimSpec,
-    AnimTable, AnimValue, Curve, Renderer, Rgba, StateView, ONE, SETTLED_MS,
+    AnimTable, AnimValue, Curve, Rgba, StateView, ONE, SETTLED_MS,
 };
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

@@ -3,8 +3,8 @@
 
 use opurom_render::image::{self, ImageFit};
 use opurom_render::{
-    digest_hex, font, layout, parse_ir, Align, Ir, Kind, LaidOut, Rect, Renderer, StateValue,
-    StateView, CACHE_CAPACITY,
+    digest_hex, font, layout, parse_ir, Align, Ir, Kind, LaidOut, Rect, StateValue, StateView,
+    CACHE_CAPACITY,
 };
 use serde_json::{json, Map, Value};
 use std::fs;

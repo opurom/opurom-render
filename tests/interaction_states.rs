@@ -1,8 +1,8 @@
 //! Eight-state matrix, variant/tone matrix, CLI override and golden regressions.
 
 use opurom_render::{
-    digest_hex, layout, parse_ir, Node, NodeState, Renderer, StateValue, StateView, CYAN,
-    FOCUS_RING, PRIMARY, SUCCESS,
+    digest_hex, layout, parse_ir, Node, NodeState, StateValue, StateView, CYAN, FOCUS_RING,
+    PRIMARY, SUCCESS,
 };
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;

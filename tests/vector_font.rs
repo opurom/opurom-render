@@ -3,7 +3,7 @@
 //! many coverage levels, and the block-font path (scale 1..=3) keeps the three
 //! pinned golden frames byte-identical.
 
-use opurom_render::{digest_hex, font, layout, parse_ir, Renderer, StateValue, StateView};
+use opurom_render::{digest_hex, font, layout, parse_ir, StateValue, StateView};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

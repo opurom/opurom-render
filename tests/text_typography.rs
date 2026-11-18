@@ -4,7 +4,7 @@
 //! frame goldens keep their exact bytes.
 
 use opurom_render::{
-    digest_hex, layout, parse_ir, text_spans, text_spans_for, text_spans_json, Renderer, StateView,
+    digest_hex, layout, parse_ir, text_spans, text_spans_for, text_spans_json, StateView,
 };
 use serde_json::json;
 

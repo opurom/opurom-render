@@ -7,7 +7,7 @@
 
 use opurom_render::a11y::{a11y_tree, role_of};
 use opurom_render::primitives::{self, CONTRACTS, COUNT};
-use opurom_render::{digest_hex, parse_ir, svg, Kind, Renderer, Role, StateView};
+use opurom_render::{digest_hex, parse_ir, svg, Kind, Role, StateView};
 use std::collections::HashSet;
 use std::{fs, path::PathBuf, process::Command};
 

@@ -3,7 +3,7 @@
 //! a cached miss instead of a render error.
 
 use opurom_render::image::{self, ImageFit};
-use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, parse_ir, StateView};
 use std::sync::Mutex;
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

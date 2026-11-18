@@ -8,8 +8,8 @@
 //! frames stay byte-identical.
 
 use opurom_render::{
-    digest_hex, font, layout, parse_ir, svg_at, FontMetrics, Kind, LaidOut, Renderer, StateValue,
-    StateView, SETTLED_MS,
+    digest_hex, font, layout, parse_ir, svg_at, FontMetrics, Kind, LaidOut, StateValue, StateView,
+    SETTLED_MS,
 };
 use serde_json::json;
 

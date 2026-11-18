@@ -1,7 +1,7 @@
 //! Opt-in grid columnSpan: a cell spans N columns and consumes N cells.
 //! Spec: opurom-spec/IR_SCHEMA.md and LANG_SPEC.md ("columnSpan").
 
-use opurom_render::{digest_hex, layout, parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, layout, parse_ir, StateView};
 use serde_json::json;
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

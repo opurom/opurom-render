@@ -2,7 +2,7 @@
 //! software framebuffer refracts the backdrop and the display list carries the
 //! matching GPU effect commands. IR that declares no glass stays unchanged.
 
-use opurom_render::{digest_hex, parse_ir, Command, Renderer, Rgba, StateView, ThemeMode};
+use opurom_render::{digest_hex, parse_ir, Command, Rgba, StateView, ThemeMode};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

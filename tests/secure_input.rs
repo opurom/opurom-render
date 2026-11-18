@@ -2,9 +2,7 @@
 //! glyph (U+002A `*`) per Unicode scalar of the bound value, never the raw
 //! characters. `secure` absent leaves rendering byte-identical.
 
-use opurom_render::{
-    digest_hex, font, layout, measure, parse_ir, FontMetrics, Renderer, StateView,
-};
+use opurom_render::{digest_hex, font, layout, measure, parse_ir, FontMetrics, StateView};
 use serde_json::json;
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

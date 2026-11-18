@@ -1,7 +1,7 @@
 //! GPU effect-command export: all five effect types, integer parameters, draw
 //! order, bounds, effect-free invariance and the committed proof fixture.
 
-use opurom_render::{digest_hex, parse_ir, DisplayList, Renderer, Rgba, StateView};
+use opurom_render::{digest_hex, parse_ir, DisplayList, Rgba, StateView};
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command};
 

@@ -2,8 +2,8 @@
 //! default-palette fallback. All assertions are integer-only and deterministic.
 
 use opurom_render::{
-    digest_hex, layout, parse_ir, Contrast, Palette, Renderer, Rgba, StateView, ThemeTokens, Tone,
-    ERROR, INFO, SUCCESS, WARNING,
+    digest_hex, layout, parse_ir, Contrast, Palette, Rgba, StateView, ThemeTokens, Tone, ERROR,
+    INFO, SUCCESS, WARNING,
 };
 use serde_json::json;
 

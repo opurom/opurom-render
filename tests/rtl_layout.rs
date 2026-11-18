@@ -147,7 +147,7 @@ fn grid_reverses_columns_only_compact_and_one_column_unchanged() {
 
 #[test]
 fn no_bidi_glyph_run_is_byte_identical_between_ltr_and_rtl() {
-    use opurom_render::{digest_hex, Renderer};
+    use opurom_render::digest_hex;
     // Center alignment removes placement differences: the glyph run itself
     // must be identical, since v1 has no bidi/glyph reordering.
     let text = json!({
@@ -196,7 +196,7 @@ fn compact_row_stacks_vertically_unchanged_under_rtl() {
 
 #[test]
 fn default_path_bytes_and_all_pinned_goldens_stay_identical() {
-    use opurom_render::{digest_hex, Renderer};
+    use opurom_render::digest_hex;
     use std::{fs, path::PathBuf, process::Command};
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let counter = fs::read_to_string("../opurom-examples/golden/counter.opuir.json").unwrap();

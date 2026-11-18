@@ -1,6 +1,6 @@
 //! Global `theme.fontScale` is the default for nodes without a local prop.
 
-use opurom_render::{a11y_tree, layout, parse_ir, Renderer, StateView};
+use opurom_render::{a11y_tree, layout, parse_ir, StateView};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

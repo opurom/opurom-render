@@ -9,7 +9,7 @@ fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     renderer
 }
 
-use opurom_render::{digest_hex, parse_ir, Kind, Renderer, StateView};
+use opurom_render::{digest_hex, parse_ir, Kind, StateView};
 
 const IR: &str = r##"{
   "ir": "0.1.0", "app": "CompactText",

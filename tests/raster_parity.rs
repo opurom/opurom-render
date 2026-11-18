@@ -7,7 +7,7 @@
 //! byte-deterministic across two runs, and `measure` must place the
 //! proportional run strictly left of the fixed one.
 
-use opurom_render::{digest_hex, measure, parse_ir, FontMetrics, Renderer, StateView};
+use opurom_render::{digest_hex, measure, parse_ir, FontMetrics, StateView};
 use serde_json::json;
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

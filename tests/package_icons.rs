@@ -3,7 +3,7 @@
 //! the name is not in the table. These tests pin that priority and the
 //! deterministic output.
 
-use opurom_render::{parse_ir, Renderer, StateView};
+use opurom_render::{parse_ir, StateView};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

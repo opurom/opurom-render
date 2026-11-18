@@ -2,9 +2,7 @@
 //! opt-in `theme.verticalMetrics`, `Text.props.lineHeight` and `baselineKind`.
 //! Absent keys keep byte-identical geometry, span JSON and goldens.
 
-use opurom_render::{
-    digest, digest_hex, layout, parse_ir, text_spans, text_spans_for, Renderer, StateView,
-};
+use opurom_render::{digest, digest_hex, layout, parse_ir, text_spans, text_spans_for, StateView};
 use serde_json::json;
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

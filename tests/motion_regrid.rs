@@ -3,7 +3,7 @@
 //! framebuffer when the effective clip's y-range was empty). Mirrors the mobile
 //! `frame_at` baseline that caught the regression.
 
-use opurom_render::{digest_hex, parse_ir, Renderer, StateView, SETTLED_MS};
+use opurom_render::{digest_hex, parse_ir, StateView, SETTLED_MS};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

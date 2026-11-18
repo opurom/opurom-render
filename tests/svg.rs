@@ -3,8 +3,8 @@
 //! a11y roles, 32 primitives, and unchanged 0.1.0 golden digests).
 
 use opurom_render::{
-    a11y::role_of, a11y_tree, digest_hex, layout, parse_ir, svg, svg_at, Control, Kind, Renderer,
-    Role, StateValue, StateView, SETTLED_MS,
+    a11y::role_of, a11y_tree, digest_hex, layout, parse_ir, svg, svg_at, Control, Kind, Role,
+    StateValue, StateView, SETTLED_MS,
 };
 use std::{fs, path::PathBuf, process::Command};
 

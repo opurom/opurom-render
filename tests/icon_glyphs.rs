@@ -3,7 +3,7 @@
 //! large node scales, an unknown name falls back to a visible neutral glyph,
 //! and the three pinned golden frames stay byte-identical.
 
-use opurom_render::{digest_hex, icons, layout, parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, icons, layout, parse_ir, StateView};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

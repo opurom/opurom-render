@@ -7,7 +7,7 @@
 
 use opurom_render::{
     apply_policy, digest_hex, parse_ir, FrameBudget, FrameRate, QualityProfile, RenderConfig,
-    Renderer, StateView, WINDOW_FRAMES,
+    StateView, WINDOW_FRAMES,
 };
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};

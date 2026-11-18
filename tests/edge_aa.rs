@@ -2,7 +2,7 @@
 //! frames, so the flag must leave it byte-identical while producing partial
 //! coverage on rounded corners, discs and rings.
 
-use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, parse_ir, StateView};
 use std::{fs, path::PathBuf, process::Command};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

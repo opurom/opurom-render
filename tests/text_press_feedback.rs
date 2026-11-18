@@ -3,7 +3,7 @@
 //! tappable Text with no Button ancestor stays byte-identical under press,
 //! including when bitmap text is suppressed for the system-font overlay.
 
-use opurom_render::{digest_hex, parse_ir, PressPhase, Renderer, StateView};
+use opurom_render::{digest_hex, parse_ir, PressPhase, StateView};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

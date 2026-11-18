@@ -3,8 +3,7 @@
 //! integer-only and deterministic. Default path keeps all pinned goldens.
 
 use opurom_render::{
-    animate_progress, default_duration_ms, digest_hex, layout, parse_ir, Curve, Renderer,
-    StateView, ONE,
+    animate_progress, default_duration_ms, digest_hex, layout, parse_ir, Curve, StateView, ONE,
 };
 use serde_json::json;
 use std::fs;

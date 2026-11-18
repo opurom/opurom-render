@@ -1,8 +1,6 @@
 //! Tests for the inverted conditional visibility node field.
 
-use opurom_render::{
-    a11y_tree, digest_hex, layout, parse_ir, svg, Ir, Renderer, StateValue, StateView,
-};
+use opurom_render::{a11y_tree, digest_hex, layout, parse_ir, svg, Ir, StateValue, StateView};
 use std::process::Command;
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

@@ -3,7 +3,7 @@
 //! call sequence must produce byte-identical frames, and a display-list query
 //! must not mutate that state.
 
-use opurom_render::{digest_hex, parse_ir, PressPhase, Renderer, StateView, SETTLED_MS};
+use opurom_render::{digest_hex, parse_ir, PressPhase, StateView, SETTLED_MS};
 use serde_json::json;
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {

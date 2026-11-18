@@ -2,7 +2,7 @@
 //! into lines that stay inside its node, overflowing lines are clipped, short
 //! labels and the pinned golden frames are untouched.
 
-use opurom_render::{digest_hex, font, layout, parse_ir, Renderer, StateValue, StateView};
+use opurom_render::{digest_hex, font, layout, parse_ir, StateValue, StateView};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

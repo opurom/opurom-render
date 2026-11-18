@@ -1,7 +1,7 @@
 //! Correctness gate: the incremental press-ripple path must be byte-identical
 //! to the full raster path, and clearing a press must leave no residue.
 
-use opurom_render::{digest_hex, Node, PressPhase, Renderer, StateView};
+use opurom_render::{digest_hex, Node, PressPhase, StateView};
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
     let mut renderer = opurom_render::Renderer::new(width, height);

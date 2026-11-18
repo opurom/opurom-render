@@ -4,7 +4,7 @@
 //! bounded sequence of distinct ticks produces distinct frames and distinct
 //! display lists. Everything is integer-only and tick-driven: no wall clock.
 
-use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, parse_ir, StateView};
 use std::fs;
 
 fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
