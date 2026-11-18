@@ -41,6 +41,7 @@ const TESTS = [
   'multi_pointer_fields.rs',
   'multi_pointer_parity.rs',
   'multidrag_strategy.rs',
+  'pointer_signal_resolver.rs',
   'nested_scroll_coordinator.rs',
   'nested_scroll_coordination.rs',
   'parallel_pointer_arenas.rs',
