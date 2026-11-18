@@ -94,6 +94,15 @@ function evaluate(dir) {
   record('source_pin', sourceOk ? 'PASS' : 'FAIL', `source=${SOURCE}`);
   const joint = readJson(dir, 'joint.json', true);
   if (!joint) return { status: 'FAIL', checks, schemas };
+  record('joint_verdict_consistent',
+    Array.isArray(joint.results)
+      && joint.results.length > 0
+      && joint.results.every((item) => {
+        if (item.verdict === 'PASS' || item.verdict === 'N/A') return true;
+        return item.check === 'baseline_comparability' && item.verdict === 'N/A';
+      })
+    ? 'PASS' : 'FAIL',
+    `results=${Array.isArray(joint.results) ? joint.results.length : 0}`);
   const jointCheckNames = new Set(
     (joint.results ?? [])
       .filter((item) => typeof item.check === 'string' && item.check.endsWith('_gate_status'))

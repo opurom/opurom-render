@@ -11,7 +11,8 @@
 //   3. gesture-evidence-archive.mjs --out --joint        -> SHA-256 archive
 //   4. gesture-evidence-archive.mjs --verify              -> manifest check
 //   5. gesture-fairness-perf-gate.mjs --baseline --raw    -> replayed verdict
-//   6. injected tamper / missing evidence                 -> expected FAIL
+//   6. gesture-schema-consistency.mjs --archive           -> schema/source parity
+//   7. injected tamper / missing / verdict drift          -> expected FAIL
 //
 // Additive only: it never edits shared CI, IR, ABI or renderer sources.
 import { spawnSync } from 'node:child_process';
@@ -31,6 +32,7 @@ import { dirname, join, resolve } from 'node:path';
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const JOINT_GATE = join(ROOT, 'gesture-gate', 'gesture-fairness-perf-gate.mjs');
 const ARCHIVER = join(ROOT, 'gesture-gate', 'gesture-evidence-archive.mjs');
+const CONSISTENCY = join(ROOT, 'gesture-gate', 'gesture-schema-consistency.mjs');
 const E2E_SCHEMA = 'opurom.gesture.e2e/1';
 const SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 const ARCHIVE_FILES = [
@@ -254,6 +256,27 @@ function runRegression(archiveDir) {
   record('missing_detected',
     missingResult.code === 1 && missingResult.json?.status === 'FAIL' ? 'PASS' : 'FAIL',
     missingResult.json?.detail ?? describeFailure(missingResult));
+
+  // Cross-document schema and source parity over the archived evidence.
+  const consistency = runNode(CONSISTENCY, ['--archive', archiveDir], 'schema consistency');
+  record('schema_consistency',
+    consistency.code === 0 && consistency.json?.status === 'PASS' ? 'PASS' : 'FAIL',
+    consistency.json?.detail ?? describeFailure(consistency));
+
+  // Injected verdict drift: a modified joint result must be rejected by the
+  // consistency gate, closing the blind spot of single-file hash tampering.
+  const driftDir = copyTree(archiveDir, join(workspace, 'archive-verdict-drift'));
+  const driftPath = join(driftDir, 'joint.json');
+  const drift = JSON.parse(readFileSync(driftPath, 'utf8'));
+  drift.results = drift.results.map((item) =>
+    item.check === 'perf_gate_status' ? { ...item, verdict: 'FAIL' } : item);
+  writeFileSync(driftPath, `${JSON.stringify(drift, null, 2)}\n`);
+  const driftResult = runNode(CONSISTENCY, ['--archive', driftDir], 'verdict drift');
+  record('verdict_drift_detected',
+    driftResult.code === 1
+      && driftResult.json?.status === 'FAIL'
+      ? 'PASS' : 'FAIL',
+    driftResult.json?.detail ?? describeFailure(driftResult));
 
   rmSync(workspace, { recursive: true, force: true });
   const failed = checks.some((item) => item.verdict === 'FAIL');

@@ -20,6 +20,8 @@ Flutter 3.50.0 source pin: `ab2912035e160d9cad6306df307576da6128ebdb`.
   check in the joint verdict.
 - `replay_projection_complete`: every gate evidence source has a `<name>_order`
   projection in `replay.json`.
+- `joint_verdict_consistent`: every joint check carries a terminal verdict of
+  `PASS` or `N/A`; a forced `FAIL` is a drift signal.
 
 The verdict is `opurom.gesture.consistency/1` JSON. `PASS` exits `0`, `FAIL`
 exits `1`, usage or IO errors exit `2`.

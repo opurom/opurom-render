@@ -54,6 +54,8 @@ The report is `opurom.gesture.e2e/1` JSON on stdout.
 | `nested_evidence_stable` | the archived nested scroll metrics match the joint verdict |
 | `parallel_evidence_stable` | the archived parallel pointer metrics match the joint verdict |
 | `advanced_evidence_stable` | the archived rotation and drag-start metrics match the joint verdict |
+| `schema_consistency` | all archived schemas, sources and projections align |
+| `verdict_drift_detected` | a tampered joint verdict is rejected by the consistency gate |
 | `replay_verdict_stable` | the replayed verdict equals the archived verdict |
 | `archive_deterministic` | two archives share one manifest hash |
 | `tamper_detected` | a modified archive is rejected |
