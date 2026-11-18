@@ -45,6 +45,18 @@ fn shl16(v: i64) -> i64 {
     v.saturating_mul(ONE)
 }
 
+/// Multiply a 16.16 fixed coefficient by a pixel radius. The product stays
+/// 16.16 fixed with no shift; i128 prevents wrap at extreme radii.
+fn mul_fp_px(v: i64, scalar: i64) -> i64 {
+    ((v as i128).saturating_mul(scalar as i128)).clamp(i64::MIN as i128, i64::MAX as i128) as i64
+}
+
+/// Multiply a 32.16 coefficient by a scalar and reduce to 16.16 fixed.
+fn scale_fixed(v: i64, scalar: i64) -> i64 {
+    (((v as i128).saturating_mul(scalar as i128)) >> 16).clamp(i64::MIN as i128, i64::MAX as i128)
+        as i64
+}
+
 /// Fail-closed bound for a row span. A surface row is at most
 /// `MAX_DIMENSION` (4096) pixels; anything larger is corrupt fixed-point
 /// input, so drop the strip instead of allocating or looping past the mask.
@@ -600,8 +612,8 @@ pub fn conic_quad_pow2(radius: i64, tol_num: i64, tol_den: i64) -> u32 {
 pub fn round_rect_path(x: i64, y: i64, w: i64, h: i64, radius: i64) -> Vec<Segment> {
     let r = radius.max(0).min(w / 2).min(h / 2);
     if r <= 0 {
-        let (x1, y1) = (x + w, y + h);
-        let f = |v: i64| v << 16;
+        let (x1, y1) = (x.saturating_add(w), y.saturating_add(h));
+        let f = shl16;
         return vec![
             Segment {
                 x0: f(x),
@@ -637,50 +649,65 @@ pub fn round_rect_path(x: i64, y: i64, w: i64, h: i64, radius: i64) -> Vec<Segme
     // (mx/my sign mapping kept explicit per corner below.)
     // Top-left: (cx - r*c, cy - r*s), left -> top.
     {
-        let (cx, cy) = (x + r, y + r);
+        let (cx, cy) = (x.saturating_add(r), y.saturating_add(r));
         for i in 0..=n {
             let u = i as i128 * ONE as i128 / n as i128;
             let u2 = u * u / ONE as i128;
             let den = ONE as i128 + u2;
             let c = ((ONE as i128 - u2) << 16) / den;
             let s = (2 * u << 16) / den;
-            pts.push((cx * ONE - (c as i64 * r), cy * ONE - (s as i64 * r)));
+            pts.push((
+                shl16(cx).saturating_sub(mul_fp_px(c as i64, r)),
+                shl16(cy).saturating_sub(mul_fp_px(s as i64, r)),
+            ));
         }
     }
     // Top-right: (cx + s, cy - c), top -> right.
     {
-        let (cx, cy) = (x + w - r, y + r);
+        let (cx, cy) = (x.saturating_add(w).saturating_sub(r), y.saturating_add(r));
         for i in 0..=n {
             let u = i as i128 * ONE as i128 / n as i128;
             let u2 = u * u / ONE as i128;
             let den = ONE as i128 + u2;
             let c = ((ONE as i128 - u2) << 16) / den;
             let s = (2 * u << 16) / den;
-            pts.push((cx * ONE + (s as i64 * r), cy * ONE - (c as i64 * r)));
+            pts.push((
+                shl16(cx).saturating_add(mul_fp_px(s as i64, r)),
+                shl16(cy).saturating_sub(mul_fp_px(c as i64, r)),
+            ));
         }
     }
     // Bottom-right: (cx + c, cy + s), right -> bottom.
     {
-        let (cx, cy) = (x + w - r, y + h - r);
+        let (cx, cy) = (
+            x.saturating_add(w).saturating_sub(r),
+            y.saturating_add(h).saturating_sub(r),
+        );
         for i in 0..=n {
             let u = i as i128 * ONE as i128 / n as i128;
             let u2 = u * u / ONE as i128;
             let den = ONE as i128 + u2;
             let c = ((ONE as i128 - u2) << 16) / den;
             let s = (2 * u << 16) / den;
-            pts.push((cx * ONE + (c as i64 * r), cy * ONE + (s as i64 * r)));
+            pts.push((
+                shl16(cx).saturating_add(mul_fp_px(c as i64, r)),
+                shl16(cy).saturating_add(mul_fp_px(s as i64, r)),
+            ));
         }
     }
     // Bottom-left: (cx - s, cy + c), bottom -> left.
     {
-        let (cx, cy) = (x + r, y + h - r);
+        let (cx, cy) = (x.saturating_add(r), y.saturating_add(h).saturating_sub(r));
         for i in 0..=n {
             let u = i as i128 * ONE as i128 / n as i128;
             let u2 = u * u / ONE as i128;
             let den = ONE as i128 + u2;
             let c = ((ONE as i128 - u2) << 16) / den;
             let s = (2 * u << 16) / den;
-            pts.push((cx * ONE - (s as i64 * r), cy * ONE + (c as i64 * r)));
+            pts.push((
+                shl16(cx).saturating_sub(mul_fp_px(s as i64, r)),
+                shl16(cy).saturating_add(mul_fp_px(c as i64, r)),
+            ));
         }
     }
     let mut segs: Vec<Segment> = Vec::with_capacity(pts.len());
@@ -709,12 +736,21 @@ fn push_arc(pts: &mut Vec<(i64, i64)>, cx: i64, cy: i64, rx: i64, ry: i64, corne
         let c = ((ONE as i128 - u2) << 16) / den;
         let s = (2 * u << 16) / den;
         let (dx, dy) = match corner {
-            0 => (-(c as i64 * rx), -(s as i64 * ry)), // TL: (1,0)->(0,1)
-            1 => ((s as i64 * rx), -(c as i64 * ry)),  // TR
-            2 => ((c as i64 * rx), (s as i64 * ry)),   // BR
-            _ => (-(s as i64 * rx), (c as i64 * ry)),  // BL
+            0 => (
+                mul_fp_px(c as i64, rx).saturating_neg(),
+                mul_fp_px(s as i64, ry).saturating_neg(),
+            ), // TL: (1,0)->(0,1)
+            1 => (
+                mul_fp_px(s as i64, rx),
+                mul_fp_px(c as i64, ry).saturating_neg(),
+            ), // TR
+            2 => (mul_fp_px(c as i64, rx), mul_fp_px(s as i64, ry)), // BR
+            _ => (
+                mul_fp_px(s as i64, rx).saturating_neg(),
+                mul_fp_px(c as i64, ry),
+            ), // BL
         };
-        pts.push((cx * ONE + dx, cy * ONE + dy));
+        pts.push((shl16(cx).saturating_add(dx), shl16(cy).saturating_add(dy)));
     }
 }
 
@@ -725,7 +761,10 @@ pub const CONIC_WEIGHT: i64 = 46_341;
 pub type Quad = [(i64, i64); 3];
 
 /// Chop a rational conic into `2^pow2` quadratic curves, mirroring Skia's
-/// `SkConic::chop` (`SkGeometry.cpp:1430-1462`).
+/// `SkConic::chop` (`SkGeometry.cpp:1430-1462`, pinned Skia revision
+/// `0e5d8d1be81b22f5529a41cf4810dd89b63527ba`; Impeller's matching subdivision
+/// bound is `wangs_formula.cc:14,45-77`). The cap and degenerate-weight guard
+/// below are the integer-kernel equivalent of those source contracts.
 ///
 /// Skia works in floats; the weighted-point formula is reproduced here in
 /// 16.16 with i128 intermediates. The middle control point halves each outer
@@ -733,9 +772,18 @@ pub type Quad = [(i64, i64); 3];
 /// an arithmetic right shift would floor a negative half and bias the corner
 /// by one LSB.
 pub fn chop_conic(p: Quad, weight: i64, pow2: u32) -> Vec<Quad> {
+    // Skia's `kMaxConicToQuadPOW2` caps adaptive conic subdivision at 5.
+    // Reject a larger caller value instead of allocating an exponential quad
+    // vector (fail closed and deterministic).
+    let pow2 = pow2.min(5);
     let mut quads = vec![p];
     let mut w = weight;
     for _ in 0..pow2 {
+        // `ONE + w == 0` at the degenerate weight -ONE; keep the original
+        // conic rather than dividing by zero (SkGeometry.cpp:1430-1462).
+        if w == -ONE {
+            return quads;
+        }
         let scale = ONE as i128 * ONE as i128 / (ONE as i128 + w as i128);
         let ws = (w as i128 * scale) >> 16;
         let mut next = Vec::with_capacity(quads.len() * 2);
@@ -754,7 +802,7 @@ pub fn chop_conic(p: Quad, weight: i64, pow2: u32) -> Vec<Quad> {
             next.push([p2, p3, q[2]]);
         }
         // The sub-conic weight is sqrt(0.5 + w/2).
-        let half = (ONE as i128 * ONE as i128 / 2 + w as i128 * ONE as i128 / 2) as i128;
+        let half = (ONE as i128 * ONE as i128 / 2 + w as i128 * ONE as i128 / 2).max(0);
         w = (isqrt(half << 32) >> 16) as i64;
         quads = next;
     }
@@ -809,15 +857,30 @@ pub fn round_rect_path_radii(x: i64, y: i64, w: i64, h: i64, radii: RoundingRadi
     let mut pts: Vec<(i64, i64)> = Vec::new();
     let mut vertex = |cx: i64, cy: i64, r: CornerRadii, corner: usize| {
         if r.x <= 0 || r.y <= 0 {
-            pts.push((cx << 16, cy << 16));
+            pts.push((shl16(cx), shl16(cy)));
         } else {
             push_arc(&mut pts, cx, cy, r.x, r.y, corner);
         }
     };
-    vertex(x + tl.x, y + tl.y, tl, 0);
-    vertex(x + w - tr.x, y + tr.y, tr, 1);
-    vertex(x + w - br.x, y + h - br.y, br, 2);
-    vertex(x + bl.x, y + h - bl.y, bl, 3);
+    vertex(x.saturating_add(tl.x), y.saturating_add(tl.y), tl, 0);
+    vertex(
+        x.saturating_add(w).saturating_sub(tr.x),
+        y.saturating_add(tr.y),
+        tr,
+        1,
+    );
+    vertex(
+        x.saturating_add(w).saturating_sub(br.x),
+        y.saturating_add(h).saturating_sub(br.y),
+        br,
+        2,
+    );
+    vertex(
+        x.saturating_add(bl.x),
+        y.saturating_add(h).saturating_sub(bl.y),
+        bl,
+        3,
+    );
     let mut segs: Vec<Segment> = Vec::with_capacity(pts.len());
     for i in 0..pts.len() {
         let a = pts[i];
@@ -922,12 +985,12 @@ pub fn circle_path(cx: i64, cy: i64, r: i64) -> Vec<Segment> {
         let den = ONE as i128 + u2;
         let c = (((ONE as i128 - u2) << 16) / den) as i64;
         let s = ((2 * u << 16) / den) as i64;
-        let (dx, dy) = (c as i128 * r as i128 >> 16, s as i128 * r as i128 >> 16);
-        let (dx, dy) = (dx as i64, dy as i64);
-        pts.push((cx * ONE + dx, cy * ONE + dy)); // Q1
-        pts.push((cx * ONE - dx, cy * ONE + dy)); // Q2
-        pts.push((cx * ONE - dx, cy * ONE - dy)); // Q3
-        pts.push((cx * ONE + dx, cy * ONE - dy)); // Q4
+        let (dx, dy) = (scale_fixed(c, r), scale_fixed(s, r));
+        let (base_x, base_y) = (shl16(cx), shl16(cy));
+        pts.push((base_x.saturating_add(dx), base_y.saturating_add(dy))); // Q1
+        pts.push((base_x.saturating_sub(dx), base_y.saturating_add(dy))); // Q2
+        pts.push((base_x.saturating_sub(dx), base_y.saturating_sub(dy))); // Q3
+        pts.push((base_x.saturating_add(dx), base_y.saturating_sub(dy))); // Q4
     }
     let total = pts.len();
     let mut segs = Vec::with_capacity(total);
@@ -1205,7 +1268,10 @@ mod scalar_boundary_tests {
 
 #[cfg(test)]
 mod boundary_overflow_tests {
-    use super::{conic_quad_count_wang, conic_quad_pow2, cubic_subdivisions, quad_subdivisions};
+    use super::{
+        chop_conic, circle_path, conic_quad_count_wang, conic_quad_pow2, cubic_subdivisions,
+        quad_subdivisions, round_rect_path, Quad, CONIC_WEIGHT, ONE,
+    };
 
     #[test]
     fn wang_counts_are_bounded_and_deterministic_at_i64_extremes() {
@@ -1262,6 +1328,36 @@ mod boundary_overflow_tests {
         for (r, n) in expected {
             assert_eq!(conic_quad_count_wang(r), n, "radius {r}");
         }
+    }
+
+    #[test]
+    fn chop_conic_rejects_degenerate_weight_and_unbounded_depth() {
+        let p: Quad = [(0, 0), (ONE, ONE), (ONE << 1, 0)];
+        let normal = chop_conic(p, CONIC_WEIGHT, 3);
+        assert_eq!(normal.len(), 8, "normal chop still yields 2^3 quads");
+        assert_eq!(normal, chop_conic(p, CONIC_WEIGHT, 3), "deterministic");
+        // Skia's kMaxConicToQuadPOW2 = 5; larger public values fail closed.
+        let capped = chop_conic(p, CONIC_WEIGHT, u32::MAX);
+        assert_eq!(capped.len(), 32, "excessive pow2 is capped at Skia's limit");
+        // w = -ONE would divide by ONE + w == 0; keep the original conic.
+        let degenerate = chop_conic(p, -ONE, 5);
+        assert_eq!(degenerate, vec![p], "degenerate weight is a no-op");
+    }
+
+    #[test]
+    fn extreme_path_builders_stay_finite_and_deterministic() {
+        let rect = round_rect_path(i64::MAX - 10, i64::MIN + 10, 20, 20, 4);
+        assert!(!rect.is_empty());
+        assert_eq!(
+            rect,
+            round_rect_path(i64::MAX - 10, i64::MIN + 10, 20, 20, 4)
+        );
+        assert!(rect.iter().all(|s| [s.x0, s.x1]
+            .iter()
+            .all(|v| *v >= i64::MIN && *v <= i64::MAX)));
+        let circle = circle_path(i64::MAX, i64::MIN, 8);
+        assert_eq!(circle.len(), 128);
+        assert_eq!(circle, circle_path(i64::MAX, i64::MIN, 8));
     }
 
     #[test]
