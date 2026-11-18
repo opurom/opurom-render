@@ -147,11 +147,56 @@ function runFaultMatrix(gate, states) {
 function main() {
   const args = parseArgs(process.argv);
   const mode = args.selfTest ?? 'pass';
-  if (!['pass', 'degrade', 'missing', 'parallel_faults', 'gate_faults'].includes(mode)) {
+  if (!['pass', 'degrade', 'missing', 'parallel_faults', 'gate_faults', 'baseline_faults'].includes(mode)) {
     throw new Error(`unknown self-test state: ${mode}`);
   }
   if (mode === 'parallel_faults') {
     return runFaultMatrix('parallel', ['no_independent_win', 'replay_drift', 'no_deadline']);
+  }
+  if (mode === 'baseline_faults') {
+    const workspace = mkdtempSync(join(tmpdir(), 'opurom-gesture-baseline-fault-'));
+    try {
+      let allDetected = true;
+      const checks = [];
+      for (const gate of GATES) {
+        const baselinePath = join(workspace, `${gate}-baseline.json`);
+        const baseline = run(gate, ['--write-baseline', baselinePath], `${gate} write baseline`);
+        if (baseline.code !== 0 || !existsSync(baselinePath)) {
+          checks.push({ gate, check: 'baseline_regression', verdict: 'FAIL',
+            detail: 'baseline write failed' });
+          allDetected = false;
+          continue;
+        }
+        const report = JSON.parse(readFileSync(baselinePath, 'utf8'));
+        for (const key of Object.keys(report.metrics ?? {})) {
+          const original = report.metrics[key];
+          // A +100 increment stays inside the `baseline*2+8` budget for
+          // large counts, so use the same super-budget factor as the
+          // degrade self test to exercise the regression branch.
+          report.metrics[key] = Math.round(original * 4) + 100;
+          const driftedPath = join(workspace, `${gate}-${key}-drift.json`);
+          writeFileSync(driftedPath, `${JSON.stringify(report, null, 2)}\n`);
+          const drifted = run(gate,
+            ['--report', driftedPath, '--baseline', baselinePath],
+            `${gate} ${key} regression`);
+          const detected = drifted.code === 1;
+          if (!detected) allDetected = false;
+          checks.push({ gate, check: `${key}:4x+100`, verdict: detected ? 'PASS' : 'FAIL',
+            detail: detected ? 'regression rejected' : `exit=${drifted.code}` });
+          report.metrics[key] = original;
+        }
+      }
+      console.log(JSON.stringify({
+        schema: SCHEMA,
+        status: allDetected ? 'FAIL' : 'PASS',
+        detail: `baseline regression matrix: ${checks.length} injections`,
+        source: SOURCE,
+        checks,
+      }, null, 2));
+      return allDetected ? 1 : 0;
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   }
   if (mode === 'gate_faults') {
     let allDetected = true;

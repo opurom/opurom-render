@@ -35,6 +35,9 @@ node gesture-gate/gesture-baseline-loop.mjs --self-test parallel_faults
 # Full matrix: 13 targeted injections across all six gates must be rejected.
 node gesture-gate/gesture-baseline-loop.mjs --self-test gate_faults
 
+# Baseline regression matrix: each metric is pushed beyond `baseline*2+8`.
+node gesture-gate/gesture-baseline-loop.mjs --self-test baseline_faults
+
 # Default mode is pass.
 node gesture-gate/gesture-baseline-loop.mjs
 ```
