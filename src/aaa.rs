@@ -39,30 +39,30 @@ fn ceil_fixed(v: i64) -> i64 {
 }
 
 /// Skia :535 — alpha of a unit-height trapezoid of fixed widths `l1`, `l2`.
-fn trapezoid_to_alpha(l1: i64, l2: i64) -> i64 {
+pub(crate) fn trapezoid_to_alpha(l1: i64, l2: i64) -> i64 {
     let area = (l1 + l2) / 2;
     (area >> 8).clamp(0, 255)
 }
 
 /// Skia :542 — right-triangle of horizontal `a` and slope `b`, both fixed.
-fn partial_triangle_to_alpha(a: i64, b: i64) -> i64 {
+pub(crate) fn partial_triangle_to_alpha(a: i64, b: i64) -> i64 {
     let a = (a >> 11).clamp(0, 32);
     let b = (b >> 11).clamp(0, 32);
     ((a * a * b) >> 8) & 0xFF
 }
 
 /// Skia :561 — scale an alpha by a 16.16 fraction, rounding to integer.
-fn partial_alpha(alpha: i64, fraction: i64) -> i64 {
+pub(crate) fn partial_alpha(alpha: i64, fraction: i64) -> i64 {
     (alpha.saturating_mul(fraction) + ONE / 2) >> 16
 }
 
 /// Skia :565 — alpha scaled by another alpha (0..255).
-fn alpha_of(alpha: i64, full: i64) -> i64 {
+pub(crate) fn alpha_of(alpha: i64, full: i64) -> i64 {
     (alpha * full) >> 8
 }
 
 /// Skia :590 — per-column alphas for the region ABOVE a line crossing the row.
-fn compute_alpha_above_line(alphas: &mut [i64], l: i64, r: i64, dy: i64, full: i64) {
+pub(crate) fn compute_alpha_above_line(alphas: &mut [i64], l: i64, r: i64, dy: i64, full: i64) {
     let r_int = ceil_fixed(r);
     if r_int <= 0 {
         return;
@@ -85,7 +85,7 @@ fn compute_alpha_above_line(alphas: &mut [i64], l: i64, r: i64, dy: i64, full: i
 }
 
 /// Skia :617 — per-column alphas for the region BELOW a line crossing the row.
-fn compute_alpha_below_line(alphas: &mut [i64], l: i64, r: i64, dy: i64, full: i64) {
+pub(crate) fn compute_alpha_below_line(alphas: &mut [i64], l: i64, r: i64, dy: i64, full: i64) {
     let r_int = ceil_fixed(r);
     if r_int <= 0 {
         return;
@@ -107,7 +107,7 @@ fn compute_alpha_below_line(alphas: &mut [i64], l: i64, r: i64, dy: i64, full: i
 
 /// Skia clamps a strip to the surface clip before blitting; an out-of-row
 /// index is dropped instead of indexing past the mask.
-fn add_mask(mask: &mut [i64], idx: i64, a: i64) {
+pub(crate) fn add_mask(mask: &mut [i64], idx: i64, a: i64) {
     if idx >= 0 {
         if let Some(slot) = mask.get_mut(idx as usize) {
             *slot = slot.saturating_add(a);
@@ -118,7 +118,7 @@ fn add_mask(mask: &mut [i64], idx: i64, a: i64) {
 /// Skia :707 — accumulate the analytic coverage of one trapezoid strip into a
 /// row mask. `ul/ur` are the top x edges, `ll/lr` the bottom x edges, all
 /// relative to the strip's left pixel and in 16.16. `ldy/rdy` are |dy/dx|.
-fn blit_aaa_trapezoid_row(
+pub(crate) fn blit_aaa_trapezoid_row(
     mask: &mut [i64],
     origin: i64,
     ul: i64,
@@ -136,7 +136,12 @@ fn blit_aaa_trapezoid_row(
         return;
     }
     if len == 1 {
-        add_mask(mask, origin + left, trapezoid_to_alpha(ur - ul, lr - ll));
+        // Skia :723 scales the single pixel by the full alpha as well.
+        add_mask(
+            mask,
+            origin + left,
+            alpha_of(trapezoid_to_alpha(ur - ul, lr - ll), full),
+        );
         return;
     }
     let mut alphas = vec![full; len as usize];
@@ -202,6 +207,136 @@ fn blit_aaa_trapezoid_row(
 
     for (i, a) in alphas.into_iter().enumerate() {
         add_mask(mask, origin + left + i as i64, a);
+    }
+}
+
+/// Skia :806 — blit one trapezoid row. `ul/ur` are the left and right edge x at
+/// the top of the row, `ll/lr` the same at the bottom, `ldy/rdy` the absolute
+/// edge slopes and `full` the row's full alpha. The area left of the left edge
+/// and right of the right edge is excluded; the rest is filled.
+pub(crate) fn blit_trapezoid_row(
+    mask: &mut [i64],
+    origin: i64,
+    mut ul: i64,
+    mut ur: i64,
+    mut ll: i64,
+    mut lr: i64,
+    ldy: i64,
+    rdy: i64,
+    full: i64,
+) {
+    if ul > ur {
+        return;
+    }
+    // Edges that cross are an approximation; this only happens at the
+    // precision limit (Skia :825-827).
+    if ll > lr {
+        let lo = ul.min(ll);
+        let hi = ur.max(lr);
+        let mid = (lo + hi) / 2;
+        ll = mid;
+        lr = mid;
+    }
+    if ul == ur && ll == lr {
+        return;
+    }
+    // Swapping the endpoints does not change the excluded area (Skia :837-842).
+    if ul > ll {
+        std::mem::swap(&mut ul, &mut ll);
+    }
+    if ur > lr {
+        std::mem::swap(&mut ur, &mut lr);
+    }
+
+    let join_left = ceil_fixed(ll) << 16;
+    let join_rite = ur & !0xFFFF;
+    if join_left <= join_rite {
+        if ul < join_left {
+            let len = ceil_fixed(join_left - ul);
+            if len == 1 {
+                add_mask(
+                    mask,
+                    origin + (ul >> 16),
+                    alpha_of(trapezoid_to_alpha(join_left - ul, join_left - ll), full),
+                );
+            } else if len == 2 {
+                let first = join_left - ONE - ul;
+                let second = ll - ul - first;
+                add_mask(
+                    mask,
+                    origin + (ul >> 16),
+                    alpha_of(partial_triangle_to_alpha(first, ldy), full),
+                );
+                add_mask(
+                    mask,
+                    origin + (ul >> 16) + 1,
+                    alpha_of(
+                        (full - partial_triangle_to_alpha(second, ldy)).clamp(0, 255),
+                        full,
+                    ),
+                );
+            } else {
+                blit_aaa_trapezoid_row(
+                    mask,
+                    origin,
+                    ul,
+                    join_left,
+                    ll,
+                    join_left,
+                    ldy,
+                    i64::MAX,
+                    full,
+                );
+            }
+        }
+        // The rectangle between the joins is fully covered.
+        if join_left < join_rite {
+            let x0 = join_left >> 16;
+            let len = (join_rite - join_left) >> 16;
+            for i in 0..len {
+                add_mask(mask, origin + x0 + i, full);
+            }
+        }
+        if lr > join_rite {
+            let len = ceil_fixed(lr - join_rite);
+            if len == 1 {
+                add_mask(
+                    mask,
+                    origin + (join_rite >> 16),
+                    alpha_of(trapezoid_to_alpha(ur - join_rite, lr - join_rite), full),
+                );
+            } else if len == 2 {
+                let first = join_rite + ONE - ur;
+                let second = lr - ur - first;
+                add_mask(
+                    mask,
+                    origin + (join_rite >> 16),
+                    alpha_of(
+                        (full - partial_triangle_to_alpha(first, rdy)).clamp(0, 255),
+                        full,
+                    ),
+                );
+                add_mask(
+                    mask,
+                    origin + (join_rite >> 16) + 1,
+                    alpha_of(partial_triangle_to_alpha(second, rdy), full),
+                );
+            } else {
+                blit_aaa_trapezoid_row(
+                    mask,
+                    origin,
+                    join_rite,
+                    ur,
+                    join_rite,
+                    lr,
+                    i64::MAX,
+                    rdy,
+                    full,
+                );
+            }
+        }
+    } else {
+        blit_aaa_trapezoid_row(mask, origin, ul, ur, ll, lr, ldy, rdy, full);
     }
 }
 
@@ -504,14 +639,18 @@ pub fn chop_conic(p: Quad, weight: i64, pow2: u32) -> Vec<Quad> {
 /// the corner itself, in the corner's own 16.16 coordinates.
 pub fn corner_conic(rx: i64, ry: i64, corner: usize) -> Quad {
     match corner {
+        // The corners follow the rectangle's clockwise order, so each arc runs
+        // from the tangent it arrives at to the tangent it leaves towards. The
+        // offsets are relative to the rectangle's vertex, which is the conic's
+        // control point.
         // Top-left: left tangent -> top tangent.
-        0 => [(-rx * ONE, 0), (0, 0), (0, -ry * ONE)],
+        0 => [(0, ry * ONE), (0, 0), (rx * ONE, 0)],
         // Top-right: top tangent -> right tangent.
-        1 => [(0, -ry * ONE), (0, 0), (rx * ONE, 0)],
+        1 => [(-rx * ONE, 0), (0, 0), (0, ry * ONE)],
         // Bottom-right: right tangent -> bottom tangent.
-        2 => [(rx * ONE, 0), (0, 0), (0, ry * ONE)],
+        2 => [(0, -ry * ONE), (0, 0), (-rx * ONE, 0)],
         // Bottom-left: bottom tangent -> left tangent.
-        _ => [(0, ry * ONE), (0, 0), (-rx * ONE, 0)],
+        _ => [(rx * ONE, 0), (0, 0), (0, -ry * ONE)],
     }
 }
 
@@ -660,4 +799,68 @@ pub fn line_path(x0: i64, y0: i64, x1: i64, y1: i64, half_fp: i64) -> Vec<Segmen
         });
     }
     segs
+}
+
+/// Build the analytic edges of a rounded rectangle: one quadratic edge per
+/// corner and one straight edge per side.
+///
+/// The corners use Skia's corner conic (`SkConic::chopIntoQuadsPOW2` with
+/// `kConicTol = 0.25`), so the curve is the one Skia renders rather than a
+/// sampled circle.
+pub fn round_rect_walker_edges(
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+    radius: i64,
+) -> Vec<crate::aaa_walker::Edge> {
+    use crate::aaa_walker::{Edge, LineEdge, QuadEdge};
+    let r = radius.max(0).min(w / 2).min(h / 2);
+    if r <= 0 {
+        let (x1, y1) = (x + w, y + h);
+        let f = |v: i64| v << 16;
+        let mut edges = Vec::new();
+        for (a, b) in [
+            ((f(x), f(y)), (f(x1), f(y))),
+            ((f(x1), f(y)), (f(x1), f(y1))),
+            ((f(x1), f(y1)), (f(x), f(y1))),
+            ((f(x), f(y1)), (f(x), f(y))),
+        ] {
+            let a32 = (a.0 as i32, a.1 as i32);
+            let b32 = (b.0 as i32, b.1 as i32);
+            if let Some(e) = LineEdge::new(a32, b32) {
+                edges.push(Edge::Line(e));
+            }
+        }
+        return edges;
+    }
+
+    let pow2 = conic_quad_pow2(r, 1, 4);
+    let mut edges = Vec::new();
+    // The four corners, in clockwise order, each as one or more quadratic
+    // edges; the straight sides join them.
+    // The corners are placed at the rectangle's own vertices: the conic runs
+    // from one tangent point to the next with the vertex as its control
+    // point, which is how Skia describes a rounded corner.
+    let corners = [
+        (x, y, 0usize),
+        (x + w, y, 1),
+        (x + w, y + h, 2),
+        (x, y + h, 3),
+    ];
+    for (cx, cy, corner) in corners {
+        let conic = corner_conic(r, r, corner);
+        let quads = chop_conic(conic, CONIC_WEIGHT, pow2);
+        for q in quads {
+            let shifted = [
+                ((q[0].0 + (cx << 16)) as i32, (q[0].1 + (cy << 16)) as i32),
+                ((q[1].0 + (cx << 16)) as i32, (q[1].1 + (cy << 16)) as i32),
+                ((q[2].0 + (cx << 16)) as i32, (q[2].1 + (cy << 16)) as i32),
+            ];
+            if let Some(e) = QuadEdge::new(shifted) {
+                edges.push(Edge::Quad(e));
+            }
+        }
+    }
+    edges
 }

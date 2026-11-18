@@ -22,23 +22,26 @@ fn conic_weight_is_sqrt_two_over_two() {
 
 #[test]
 fn corner_conic_gives_the_two_tangents_and_the_corner() {
+    // Offsets are relative to the rectangle vertex, which is the conic's
+    // control point. Corners run clockwise, each arc from its entry tangent
+    // to its exit tangent.
     let tl = corner_conic(16, 16, 0);
-    assert_eq!(tl[0], (-16 * ONE, 0), "left tangent");
+    assert_eq!(tl[0], (0, 16 * ONE), "left tangent");
     assert_eq!(tl[1], (0, 0), "corner");
-    assert_eq!(tl[2], (0, -16 * ONE), "top tangent");
+    assert_eq!(tl[2], (16 * ONE, 0), "top tangent");
 
     let tr = corner_conic(16, 16, 1);
-    assert_eq!(tr[0], (0, -16 * ONE), "top tangent");
+    assert_eq!(tr[0], (-16 * ONE, 0), "top tangent");
     assert_eq!(tr[1], (0, 0));
-    assert_eq!(tr[2], (16 * ONE, 0), "right tangent");
+    assert_eq!(tr[2], (0, 16 * ONE), "right tangent");
 
     let br = corner_conic(16, 16, 2);
-    assert_eq!(br[0], (16 * ONE, 0), "right tangent");
-    assert_eq!(br[2], (0, 16 * ONE), "bottom tangent");
+    assert_eq!(br[0], (0, -16 * ONE), "right tangent");
+    assert_eq!(br[2], (-16 * ONE, 0), "bottom tangent");
 
     let bl = corner_conic(16, 16, 3);
-    assert_eq!(bl[0], (0, 16 * ONE), "bottom tangent");
-    assert_eq!(bl[2], (-16 * ONE, 0), "left tangent");
+    assert_eq!(bl[0], (16 * ONE, 0), "bottom tangent");
+    assert_eq!(bl[2], (0, -16 * ONE), "left tangent");
 }
 
 #[test]
@@ -49,18 +52,18 @@ fn chop_matches_skia_float_control_points() {
     assert_eq!(quads.len(), 2);
 
     let q0 = quads[0];
-    assert!((px(q0[0].0) + 16.0).abs() < 1e-6, "q0 start x");
-    assert!((px(q0[0].1) - 0.0).abs() < 1e-6, "q0 start y");
-    assert!((px(q0[1].0) + 9.372_6).abs() < 1e-3, "q0 control x");
-    assert!((px(q0[1].1) - 0.0).abs() < 1e-6, "q0 control y");
-    assert!((px(q0[2].0) + 4.686_3).abs() < 1e-3, "q0 end x");
-    assert!((px(q0[2].1) + 4.686_3).abs() < 1e-3, "q0 end y");
+    assert!((px(q0[0].0) - 0.0).abs() < 1e-6, "q0 start x");
+    assert!((px(q0[0].1) - 16.0).abs() < 1e-6, "q0 start y");
+    assert!((px(q0[1].0) - 0.0).abs() < 1e-6, "q0 control x");
+    assert!((px(q0[1].1) - 9.372_6).abs() < 1e-3, "q0 control y");
+    assert!((px(q0[2].0) - 4.686_3).abs() < 1e-3, "q0 end x");
+    assert!((px(q0[2].1) - 4.686_3).abs() < 1e-3, "q0 end y");
 
     let q1 = quads[1];
-    assert!((px(q1[0].0) + 4.686_3).abs() < 1e-3, "q1 start x");
-    assert!((px(q1[1].1) + 9.372_6).abs() < 1e-3, "q1 control y");
-    assert!((px(q1[2].0) - 0.0).abs() < 1e-6, "q1 end x");
-    assert!((px(q1[2].1) + 16.0).abs() < 1e-6, "q1 end y");
+    assert!((px(q1[0].0) - 4.686_3).abs() < 1e-3, "q1 start x");
+    assert!((px(q1[1].1) - 0.0).abs() < 1e-6, "q1 control y");
+    assert!((px(q1[2].0) - 16.0).abs() < 1e-6, "q1 end x");
+    assert!((px(q1[2].1) - 0.0).abs() < 1e-6, "q1 end y");
 }
 
 #[test]
