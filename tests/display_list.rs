@@ -254,3 +254,76 @@ fn software_bounds_clipping_matches_recorded_command() {
     }
     assert_eq!(pixels, expected);
 }
+
+#[test]
+fn zero_and_oversized_display_views_fail_closed() {
+    let list = |w: u32, h: u32| DisplayList {
+        unsupported: None,
+        width: w,
+        height: h,
+        background: Rgba::rgb(0, 0, 0),
+        commands: Vec::new(),
+    };
+    for (w, h) in [(0, 10), (10, 0), (0, 0), (4097, 10)] {
+        assert!(
+            list(w, h).to_json().is_err(),
+            "invalid viewport {w}x{h} was serialized"
+        );
+    }
+    assert!(list(4096, 4096).to_json().is_ok());
+}
+
+#[test]
+fn command_count_above_the_wire_limit_is_rejected() {
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+    };
+    let list = DisplayList {
+        unsupported: None,
+        width: 2,
+        height: 2,
+        background: Rgba::rgb(0, 0, 0),
+        commands: vec![
+            RasterCommand::Solid {
+                rect,
+                clip: rect,
+                color: Rgba::rgb(1, 2, 3),
+            };
+            opurom_render::display::MAX_COMMANDS + 1
+        ],
+    };
+    let err = list.to_json().unwrap_err().to_string();
+    assert!(err.contains("too many commands"), "{err}");
+}
+
+#[test]
+fn extreme_theme_tokens_are_rejected_with_typed_diagnostics() {
+    let doc = |theme: serde_json::Value| {
+        format!(
+            r#"{{"ir":"0.1.0","app":"Stress","state":[],"tree":{{"id":0,"kind":"Column","props":{{"padding":0}},"children":[],"events":{{}}}},"theme":{theme}}}"#
+        )
+    };
+    for theme in [
+        serde_json::json!({"mode":"light","accent":"#097FEB","radius":-1}),
+        serde_json::json!({"mode":"dark","accent":"not-a-color","radius":4}),
+        serde_json::json!({"mode":"solarized","accent":"#097FEB","radius":4}),
+    ] {
+        assert!(
+            parse_ir(&doc(theme.clone())).is_err(),
+            "extreme theme was accepted: {theme}"
+        );
+    }
+    // A very large but non-negative radius is a legal authored value; layout
+    // clamps it to the viewport before the display-list wire boundary.
+    let legal = parse_ir(&doc(
+        serde_json::json!({"mode":"dark","accent":"#097FEB","radius":1_000_000}),
+    ))
+    .unwrap();
+    Renderer::new(32, 32)
+        .display_list(&legal, &StateView::from_ir(&legal))
+        .to_json()
+        .unwrap();
+}
