@@ -313,6 +313,10 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
 /// unchanged. Effect commands and all other geometry are hard barriers.
 /// This kernel is opt-in: the frozen default display-list fixture stays
 /// byte-identical (PERF-002 in `reports/perf-audit.json`).
+///
+/// A merge is only legal when the resulting coordinates stay inside the GPU
+/// protocol's signed range. Rejected pairs are kept as two distinct commands
+/// (fail closed) instead of wrapping or overflowing in debug builds.
 pub fn coalesce_solids(commands: Vec<Command>) -> Vec<Command> {
     let mut out: Vec<Command> = Vec::with_capacity(commands.len());
     for command in commands {
@@ -330,16 +334,26 @@ pub fn coalesce_solids(commands: Vec<Command>) -> Vec<Command> {
                     && rect.x == next_rect.x
                     && rect.y.saturating_add(rect.h) == next_rect.y
                 {
-                    rect.h += next_rect.h;
-                    merged = true;
+                    // Vertical merge: only the height grows.
+                    if let Some(h) = rect.h.checked_add(next_rect.h) {
+                        if h <= COORD_LIMIT {
+                            rect.h = h;
+                            merged = true;
+                        }
+                    }
                 } else if clip == next_clip
                     && color == next_color
                     && rect.h == next_rect.h
                     && rect.y == next_rect.y
                     && rect.x.saturating_add(rect.w) == next_rect.x
                 {
-                    rect.w += next_rect.w;
-                    merged = true;
+                    // Horizontal merge: only the width grows.
+                    if let Some(w) = rect.w.checked_add(next_rect.w) {
+                        if w <= COORD_LIMIT {
+                            rect.w = w;
+                            merged = true;
+                        }
+                    }
                 }
             }
         }
@@ -778,5 +792,68 @@ mod coalescing_tests {
         ]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0], solid(0, 0, 10, 12));
+    }
+
+    #[test]
+    fn vertical_merge_within_the_coordinate_limit_is_allowed() {
+        let half = super::COORD_LIMIT / 2;
+        let mut first = solid(0, 0, 2, half);
+        let mut second = solid(0, half, 2, half);
+        if let (Command::Solid { rect: a, .. }, Command::Solid { rect: b, .. }) =
+            (&mut first, &mut second)
+        {
+            a.h = half;
+            b.h = half;
+        }
+        let merged = coalesce_solids(vec![first, second]);
+        assert_eq!(merged.len(), 1);
+        if let Command::Solid { rect, .. } = &merged[0] {
+            assert_eq!(rect.h, 2 * half);
+        } else {
+            panic!("expected a solid command");
+        }
+    }
+
+    #[test]
+    fn overflow_would_be_rejected_and_commands_kept_distinct() {
+        // A vertical pair whose heights sum past COORD_LIMIT but below i64::MAX.
+        let big = super::COORD_LIMIT;
+        let mut first = solid(0, 0, 2, big);
+        let mut second = solid(0, big, 2, big);
+        if let (Command::Solid { rect: a, .. }, Command::Solid { rect: b, .. }) =
+            (&mut first, &mut second)
+        {
+            a.h = big;
+            b.h = big;
+        }
+        let merged = coalesce_solids(vec![first, second]);
+        assert_eq!(merged.len(), 2, "oversized merge must fail closed");
+    }
+
+    #[test]
+    fn i64_overflow_pair_is_kept_distinct_without_panicking() {
+        // Heights near i64::MAX: summing would overflow in debug builds.
+        let near_max = i64::MAX - 1;
+        let mut first = solid(0, 0, 1, near_max);
+        let mut second = solid(0, near_max, 1, near_max);
+        if let (Command::Solid { rect: a, .. }, Command::Solid { rect: b, .. }) =
+            (&mut first, &mut second)
+        {
+            a.h = near_max;
+            b.h = near_max;
+        }
+        let merged = coalesce_solids(vec![first, second]);
+        assert_eq!(merged.len(), 2, "overflowing merge must fail closed");
+    }
+
+    #[test]
+    fn horizontal_overflow_is_also_rejected() {
+        let big = super::COORD_LIMIT;
+        let merged = coalesce_solids(vec![solid(0, 0, big, 2), solid(big, 0, big, 2)]);
+        assert_eq!(
+            merged.len(),
+            2,
+            "oversized horizontal merge must fail closed"
+        );
     }
 }

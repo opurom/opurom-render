@@ -1,4 +1,4 @@
-//! Semiconductor-free semantic component recipe contract.
+//! Semantic component recipe contract.
 //!
 //! A recipe is a pure description lowered by the compiler into ordinary IR
 //! primitives. It never interprets IR at runtime and never imports a sibling

@@ -26,7 +26,8 @@ fn mul_div(a: i64, b: i64, d: i64) -> i64 {
     if d == 0 {
         0
     } else {
-        (a.saturating_mul(b)) / d
+        // `i64::MIN / -1` also overflows; fail closed to the positive limit.
+        (a.saturating_mul(b)).checked_div(d).unwrap_or(i64::MAX)
     }
 }
 
@@ -35,12 +36,23 @@ fn trunc_fixed(v: i64) -> i64 {
 }
 
 fn ceil_fixed(v: i64) -> i64 {
-    (v + ONE - 1) >> 16
+    v.saturating_add(ONE - 1) >> 16
 }
+
+/// 16.16 left shift that saturates instead of wrapping at extreme fixed
+/// coordinates. Equal to `v << 16` wherever that shift is representable.
+fn shl16(v: i64) -> i64 {
+    v.saturating_mul(ONE)
+}
+
+/// Fail-closed bound for a row span. A surface row is at most
+/// `MAX_DIMENSION` (4096) pixels; anything larger is corrupt fixed-point
+/// input, so drop the strip instead of allocating or looping past the mask.
+const MAX_ROW_SPAN: i64 = 1 << 20;
 
 /// Skia :535 — alpha of a unit-height trapezoid of fixed widths `l1`, `l2`.
 pub(crate) fn trapezoid_to_alpha(l1: i64, l2: i64) -> i64 {
-    let area = (l1 + l2) / 2;
+    let area = l1.saturating_add(l2) / 2;
     (area >> 8).clamp(0, 255)
 }
 
@@ -53,12 +65,13 @@ pub(crate) fn partial_triangle_to_alpha(a: i64, b: i64) -> i64 {
 
 /// Skia :561 — scale an alpha by a 16.16 fraction, rounding to integer.
 pub(crate) fn partial_alpha(alpha: i64, fraction: i64) -> i64 {
-    (alpha.saturating_mul(fraction) + ONE / 2) >> 16
+    let scaled = alpha.saturating_mul(fraction);
+    (scaled.saturating_add(ONE / 2) >> 16).clamp(0, 255)
 }
 
 /// Skia :565 — alpha scaled by another alpha (0..255).
 pub(crate) fn alpha_of(alpha: i64, full: i64) -> i64 {
-    (alpha * full) >> 8
+    (alpha.saturating_mul(full) >> 8).clamp(0, 255)
 }
 
 /// Skia :590 — per-column alphas for the region ABOVE a line crossing the row.
@@ -68,20 +81,32 @@ pub(crate) fn compute_alpha_above_line(alphas: &mut [i64], l: i64, r: i64, dy: i
         return;
     }
     if r_int == 1 {
-        let a = (((ONE << 1) - l - r) >> 9).clamp(0, 255);
+        if alphas.is_empty() {
+            return;
+        }
+        let a = ((((ONE << 1).saturating_sub(l)).saturating_sub(r)) >> 9).clamp(0, 255);
         alphas[0] = alpha_of(a, full);
         return;
     }
-    let (first, last) = (ONE - l, r - ((r_int - 1) << 16));
+    let (first, last) = (ONE.saturating_sub(l), r.saturating_sub(shl16(r_int - 1)));
     let first_h = fmul(first, dy);
+    if alphas.is_empty() {
+        return;
+    }
     alphas[0] = fmul(first, first_h) >> 9;
     let mut alpha16 = first_h.saturating_add(dy >> 1);
     for i in 1..r_int - 1 {
+        if i as usize >= alphas.len() {
+            break;
+        }
         alphas[i as usize] = (alpha16 >> 8).clamp(0, 255);
         alpha16 = alpha16.saturating_add(dy);
     }
     let tail = (full - partial_triangle_to_alpha(last, dy)).clamp(0, 255);
-    alphas[(r_int - 1) as usize] = tail;
+    let idx = (r_int - 1) as usize;
+    if idx < alphas.len() {
+        alphas[idx] = tail;
+    }
 }
 
 /// Skia :617 — per-column alphas for the region BELOW a line crossing the row.
@@ -91,18 +116,28 @@ pub(crate) fn compute_alpha_below_line(alphas: &mut [i64], l: i64, r: i64, dy: i
         return;
     }
     if r_int == 1 {
-        alphas[0] = alpha_of(trapezoid_to_alpha(l, r), full);
+        if let Some(slot) = alphas.first_mut() {
+            *slot = alpha_of(trapezoid_to_alpha(l, r), full);
+        }
         return;
     }
-    let (first, last) = (ONE - l, r - ((r_int - 1) << 16));
+    let (first, last) = (ONE.saturating_sub(l), r.saturating_sub(shl16(r_int - 1)));
     let last_h = fmul(last, dy);
-    alphas[(r_int - 1) as usize] = fmul(last, last_h) >> 9;
+    let idx = (r_int - 1) as usize;
+    if let Some(slot) = alphas.get_mut(idx) {
+        *slot = fmul(last, last_h) >> 9;
+    }
     let mut alpha16 = last_h.saturating_add(dy >> 1);
     for i in (1..r_int - 1).rev() {
+        if i as usize >= alphas.len() {
+            continue;
+        }
         alphas[i as usize] = ((alpha16 >> 8) & 0xFF).clamp(0, 255);
         alpha16 = alpha16.saturating_add(dy);
     }
-    alphas[0] = (full - partial_triangle_to_alpha(first, dy)).clamp(0, 255);
+    if let Some(slot) = alphas.first_mut() {
+        *slot = (full - partial_triangle_to_alpha(first, dy)).clamp(0, 255);
+    }
 }
 
 /// Skia clamps a strip to the surface clip before blitting; an out-of-row
@@ -131,8 +166,13 @@ pub(crate) fn blit_aaa_trapezoid_row(
 ) {
     let left = trunc_fixed(ul);
     let right = ceil_fixed(lr);
-    let len = right - left;
-    if len <= 0 {
+    let len = right.saturating_sub(left);
+    // `origin + left + i` must stay positive and in range for every blit
+    // index; check the bound in u64 so no intermediate overflows i64.
+    let left_u = left.max(0) as u64;
+    let origin_u = if origin < 0 { 0u64 } else { origin as u64 };
+    let limit = u64::MAX - origin_u - left_u;
+    if len <= 0 || len > MAX_ROW_SPAN || (len as u64) > limit {
         return;
     }
     if len == 1 {
@@ -140,7 +180,10 @@ pub(crate) fn blit_aaa_trapezoid_row(
         add_mask(
             mask,
             origin + left,
-            alpha_of(trapezoid_to_alpha(ur - ul, lr - ll), full),
+            alpha_of(
+                trapezoid_to_alpha(ur.saturating_sub(ul), lr.saturating_sub(ll)),
+                full,
+            ),
         );
         return;
     }
@@ -149,9 +192,9 @@ pub(crate) fn blit_aaa_trapezoid_row(
     // Exclude the area left of the left edge (Skia :746-765).
     let u_left = trunc_fixed(ul);
     let l_left = ceil_fixed(ll);
-    if u_left + 2 == l_left {
-        let first = (u_left << 16) + ONE - ul;
-        let second = ll - ul - first;
+    if u_left.saturating_add(2) == l_left {
+        let first = shl16(u_left).saturating_add(ONE).saturating_sub(ul);
+        let second = ll.saturating_sub(ul).saturating_sub(first);
         let a1 = (full - partial_triangle_to_alpha(first, ldy)).clamp(0, 255);
         let a2 = partial_triangle_to_alpha(second, ldy);
         alphas[0] = (alphas[0] - a1).max(0);
@@ -160,11 +203,12 @@ pub(crate) fn blit_aaa_trapezoid_row(
         let mut temp = vec![0i64; len as usize];
         let off = u_left - left;
         if off >= 0 && off < len {
-            let count = (temp.len() - off as usize).min((l_left - u_left) as usize);
+            let span = (l_left - u_left).clamp(0, len - off);
+            let count = (temp.len() - off as usize).min(span as usize);
             compute_alpha_below_line(
                 &mut temp[off as usize..off as usize + count],
-                ul - (u_left << 16),
-                ll - (u_left << 16),
+                ul.saturating_sub(shl16(u_left)),
+                ll.saturating_sub(shl16(u_left)),
                 ldy,
                 full,
             );
@@ -178,9 +222,9 @@ pub(crate) fn blit_aaa_trapezoid_row(
     // Exclude the area right of the right edge (Skia :767-786).
     let u_right = trunc_fixed(ur);
     let l_right = ceil_fixed(lr);
-    if u_right + 2 == l_right {
-        let first = (u_right << 16) + ONE - ur;
-        let second = lr - ur - first;
+    if u_right.saturating_add(2) == l_right {
+        let first = shl16(u_right).saturating_add(ONE).saturating_sub(ur);
+        let second = lr.saturating_sub(ur).saturating_sub(first);
         let a1 = partial_triangle_to_alpha(first, rdy);
         let a2 = (full - partial_triangle_to_alpha(second, rdy)).clamp(0, 255);
         let i2 = (len - 2) as usize;
@@ -190,11 +234,12 @@ pub(crate) fn blit_aaa_trapezoid_row(
         let mut temp = vec![0i64; len as usize];
         let off = u_right - left;
         if off >= 0 && off < len {
-            let count = (temp.len() - off as usize).min((l_right - u_right) as usize);
+            let span = (l_right - u_right).clamp(0, len - off);
+            let count = (temp.len() - off as usize).min(span as usize);
             compute_alpha_above_line(
                 &mut temp[off as usize..off as usize + count],
-                ur - (u_right << 16),
-                lr - (u_right << 16),
+                ur.saturating_sub(shl16(u_right)),
+                lr.saturating_sub(shl16(u_right)),
                 rdy,
                 full,
             );
@@ -233,7 +278,8 @@ pub(crate) fn blit_trapezoid_row(
     if ll > lr {
         let lo = ul.min(ll);
         let hi = ur.max(lr);
-        let mid = (lo + hi) / 2;
+        // Saturating midpoint: `(lo + hi) / 2` can overflow at i64 extremes.
+        let mid = lo.saturating_add(hi) / 2;
         ll = mid;
         lr = mid;
     }
@@ -248,20 +294,26 @@ pub(crate) fn blit_trapezoid_row(
         std::mem::swap(&mut ur, &mut lr);
     }
 
-    let join_left = ceil_fixed(ll) << 16;
-    let join_rite = ur & !0xFFFF;
+    let join_left = shl16(ceil_fixed(ll));
+    let join_rite = ur & !(ONE - 1);
     if join_left <= join_rite {
         if ul < join_left {
-            let len = ceil_fixed(join_left - ul);
+            let len = ceil_fixed(join_left.saturating_sub(ul));
             if len == 1 {
                 add_mask(
                     mask,
                     origin + (ul >> 16),
-                    alpha_of(trapezoid_to_alpha(join_left - ul, join_left - ll), full),
+                    alpha_of(
+                        trapezoid_to_alpha(
+                            join_left.saturating_sub(ul),
+                            join_left.saturating_sub(ll),
+                        ),
+                        full,
+                    ),
                 );
             } else if len == 2 {
-                let first = join_left - ONE - ul;
-                let second = ll - ul - first;
+                let first = join_left.saturating_sub(ONE).saturating_sub(ul);
+                let second = ll.saturating_sub(ul).saturating_sub(first);
                 add_mask(
                     mask,
                     origin + (ul >> 16),
@@ -293,21 +345,30 @@ pub(crate) fn blit_trapezoid_row(
         if join_left < join_rite {
             let x0 = join_left >> 16;
             let len = (join_rite - join_left) >> 16;
+            if len > MAX_ROW_SPAN || origin > i64::MAX - x0 - len {
+                return;
+            }
             for i in 0..len {
                 add_mask(mask, origin + x0 + i, full);
             }
         }
         if lr > join_rite {
-            let len = ceil_fixed(lr - join_rite);
+            let len = ceil_fixed(lr.saturating_sub(join_rite));
             if len == 1 {
                 add_mask(
                     mask,
                     origin + (join_rite >> 16),
-                    alpha_of(trapezoid_to_alpha(ur - join_rite, lr - join_rite), full),
+                    alpha_of(
+                        trapezoid_to_alpha(
+                            ur.saturating_sub(join_rite),
+                            lr.saturating_sub(join_rite),
+                        ),
+                        full,
+                    ),
                 );
             } else if len == 2 {
-                let first = join_rite + ONE - ur;
-                let second = lr - ur - first;
+                let first = join_rite.saturating_add(ONE).saturating_sub(ur);
+                let second = lr.saturating_sub(ur).saturating_sub(first);
                 add_mask(
                     mask,
                     origin + (join_rite >> 16),
@@ -353,14 +414,21 @@ fn x_at(s: &Segment, y: i64) -> i64 {
     if s.y0 == s.y1 {
         return s.x0.min(s.x1);
     }
-    s.x0 + mul_div(y - s.y0, s.x1 - s.x0, s.y1 - s.y0)
+    s.x0.saturating_add(mul_div(
+        y.saturating_sub(s.y0),
+        s.x1.saturating_sub(s.x0),
+        s.y1.saturating_sub(s.y0),
+    ))
 }
 
 fn slope(s: &Segment) -> i64 {
     if s.x0 == s.x1 {
         return MAX_SLOPE;
     }
-    (s.y1 - s.y0).abs().saturating_mul(ONE) / (s.x1 - s.x0).abs().max(1)
+    // `i64::MIN.abs()` panics in debug and wraps in release; saturate first.
+    let dy = s.y1.saturating_sub(s.y0);
+    let dx = s.x1.saturating_sub(s.x0);
+    dy.saturating_abs().saturating_mul(ONE) / dx.saturating_abs().max(1)
 }
 
 /// Exact convex coverage for one pixel row band, accumulated into `row`
@@ -368,8 +436,8 @@ fn slope(s: &Segment) -> i64 {
 /// integer row ends plus every segment endpoint y inside the row, mirroring
 /// Skia's scan-line set (file header :47-53).
 pub fn rasterize_convex_row(segments: &[Segment], row: &mut [i64], origin: i64, y: i64) {
-    let y_top = y << 16;
-    let y_bot = (y + 1) << 16;
+    let y_top = shl16(y);
+    let y_bot = shl16(y.saturating_add(1));
     let mut cuts = vec![y_top, y_bot];
     for s in segments {
         for ey in [s.y0, s.y1] {
@@ -413,30 +481,37 @@ pub fn rasterize_convex_row(segments: &[Segment], row: &mut [i64], origin: i64, 
         }
         // Unit-height trapezoid alphas, then scale by this strip's height.
         let first_x = trunc_fixed(ul).min(trunc_fixed(ll));
-        let last_x = ceil_fixed(ur).max(ceil_fixed(lr)).max(first_x + 1);
+        let last_x = ceil_fixed(ur)
+            .max(ceil_fixed(lr))
+            .max(first_x.saturating_add(1));
         // Clip the strip to the row instead of dropping it: a segment ending
         // inside this band extrapolates its far x past the surface, which can
         // push first_x outside the row while covered pixels stay inside.
-        let row_end = origin + row.len() as i64;
+        let row_end = origin.saturating_add(row.len() as i64);
         let lo = first_x.max(origin);
         let hi = last_x.min(row_end);
         if hi <= lo {
             continue;
         }
-        let width = (hi - lo) as usize;
+        let strip_span = hi.saturating_sub(lo);
+        if strip_span > MAX_ROW_SPAN {
+            continue;
+        }
+        let width = strip_span as usize;
         let mut strip = vec![0i64; width];
+        let shift = shl16(lo);
         blit_aaa_trapezoid_row(
             &mut strip,
             0,
-            ul - (lo << 16),
-            ur - (lo << 16),
-            ll - (lo << 16),
-            lr - (lo << 16),
+            ul.saturating_sub(shift),
+            ur.saturating_sub(shift),
+            ll.saturating_sub(shift),
+            lr.saturating_sub(shift),
             ls,
             rs,
             255,
         );
-        let h = c1 - c0;
+        let h = c1.saturating_sub(c0);
         let base = (lo - origin) as usize;
         for (i, a) in strip.into_iter().enumerate() {
             row[base + i] = row[base + i].saturating_add(partial_alpha(a, h));
@@ -479,15 +554,23 @@ pub fn conic_quad_count_wang(radius: i64) -> u32 {
     let w_num = 46_341i128; // sqrt(2)/2 * 65536, Skia CONIC_WEIGHT
     let w2_num = w_num * w_num;
     let dp2 = 4 * w2_num * len2(p1x, p1y) / (65_536i128 * 65_536);
-    let w = w_num as f64 / 65_536.0;
-    let dw = (2.0 - 2.0 * w).abs();
+    // dw = |2 - 2w| as an exact rational: 2*(65536 - 46341)/65536. The shader
+    // evaluates `dw = abs(-2*w + 2)` (`wangs_formula.cc:63`); keeping it as a
+    // numerator/denominator pair removes the only f64 in the kernel, so the
+    // count no longer depends on platform float rounding.
+    let dw_num = 2 * (65_536 - w_num);
+    let dw_den = 65_536i128;
     // k = precision(4) in 1024 fixed; rp_minus_1 = max(0, max_len*k - 1).
     let rp_minus_1 = (max_len * 4 / 1024 - 1024).max(0);
-    let numer_sq = dp2 * 16
-        + rp_minus_1 * rp_minus_1 * ((dw * 1024.0) as i128) * ((dw * 1024.0) as i128) / 1_048_576;
-    let denom = (4.0 * w.min(1.0) * 1024.0) as i128;
+    // numer_sq = dp2*16 + rp^2 * dw_fixed^2 / 2^20 with dw_fixed = dw*1024,
+    // computed as an exact rational over dw_den^2 * 2^20.
+    let dw_fixed_num = dw_num * 1024;
+    let scale = dw_den * dw_den * 1_048_576;
+    let numer_sq = dp2 * 16 * scale + rp_minus_1 * rp_minus_1 * dw_fixed_num * dw_fixed_num;
+    let denom = (4.0 * w_num.min(65_536) as f64 / 65_536.0 * 1024.0) as i128;
     // sqrt(numer / denom) in 1024 fixed point: sqrt(a/b) = sqrt(a*b) / b.
-    let n = isqrt((numer_sq.max(0) * denom.max(1)) as i128) as u32 / 1024;
+    // The scaled numerator keeps every intermediate an exact integer.
+    let n = isqrt((numer_sq.max(0) / scale) * denom.max(1)) as u32 / 1024;
     n.clamp(1, 32)
 }
 
@@ -497,7 +580,11 @@ pub fn conic_quad_pow2(radius: i64, tol_num: i64, tol_den: i64) -> u32 {
     // keeping i64 extremes inside i128 arithmetic.
     let r = radius.max(0).min(1i64 << 20) as i128;
     let err2 = (CONIC_ERR_NUM * r) * (CONIC_ERR_NUM * r);
-    let tol = (tol_num.max(0) as i128 * CONIC_ERR_DEN) / tol_den.max(1) as i128;
+    // tol and tol2 stay inside i128: the product is clamped to the square
+    // root of i128::MAX before squaring, so an extreme `tol_num` saturates
+    // instead of wrapping (fail closed: a huge tolerance keeps pow2 at 0).
+    let tol_raw = (tol_num.max(0) as i128 * CONIC_ERR_DEN) / tol_den.max(1) as i128;
+    let tol = tol_raw.min(1 << 63);
     let tol2 = tol * tol;
     let mut e2 = err2;
     let mut pow2 = 0u32;
@@ -683,13 +770,17 @@ pub fn corner_conic(rx: i64, ry: i64, corner: usize) -> Quad {
         // offsets are relative to the rectangle's vertex, which is the conic's
         // control point.
         // Top-left: left tangent -> top tangent.
-        0 => [(0, ry * ONE), (0, 0), (rx * ONE, 0)],
+        0 => [(0, shl16(ry)), (0, 0), (shl16(rx), 0)],
         // Top-right: top tangent -> right tangent.
-        1 => [(-rx * ONE, 0), (0, 0), (0, ry * ONE)],
+        1 => [(shl16(rx).saturating_neg(), 0), (0, 0), (0, shl16(ry))],
         // Bottom-right: right tangent -> bottom tangent.
-        2 => [(0, -ry * ONE), (0, 0), (-rx * ONE, 0)],
+        2 => [
+            (0, shl16(ry).saturating_neg()),
+            (0, 0),
+            (shl16(rx).saturating_neg(), 0),
+        ],
         // Bottom-left: bottom tangent -> left tangent.
-        _ => [(rx * ONE, 0), (0, 0), (0, -ry * ONE)],
+        _ => [(shl16(rx), 0), (0, 0), (0, shl16(ry).saturating_neg())],
     }
 }
 
@@ -807,7 +898,11 @@ fn isqrt(v: i128) -> i64 {
         }
         bit >>= 2;
     }
-    r as i64
+    // `isqrt(u128::MAX)` is about 2^64, which does not fit i64. Saturate
+    // instead of wrapping: callers treat the result as a length/count, so a
+    // wrapped negative would become a huge allocation or a negative segment
+    // count (fail closed to the largest representable count).
+    r.min(i64::MAX as u128) as i64
 }
 
 /// Convex path for a filled disc, centred at `(cx, cy)` with radius `r`.
@@ -853,7 +948,7 @@ pub fn circle_path(cx: i64, cy: i64, r: i64) -> Vec<Segment> {
 /// half-width in 16.16 pixels, routed through the same analytic coverage as
 /// corners. The perpendicular offset uses an integer length.
 pub fn line_path(x0: i64, y0: i64, x1: i64, y1: i64, half_fp: i64) -> Vec<Segment> {
-    let (dx, dy) = (x1 - x0, y1 - y0);
+    let (dx, dy) = (x1.saturating_sub(x0), y1.saturating_sub(y0));
     let len = isqrt((dx as i128) * dx as i128 + (dy as i128) * dy as i128);
     let (px, py) = if len == 0 {
         (0i64, 0i64)
@@ -864,10 +959,10 @@ pub fn line_path(x0: i64, y0: i64, x1: i64, y1: i64, half_fp: i64) -> Vec<Segmen
         )
     };
     let corners = [
-        (x0 * ONE + px, y0 * ONE + py),
-        (x1 * ONE + px, y1 * ONE + py),
-        (x1 * ONE - px, y1 * ONE - py),
-        (x0 * ONE - px, y0 * ONE - py),
+        (shl16(x0).saturating_add(px), shl16(y0).saturating_add(py)),
+        (shl16(x1).saturating_add(px), shl16(y1).saturating_add(py)),
+        (shl16(x1).saturating_sub(px), shl16(y1).saturating_sub(py)),
+        (shl16(x0).saturating_sub(px), shl16(y0).saturating_sub(py)),
     ];
     let mut segs = Vec::with_capacity(4);
     for i in 0..4 {
@@ -897,10 +992,15 @@ pub fn round_rect_walker_edges(
     radius: i64,
 ) -> Vec<crate::aaa_walker::Edge> {
     use crate::aaa_walker::{Edge, LineEdge, QuadEdge};
+    // The walker stores 16.16 coordinates in i32 (Skia's analytic scan
+    // contract). Clamp to that domain before casting: a rust `as i32` wraps
+    // and silently reverses edges on rects wider than 32767 px, while a clamp
+    // keeps geometry monotone (pixels past the device range are unreachable).
+    let fixed32 = |v: i64| v.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
     let r = radius.max(0).min(w / 2).min(h / 2);
     if r <= 0 {
-        let (x1, y1) = (x + w, y + h);
-        let f = |v: i64| v << 16;
+        let (x1, y1) = (x.saturating_add(w), y.saturating_add(h));
+        let f = shl16;
         let mut edges = Vec::new();
         for (a, b) in [
             ((f(x), f(y)), (f(x1), f(y))),
@@ -908,8 +1008,8 @@ pub fn round_rect_walker_edges(
             ((f(x1), f(y1)), (f(x), f(y1))),
             ((f(x), f(y1)), (f(x), f(y))),
         ] {
-            let a32 = (a.0 as i32, a.1 as i32);
-            let b32 = (b.0 as i32, b.1 as i32);
+            let a32 = (fixed32(a.0), fixed32(a.1));
+            let b32 = (fixed32(b.0), fixed32(b.1));
             if let Some(e) = LineEdge::new(a32, b32) {
                 edges.push(Edge::Line(e));
             }
@@ -931,13 +1031,24 @@ pub fn round_rect_walker_edges(
         (x, y + h, 3),
     ];
     for (cx, cy, corner) in corners {
+        let cx_fp = shl16(cx);
+        let cy_fp = shl16(cy);
         let conic = corner_conic(r, r, corner);
         let quads = chop_conic(conic, CONIC_WEIGHT, pow2);
         for q in quads {
             let shifted = [
-                ((q[0].0 + (cx << 16)) as i32, (q[0].1 + (cy << 16)) as i32),
-                ((q[1].0 + (cx << 16)) as i32, (q[1].1 + (cy << 16)) as i32),
-                ((q[2].0 + (cx << 16)) as i32, (q[2].1 + (cy << 16)) as i32),
+                (
+                    fixed32(q[0].0.saturating_add(cx_fp)),
+                    fixed32(q[0].1.saturating_add(cy_fp)),
+                ),
+                (
+                    fixed32(q[1].0.saturating_add(cx_fp)),
+                    fixed32(q[1].1.saturating_add(cy_fp)),
+                ),
+                (
+                    fixed32(q[2].0.saturating_add(cx_fp)),
+                    fixed32(q[2].1.saturating_add(cy_fp)),
+                ),
             ];
             if let Some(e) = QuadEdge::new(shifted) {
                 edges.push(Edge::Quad(e));
@@ -1002,6 +1113,97 @@ mod corner_density_tests {
 }
 
 #[cfg(test)]
+mod scalar_boundary_tests {
+    use super::{
+        alpha_of, blit_aaa_trapezoid_row, blit_trapezoid_row, ceil_fixed, isqrt, line_path,
+        partial_alpha, rasterize_convex_row, round_rect_walker_edges, shl16, slope,
+        trapezoid_to_alpha, Segment, ONE,
+    };
+
+    #[test]
+    fn scalar_helpers_are_total_at_i64_extremes() {
+        assert_eq!(ceil_fixed(i64::MAX), i64::MAX >> 16);
+        assert_eq!(ceil_fixed(i64::MIN), i64::MIN >> 16);
+        assert_eq!(shl16(i64::MAX), i64::MAX);
+        assert_eq!(shl16(i64::MIN), i64::MIN);
+        assert_eq!(trapezoid_to_alpha(i64::MAX, i64::MAX), 255);
+        assert_eq!(trapezoid_to_alpha(i64::MIN, i64::MIN), 0);
+        assert_eq!(alpha_of(i64::MAX, i64::MAX), 255);
+        assert_eq!(partial_alpha(i64::MAX, i64::MAX), 255);
+    }
+
+    #[test]
+    fn isqrt_saturates_above_the_i64_range() {
+        assert_eq!(isqrt(0), 0);
+        assert_eq!(isqrt(-1), 0);
+        assert_eq!(isqrt(i128::MAX), i64::MAX);
+        let v = (i64::MAX as i128) * (i64::MAX as i128);
+        assert_eq!(isqrt(v), i64::MAX);
+        assert!(isqrt(v - 1) <= i64::MAX);
+    }
+
+    #[test]
+    fn slope_and_x_extrapolation_saturate_without_panicking() {
+        let s = Segment {
+            x0: i64::MIN,
+            y0: i64::MIN,
+            x1: i64::MAX,
+            y1: i64::MAX,
+        };
+        let sl = slope(&s);
+        assert!(sl >= 0 && sl <= i64::MAX, "slope {sl}");
+        assert_eq!(slope(&s), slope(&s), "slope deterministic");
+        let mut row = [0i64; 4];
+        rasterize_convex_row(&[s, s], &mut row, 0, 0);
+        assert_eq!(row, [0, 0, 0, 0], "extreme segments are clipped away");
+    }
+
+    #[test]
+    fn blit_helpers_drop_oversized_or_overflowing_spans() {
+        let mut mask = vec![0i64; 8];
+        // A span larger than any real surface is rejected before allocation.
+        blit_aaa_trapezoid_row(&mut mask, 0, 0, i64::MAX, 0, i64::MAX, 0, 0, 255);
+        assert_eq!(mask, vec![0; 8]);
+        blit_trapezoid_row(
+            &mut mask,
+            i64::MAX,
+            i64::MIN,
+            i64::MAX,
+            i64::MAX,
+            i64::MIN,
+            1,
+            1,
+            255,
+        );
+        assert_eq!(mask, vec![0; 8]);
+    }
+
+    #[test]
+    fn wide_walker_rects_keep_monotone_edges() {
+        // 40000 px is wider than the i32 16.16 domain (32767 px). The walker
+        // must clamp rather than wrap, so the four straight edges stay in
+        // increasing x order and no edge reverses direction.
+        let edges = round_rect_walker_edges(0, 0, 40_000, 100, 0);
+        assert!(!edges.is_empty(), "a flat 40000 px rect still emits edges");
+        assert!(edges.len() <= 4, "clamping cannot invent edges");
+        for e in &edges {
+            if let crate::aaa_walker::Edge::Line(line) = e {
+                assert!(
+                    line.upper_x >= i32::MIN && line.upper_y >= 0,
+                    "clamped edge out of domain: {line:?}"
+                );
+            }
+        }
+        let edges = round_rect_walker_edges(0, 0, 40_000, 100, 16);
+        assert!(!edges.is_empty(), "rounded wide rect still emits edges");
+        assert!(
+            line_path(0, 0, i64::MAX, i64::MAX, ONE).len() == 4,
+            "line path is total at i64 extremes"
+        );
+    }
+}
+
+#[cfg(test)]
 mod boundary_overflow_tests {
     use super::{conic_quad_count_wang, conic_quad_pow2, cubic_subdivisions, quad_subdivisions};
 
@@ -1034,5 +1236,47 @@ mod boundary_overflow_tests {
         let q = (i64::MAX, i64::MIN);
         assert!((1..=32).contains(&quad_subdivisions(p, q, p)));
         assert!((1..=32).contains(&cubic_subdivisions(p, q, p, q)));
+    }
+
+    #[test]
+    fn wang_count_keeps_normal_radii_history_after_rational_dw() {
+        // The exact-rational dw must not change the count for any radius the
+        // corner renderer can reach: the sweep saturates at 32 by r=192, and
+        // the unclamped product only matters past the clamp.
+        let expected = [
+            (1i64, 1u32),
+            (2, 1),
+            (4, 1),
+            (8, 1),
+            (16, 3),
+            (24, 5),
+            (32, 6),
+            (48, 10),
+            (64, 13),
+            (96, 20),
+            (128, 26),
+            (192, 32),
+            (1024, 32),
+            (1 << 20, 32),
+        ];
+        for (r, n) in expected {
+            assert_eq!(conic_quad_count_wang(r), n, "radius {r}");
+        }
+    }
+
+    #[test]
+    fn pow2_tolerance_extremes_fail_closed_without_overflow() {
+        // tol_num = i64::MAX with tol_den = 1 pushes tol^2 past i128::MAX;
+        // the kernel clamps the tolerance so the product stays in range and
+        // the loop keeps the minimum subdivision (fail closed).
+        assert_eq!(conic_quad_pow2(100, i64::MAX, 1), 0);
+        // tol_num == tol_den gives tol = 1e9, still tighter than r=100's error.
+        assert_eq!(conic_quad_pow2(100, i64::MAX, i64::MAX), 2);
+        assert_eq!(conic_quad_pow2(i64::MAX, i64::MAX, 1), 0);
+        // A negative tolerance clamps to 0, the pre-existing "subdivide
+        // fully" semantic; pin it so the fail-closed change cannot flip it.
+        assert_eq!(conic_quad_pow2(100, -i64::MAX, 1), 5);
+        // A tight tolerance still subdivides as before.
+        assert!(conic_quad_pow2(100, 1, 8) > 0);
     }
 }

@@ -60,6 +60,7 @@ pub mod quality;
 pub mod raster;
 pub mod recipes;
 pub mod scroll_physics;
+pub mod showcase;
 pub mod svg;
 pub mod target_painter;
 pub mod text_span;
@@ -122,6 +123,9 @@ pub use quality::{DprScale, QualityProfile};
 pub use recipes::{
     ComponentState, ComponentVariant, RecipeKind, A11Y_ROLES, COLOR_SLOTS, COMPONENT_STATES,
     COMPONENT_VARIANTS,
+};
+pub use showcase::{
+    visual_matrix, SceneCell, ShowcaseScene, ShowcaseTheme, FRAME_ARTIFACTS, SHOWCASE_VIEWPORTS,
 };
 pub use svg::{svg, svg_at};
 pub use target_painter::{PainterRequirements, TargetPainter};
