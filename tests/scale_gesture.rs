@@ -9,7 +9,8 @@
 //! `:76` kPanSlop 36, `:80` kScaleSlop == kTouchSlop.
 
 use opurom_render::{
-    Gesture, GestureEngine, GestureKind, PointerEvent, PointerKind, Rect, SCALE_SLOP, SCALE_UNIT,
+    Gesture, GestureEngine, GestureKind, Phase, PointerEvent, PointerKind, Rect, SCALE_SLOP,
+    SCALE_UNIT,
 };
 
 fn engine() -> GestureEngine {
@@ -167,4 +168,26 @@ fn scale_kind_parses_and_rejects_unknown_values() {
     assert_eq!(GestureKind::parse("scale"), Some(GestureKind::Scale));
     assert_eq!(GestureKind::Scale.name(), "scale");
     assert_eq!(GestureKind::parse("pinch"), None);
+}
+
+#[test]
+fn cancel_is_keyed_only_by_pointer_id_and_time() {
+    // Flutter cancelPointer carries only a pointer id (binding.dart:336-346,
+    // blob 15f48b2c4ec0bff2da1a89acbc47b1ca6d16f25c). The C bridge may send
+    // node_id 0 and zero coordinates; on_cancel locates the down by id.
+    let mut e = engine();
+    down(&mut e, 7, 60, 40, 0);
+    let cancel = event(PointerKind::Cancel, 7, 0, 0, 1);
+    assert_eq!(e.on_event(0, &cancel), None);
+    assert_eq!(e.phase(), Phase::Cancelled);
+    for kind in [
+        GestureKind::Tap,
+        GestureKind::DoubleTap,
+        GestureKind::LongPress,
+        GestureKind::Drag,
+        GestureKind::Scale,
+    ] {
+        assert!(e.arena_rejected(kind));
+    }
+    assert_eq!(e.dispatch(&cancel), None);
 }

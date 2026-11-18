@@ -551,6 +551,15 @@ impl GestureEngine {
     /// Dispatches one event along the hit path; the first node that yields a
     /// gesture consumes the event and stops propagation.
     pub fn dispatch(&mut self, event: &PointerEvent) -> Option<(u32, Gesture)> {
+        if event.kind == PointerKind::Cancel {
+            // Flutter's cancelPointer is keyed by pointer id only; a cancelled
+            // pointer may no longer hit any node (`binding.dart:336-346`).
+            let node = self
+                .down
+                .map(|d| d.node)
+                .or_else(|| self.scale.map(|t| t.node))?;
+            return self.on_cancel(node, event).map(|g| (node, g));
+        }
         let path = self.hit_test_path(event.global_x, event.global_y);
         let node = path.first().copied()?;
         let gesture = match event.kind {
@@ -826,22 +835,26 @@ impl GestureEngine {
     }
 
     /// Cancels the sequence without emitting a gesture (`long_press.dart:668`).
-    pub fn on_cancel(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
+    pub fn on_cancel(&mut self, _node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         if event.kind != PointerKind::Cancel {
             return None;
         }
-        if self.scale.is_some_and(|track| track.has(event.pointer_id)) {
-            self.scale = None;
-            if self.down.is_some_and(|d| d.pointer_id != event.pointer_id) {
-                return None;
+        if let Some(track) = self.scale {
+            if track.has(event.pointer_id) {
+                let primary = self.down.is_some_and(|d| d.pointer_id == event.pointer_id);
+                self.scale = None;
+                if !primary {
+                    return None;
+                }
             }
         }
         let Some(down) = self.down else { return None };
-        if down.node != node_id || down.pointer_id != event.pointer_id {
+        if down.pointer_id != event.pointer_id {
             return None;
         }
+        let node = down.node;
         for kind in GestureKind::all() {
-            self.arena.reject(node_id, kind);
+            self.arena.reject(node, kind);
         }
         self.down = None;
         self.phase = Phase::Cancelled;
