@@ -1684,16 +1684,20 @@ fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
             if alpha == 0 {
                 continue;
             }
-            canvas.set(
-                x,
-                y,
-                Rgba {
-                    r: px[0],
-                    g: px[1],
-                    b: px[2],
-                    a: alpha,
-                },
-            );
+            // Impeller `Color::Blend(kSrcOver)` premultiplies the source
+            // before blending (engine 371f772, impeller/geometry/color.cc:165-168).
+            // Straight-alpha PNG bytes are the stored source; premultiply
+            // their RGB with the effective alpha (coverage * opacity) so a
+            // translucent edge blends without a grey fringe. Fully opaque
+            // pixels are returned unchanged by premultiply_rgba, so every
+            // existing default golden stays byte-identical.
+            let source = crate::gradient::premultiply_rgba(crate::Rgba {
+                r: px[0],
+                g: px[1],
+                b: px[2],
+                a: alpha,
+            });
+            canvas.set(x, y, source);
         }
     }
 }
