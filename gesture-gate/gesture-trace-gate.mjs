@@ -30,6 +30,7 @@ const TESTS = [
   'drag_start_parity.rs',
   'gesture_conflict_team.rs',
   'gesture_extreme_sequences.rs',
+  'host_conflict_projection.rs',
   'force_press_parity.rs',
   'gesture_focus_semantics.rs',
   'gesture_hit_path.rs',
