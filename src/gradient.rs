@@ -253,3 +253,92 @@ mod layer_offset_tests {
         assert_eq!(compose_layer_offset(3, 4, 5, 6), (8, 10));
     }
 }
+
+/// Radial gradient rule, ported from Flutter 3.50.0
+/// `Gradient.radial` (`ui/painting.dart:5122-5150`) with `TileMode` semantics
+/// (`ui/painting.dart:4912-4981`). A point outside the radius decays to the
+/// end colour under clamp/repeat/mirror; under decal it is transparent black.
+/// Integer-only: coordinates are 16.16 fixed point, radius likewise; the
+/// squared distance test avoids sqrt while staying deterministic.
+pub fn radial_position(
+    px: i64,
+    py: i64,
+    cx: i64,
+    cy: i64,
+    radius_fp: i64,
+    mode: TileMode,
+) -> Option<i64> {
+    let dx = (px - cx) as i128;
+    let dy = (py - cy) as i128;
+    let r = radius_fp as i128;
+    let d2 = dx * dx + dy * dy;
+    let r2 = r * r;
+    if d2 >= r2 {
+        return match mode {
+            TileMode::Decal => None,
+            // At and beyond the edge the gradient is fully clamped to its end
+            // colour; repeat/mirror hit the same end stop at the boundary.
+            _ => Some(1024),
+        };
+    }
+    // t = distance / radius, scaled to 0..=1024 without sqrt: compare against
+    // precomputed thresholds via integer square root of the ratio.
+    // isqrt(d2) / radius = t; multiply t by 1024 with rounding.
+    let d = isqrt_i128(d2);
+    let one = 1024i64;
+    let t = ((d * one as i128) / r.max(1)).clamp(0, one as i128) as i64;
+    tile_position(t, mode)
+}
+
+/// Integer square root helper for radial positioning (floor).
+fn isqrt_i128(v: i128) -> i128 {
+    if v <= 0 {
+        return 0;
+    }
+    let mut x = v;
+    let mut r: i128 = 0;
+    let mut bit = 1i128 << 126;
+    while bit > x {
+        bit >>= 2;
+    }
+    while bit != 0 {
+        if x >= r + bit {
+            x -= r + bit;
+            r = (r >> 1) + bit;
+        } else {
+            r >>= 1;
+        }
+        bit >>= 2;
+    }
+    r
+}
+
+#[cfg(test)]
+mod radial_tests {
+    use super::{radial_position, TileMode};
+
+    #[test]
+    fn radial_edge_and_outside_match_flutter_tile_modes() {
+        // Centre and edge (fixed point 1<<16): centre t=0, edge t=1024.
+        let r = 1i64 << 16;
+        assert_eq!(radial_position(0, 0, 0, 0, r, TileMode::Clamp), Some(0));
+        assert_eq!(radial_position(r, 0, 0, 0, r, TileMode::Clamp), Some(1024));
+        assert_eq!(
+            radial_position(2 * r, 0, 0, 0, r, TileMode::Clamp),
+            Some(1024)
+        );
+        assert_eq!(radial_position(2 * r, 0, 0, 0, r, TileMode::Decal), None);
+        assert_eq!(
+            radial_position(2 * r, 0, 0, 0, r, TileMode::Repeat),
+            Some(1024)
+        );
+    }
+
+    #[test]
+    fn radial_midpoint_is_half_of_the_radius() {
+        let r = 1i64 << 16;
+        let half = (r / 2).max(1);
+        let t = radial_position(half, 0, 0, 0, r, TileMode::Clamp).unwrap();
+        assert!((500..=524).contains(&t), "midpoint t {t}");
+    }
+}
