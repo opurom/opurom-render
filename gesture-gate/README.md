@@ -18,6 +18,7 @@ native ABI, or renderer sources.
 | `gesture-e2e-regression.mjs` | end-to-end regression over the stack | `E2E_REGRESSION.md` |
 | `gesture-schema-consistency.mjs` | archive schema/source parity | `SCHEMA_CONSISTENCY.md` |
 | `gesture-baseline-loop.mjs` | baseline freeze/compare fault loop | `BASELINE_LOOP.md` |
+| `gesture-archive-freshness.mjs` | stale archive relabel detection | `ARCHIVE_FRESHNESS.md` |
 
 ## Why these metrics
 
