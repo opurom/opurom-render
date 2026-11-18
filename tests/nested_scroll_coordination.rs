@@ -15,9 +15,9 @@
 //! - `widgets/nested_scroll_view.dart:809-903`: inner/outer extents are
 //!   translated and clamped with `clampDouble(value, min, max)`.
 //! - `widgets/scroll_physics.dart:1021-1053` and
-//!   `physics/clamping_scroll_simulation.dart:250-264` at the pinned checkout:
-//!   edge flings spring back or clamp to the scroll extent with a continuous
-//!   decaying curve.
+//!   `widgets/scroll_simulation.dart:250-264` (the `ClampingScrollSimulation`
+//!   methods live in that file at the pinned checkout): edge flings spring
+//!   back or clamp to the scroll extent with a continuous decaying curve.
 //!
 //! Opurom keeps this projection pure and data-only: no new IR field and no
 //! runtime object tree. The tests pin a deterministic host-side coordinator
