@@ -460,6 +460,10 @@ struct NodeEntry {
 pub struct GestureEngine {
     nodes: Vec<NodeEntry>,
     down: Option<Down>,
+    /// Hit path captured at down, keyed by pointer id. Flutter reuses the
+    /// down-time path for every move/up/cancel of that pointer instead of
+    /// re-running hit testing (`gestures/binding.dart:407-448`).
+    hit_paths: Vec<(u32, Vec<u32>)>,
     scale: Option<ScaleTrack>,
     /// Opt-in long-press drag updates; off keeps the legacy post-trigger moves
     /// silent, so existing arena fingerprints stay byte-identical.
@@ -558,17 +562,53 @@ impl GestureEngine {
                 .down
                 .map(|d| d.node)
                 .or_else(|| self.scale.map(|t| t.node))?;
+            self.forget_path(event.pointer_id);
             return self.on_cancel(node, event).map(|g| (node, g));
         }
-        let path = self.hit_test_path(event.global_x, event.global_y);
-        let node = path.first().copied()?;
+        let path = match event.kind {
+            PointerKind::Down => {
+                let path = self.hit_test_path(event.global_x, event.global_y);
+                self.remember_path(event.pointer_id, &path);
+                path
+            }
+            // Down-time hit tests are cached per pointer (`binding.dart:432-438`).
+            PointerKind::Move | PointerKind::Up => self.path_for(event.pointer_id),
+            PointerKind::Cancel => Vec::new(),
+        };
+        let Some(node) = path.first().copied() else {
+            if event.kind == PointerKind::Up {
+                self.forget_path(event.pointer_id);
+            }
+            return None;
+        };
         let gesture = match event.kind {
             PointerKind::Down => self.on_down(node, event),
             PointerKind::Move => self.on_move(node, event),
             PointerKind::Up => self.on_up(node, event),
             PointerKind::Cancel => self.on_cancel(node, event),
         }?;
+        if event.kind == PointerKind::Up {
+            self.forget_path(event.pointer_id);
+        }
         Some((node, gesture))
+    }
+
+    /// Stores a leaf-to-root hit path for the lifetime of one pointer.
+    fn remember_path(&mut self, pointer: u32, path: &[u32]) {
+        self.forget_path(pointer);
+        self.hit_paths.push((pointer, path.to_vec()));
+    }
+
+    fn path_for(&self, pointer: u32) -> Vec<u32> {
+        self.hit_paths
+            .iter()
+            .find(|(id, _)| *id == pointer)
+            .map(|(_, path)| path.clone())
+            .unwrap_or_default()
+    }
+
+    fn forget_path(&mut self, pointer: u32) {
+        self.hit_paths.retain(|(id, _)| *id != pointer);
     }
 
     /// The next host tick the engine needs: the long-press deadline or the
