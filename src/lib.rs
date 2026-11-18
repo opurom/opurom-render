@@ -64,6 +64,7 @@ pub mod svg;
 pub mod target_painter;
 pub mod text_span;
 pub mod typography;
+pub mod visual_gate;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use anim::{
@@ -126,6 +127,11 @@ pub use svg::{svg, svg_at};
 pub use target_painter::{PainterRequirements, TargetPainter};
 pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
 pub use typography::{FontSource, TextRole, TypographySpec};
+pub use visual_gate::{
+    check_component_states, check_contrast, check_focus_states, check_min_touch_targets,
+    check_text_overlap, contrast_ratio_x100, relative_luminance_x100, LayoutFact, TextFact,
+    VisualFinding,
+};
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
