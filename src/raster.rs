@@ -1686,18 +1686,20 @@ fn draw_image(canvas: &mut Canvas, n: &LaidOut) {
             }
             // Impeller `Color::Blend(kSrcOver)` premultiplies the source
             // before blending (engine 371f772, impeller/geometry/color.cc:165-168).
-            // Straight-alpha PNG bytes are the stored source; premultiply
-            // their RGB with the effective alpha (coverage * opacity) so a
-            // translucent edge blends without a grey fringe. Fully opaque
-            // pixels are returned unchanged by premultiply_rgba, so every
-            // existing default golden stays byte-identical.
-            let source = crate::gradient::premultiply_rgba(crate::Rgba {
-                r: px[0],
-                g: px[1],
-                b: px[2],
-                a: alpha,
-            });
-            canvas.set(x, y, source);
+            // `Canvas::set_quiet` already performs that src-over product on
+            // the straight-alpha byte triple, so pre-multiplying here as well
+            // would square the alpha at translucent edges. Keep the stored
+            // PNG RGB straight and let the single blend apply coverage once.
+            canvas.set(
+                x,
+                y,
+                Rgba {
+                    r: px[0],
+                    g: px[1],
+                    b: px[2],
+                    a: alpha,
+                },
+            );
         }
     }
 }

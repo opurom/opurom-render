@@ -109,5 +109,5 @@ fn translucent_png_edges_blend_with_premultiplied_rgb() {
         "premultiplied edge red {}",
         px[0]
     );
-    assert_eq!(digest_hex(&px), "22fe7776d8703603");
+    assert_eq!(digest_hex(&px), "a6148a52a24ae1c3");
 }

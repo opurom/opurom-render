@@ -224,5 +224,5 @@ fn translucent_image_edge_is_composited_with_premultiplied_rgb() {
         "premultiplied edge red {}",
         px[0]
     );
-    assert_eq!(digest_hex(&px), "3781f56d26289663");
+    assert_eq!(digest_hex(&px), "d0e4225366511403");
 }
