@@ -33,6 +33,7 @@ const TESTS = [
   'host_conflict_projection.rs',
   'force_press_parity.rs',
   'gesture_focus_semantics.rs',
+  'gesture_semantics_report.rs',
   'gesture_hit_path.rs',
   'gesture_jank_tolerance.rs',
   'gesture_nested_report.rs',
