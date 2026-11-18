@@ -32,6 +32,7 @@ const FILES = {
   perf: 'perf.json',
   fairness: 'fairness.json',
   bounce: 'bounce.json',
+  semantics: 'semantics.json',
   replay: 'replay.json',
 };
 
@@ -92,8 +93,9 @@ function canonicalInputs(joint) {
   const perf = joint?.perf ?? null;
   const fairness = joint?.fairness ?? null;
   const bounce = joint?.bounce ?? null;
-  if (!perf || !fairness || !bounce) {
-    throw new Error('joint evidence lacks perf, fairness or bounce data');
+  const semantics = joint?.semantics ?? null;
+  if (!perf || !fairness || !bounce || !semantics) {
+    throw new Error('joint evidence lacks perf, fairness, bounce or semantics data');
   }
   if (!Array.isArray(perf.results) || perf.results.length === 0) {
     throw new Error('perf evidence lacks machine results');
@@ -103,6 +105,9 @@ function canonicalInputs(joint) {
   }
   if (!Array.isArray(bounce.results) || bounce.results.length === 0) {
     throw new Error('bounce evidence lacks machine results');
+  }
+  if (!Array.isArray(semantics.results) || semantics.results.length === 0) {
+    throw new Error('semantics evidence lacks machine results');
   }
   const perfCanonical = {
     schema: perf.schema,
@@ -124,18 +129,32 @@ function canonicalInputs(joint) {
     source: bounce.source,
     metrics: Object.fromEntries(bounce.results.map((item) => [item.metric, item.detail])),
   };
+  const semanticsCanonical = {
+    schema: semantics.schema,
+    status: semantics.status,
+    source: semantics.source,
+    digest: semantics.digest ?? null,
+    metrics: Object.fromEntries(semantics.results.map((item) => [item.metric, item.detail])),
+  };
   const replayCanonical = {
     schema: 'opurom.gesture.replay/1',
     source: fairness.source,
     cases: fairnessCanonical.cases,
     perf_order: perfCanonical.metrics,
     bounce_order: bounceCanonical.metrics,
+    semantics_order: semanticsCanonical.metrics,
   };
-  return { perfCanonical, fairnessCanonical, bounceCanonical, replayCanonical };
+  return { perfCanonical, fairnessCanonical, bounceCanonical, semanticsCanonical, replayCanonical };
 }
 
 function writeArchive(outDir, joint) {
-  const { perfCanonical, fairnessCanonical, bounceCanonical, replayCanonical } = canonicalInputs(joint);
+  const {
+    perfCanonical,
+    fairnessCanonical,
+    bounceCanonical,
+    semanticsCanonical,
+    replayCanonical,
+  } = canonicalInputs(joint);
   const documents = {
     joint: {
       schema: 'opurom.gesture.joint.evidence/1',
@@ -148,6 +167,7 @@ function writeArchive(outDir, joint) {
     perf: perfCanonical,
     fairness: fairnessCanonical,
     bounce: bounceCanonical,
+    semantics: semanticsCanonical,
     replay: replayCanonical,
   };
   mkdirSync(resolve(outDir), { recursive: true });

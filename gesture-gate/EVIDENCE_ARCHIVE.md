@@ -24,6 +24,7 @@ Given `--out <dir>`, the archiver writes:
 - `perf.json` — canonical `opurom.gesture.gate/1` metrics.
 - `fairness.json` — canonical seven-case fairness evidence.
 - `bounce.json` — canonical iOS bounce physics metrics.
+- `semantics.json` — canonical semantics and focus chain metrics.
 - `replay.json` — `opurom.gesture.replay/1` canonical case/order projection.
 - `manifest.json` — `opurom.gesture.manifest/1` with sorted-key JSON, byte
   count and SHA-256 for every file.

@@ -18,6 +18,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const PERF_GATE = join(ROOT, 'gesture-gate', 'gesture-perf-gate.mjs');
 const BOUNCE_GATE = join(ROOT, 'gesture-gate', 'gesture-bounce-gate.mjs');
+const SEMANTICS_GATE = join(ROOT, 'gesture-gate', 'gesture-semantics-gate.mjs');
 const FAIRNESS_TEST = 'multi_pointer_fairness';
 const FAIRNESS_CASES = [
   'simultaneous_downs_open_independent_arenas',
@@ -32,6 +33,7 @@ const JOINT_SCHEMA = 'opurom.gesture.joint/1';
 const FAIRNESS_SCHEMA = 'opurom.gesture.fairness/1';
 const PERF_SCHEMA = 'opurom.gesture.gate/1';
 const BOUNCE_SCHEMA = 'opurom.gesture.bounce.gate/1';
+const SEMANTICS_SCHEMA = 'opurom.gesture.semantics.gate/1';
 const JOINT_SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 
 function parseArgs(argv) {
@@ -39,6 +41,7 @@ function parseArgs(argv) {
     perf: null,
     fairness: null,
     bounce: null,
+    semantics: null,
     baseline: null,
     writeBaseline: null,
     selfTest: null,
@@ -49,6 +52,7 @@ function parseArgs(argv) {
     if (arg === '--perf') args.perf = argv[++i];
     else if (arg === '--fairness') args.fairness = argv[++i];
     else if (arg === '--bounce') args.bounce = argv[++i];
+    else if (arg === '--semantics') args.semantics = argv[++i];
     else if (arg === '--baseline') args.baseline = argv[++i];
     else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
     else if (arg === '--self-test') args.selfTest = argv[++i];
@@ -121,7 +125,19 @@ function generateBounceReport() {
   return readJsonFromText(output, BOUNCE_SCHEMA, 'bounce gate output');
 }
 
-function makeJoint(perf, fairness, bounce) {
+function generateSemanticsReport() {
+  const child = spawnSync(process.execPath, [SEMANTICS_GATE], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
+  if (child.status !== 0) throw new Error(`semantics gate failed (${child.status}): ${output.slice(-800)}`);
+  return readJsonFromText(output, SEMANTICS_SCHEMA, 'semantics gate output');
+}
+
+function makeJoint(perf, fairness, bounce, semantics) {
   return {
     schema: JOINT_SCHEMA,
     source: JOINT_SOURCE,
@@ -129,6 +145,7 @@ function makeJoint(perf, fairness, bounce) {
     perf,
     fairness,
     bounce,
+    semantics,
   };
 }
 
@@ -175,12 +192,28 @@ function evaluate(joint, baseline) {
     detail: `results=${Array.isArray(bounceResults) ? bounceResults.length : 0}`,
     reason: 'machine-readable bounce evidence must be present',
   });
+  const semanticsStatus = joint?.semantics?.status;
+  results.push({
+    check: 'semantics_gate_status',
+    verdict: semanticsStatus === 'PASS' || semanticsStatus === 'N/A' ? 'PASS' : 'FAIL',
+    detail: `status=${semanticsStatus ?? 'missing'}`,
+    reason: 'the semantics gate must not FAIL',
+  });
+  const semanticsResults = joint?.semantics?.results ?? [];
+  results.push({
+    check: 'semantics_machine_report',
+    verdict: Array.isArray(semanticsResults) && semanticsResults.length > 0 ? 'PASS' : 'FAIL',
+    detail: `results=${Array.isArray(semanticsResults) ? semanticsResults.length : 0}`,
+    reason: 'machine-readable semantics evidence must be present',
+  });
   if (baseline) {
     const bCases = baseline?.fairness?.cases ?? [];
     const bResults = baseline?.perf?.results ?? [];
     const currentResults = joint?.perf?.results ?? [];
     const bBounce = baseline?.bounce?.results ?? [];
     const currentBounce = joint?.bounce?.results ?? [];
+    const bSemantics = baseline?.semantics?.results ?? [];
+    const currentSemantics = joint?.semantics?.results ?? [];
     const bMetrics = new Map(bResults.map((item) => [item.metric, item.detail]));
     const currentMetrics = new Map(currentResults.map((item) => [item.metric, item.detail]));
     const bBounceMetrics = new Map(bBounce.map((item) => [item.metric, item.detail]));
@@ -191,12 +224,16 @@ function evaluate(joint, baseline) {
       && [...bMetrics.keys()].every((key) => currentMetrics.has(key));
     const sameBounce = bBounceMetrics.size > 0
       && [...bBounceMetrics.keys()].every((key) => currentBounceMetrics.has(key));
+    const bSemanticsMetrics = new Map(bSemantics.map((item) => [item.metric, item.detail]));
+    const currentSemanticsMetrics = new Map(currentSemantics.map((item) => [item.metric, item.detail]));
+    const sameSemantics = bSemanticsMetrics.size > 0
+      && [...bSemanticsMetrics.keys()].every((key) => currentSemanticsMetrics.has(key));
     results.push({
       check: 'baseline_comparability',
-      verdict: sameCases && sameMetrics && sameBounce ? 'PASS' : 'FAIL',
-      detail: sameCases && sameMetrics && sameBounce
+      verdict: sameCases && sameMetrics && sameBounce && sameSemantics ? 'PASS' : 'FAIL',
+      detail: sameCases && sameMetrics && sameBounce && sameSemantics
         ? 'baseline schema and fields match'
-        : 'baseline lacks matching fairness, perf or bounce results',
+        : 'baseline lacks matching fairness, perf, bounce or semantics results',
       reason: 'a frozen baseline must carry the same evidence fields',
     });
   }
@@ -216,6 +253,7 @@ function emit(status, joint, baseline, results, note, raw = false) {
     payload.perf = joint.perf;
     payload.fairness = joint.fairness;
     payload.bounce = joint.bounce;
+    payload.semantics = joint.semantics;
   }
   console.log(JSON.stringify(payload, null, 2));
 }
@@ -226,7 +264,8 @@ function main() {
     const perf = generatePerfReport();
     const fairness = generateFairnessReport();
     const bounce = generateBounceReport();
-    const joint = makeJoint(perf, fairness, bounce);
+    const semantics = generateSemanticsReport();
+    const joint = makeJoint(perf, fairness, bounce, semantics);
     if (args.selfTest === 'pass') {
       const results = evaluate(joint, null);
       const ok = results.every((r) => r.verdict === 'PASS');
@@ -251,7 +290,10 @@ function main() {
   const perf = args.perf ? readJson(args.perf, 'perf report', PERF_SCHEMA) : generatePerfReport();
   const fairness = args.fairness ? readJson(args.fairness, 'fairness report', FAIRNESS_SCHEMA) : generateFairnessReport();
   const bounce = args.bounce ? readJson(args.bounce, 'bounce report', BOUNCE_SCHEMA) : generateBounceReport();
-  const joint = makeJoint(perf, fairness, bounce);
+  const semantics = args.semantics
+    ? readJson(args.semantics, 'semantics report', SEMANTICS_SCHEMA)
+    : generateSemanticsReport();
+  const joint = makeJoint(perf, fairness, bounce, semantics);
   if (args.writeBaseline) {
     const path = resolve(args.writeBaseline);
     mkdirSync(dirname(path), { recursive: true });

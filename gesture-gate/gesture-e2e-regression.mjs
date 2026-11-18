@@ -38,6 +38,7 @@ const ARCHIVE_FILES = [
   'perf.json',
   'fairness.json',
   'bounce.json',
+  'semantics.json',
   'replay.json',
 ];
 
@@ -168,6 +169,18 @@ function runRegression(archiveDir) {
   record('bounce_evidence_stable',
     stableJson(archivedBounce.metrics ?? {}) === stableJson(jointBounceMetrics) ? 'PASS' : 'FAIL',
     `metrics=${Object.keys(archivedBounce.metrics ?? {}).length}`);
+
+  // The archived semantics evidence must carry the same metrics and digest
+  // as the joint verdict it was built from.
+  const archivedSemantics = JSON.parse(readFileSync(join(archiveDir, 'semantics.json'), 'utf8'));
+  const jointSemanticsMetrics = Object.fromEntries(
+    (evidence.json.semantics?.results ?? []).map((item) => [item.metric, item.detail]),
+  );
+  record('semantics_evidence_stable',
+    stableJson(archivedSemantics.metrics ?? {}) === stableJson(jointSemanticsMetrics)
+      && (archivedSemantics.digest ?? null) === (evidence.json.semantics?.digest ?? null)
+      ? 'PASS' : 'FAIL',
+    `metrics=${Object.keys(archivedSemantics.metrics ?? {}).length}`);
 
   // Replay: regenerate the verdict from a fresh run and compare it with the
   // archived one. A deterministic gate must produce an identical verdict.
