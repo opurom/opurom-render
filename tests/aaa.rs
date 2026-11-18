@@ -124,3 +124,20 @@ fn wang_conic_count_is_monotone_and_matches_impeller_tolerance() {
     }
     assert!(conic_quad_count_wang(512) > conic_quad_count_wang(32));
 }
+
+#[test]
+fn wang_bezier_subdivisions_scale_with_control_net() {
+    use opurom_render::aaa::{cubic_subdivisions, quad_subdivisions};
+    // Straight quadratic/cubic curves need one segment; stronger control nets
+    // need more, exactly as Impeller ComputeQuadradic/ComputeCubicSubdivisions
+    // (engine 371f772, impeller/geometry/wangs_formula.cc:18-37).
+    assert_eq!(quad_subdivisions((0, 0), (5, 0), (10, 0)), 1);
+    assert_eq!(cubic_subdivisions((0, 0), (3, 0), (6, 0), (10, 0)), 1);
+    let q = quad_subdivisions((0, 0), (5, 10), (10, 0));
+    let q2 = quad_subdivisions((0, 0), (5, 20), (10, 0));
+    assert!(q > 1 && q2 > q, "quadratic: {q} then {q2}");
+    let c = cubic_subdivisions((0, 0), (0, 10), (10, 10), (10, 0));
+    let c2 = cubic_subdivisions((0, 0), (0, 20), (10, 20), (10, 0));
+    assert!(c > 1 && c2 > c, "cubic: {c} then {c2}");
+    assert!(q <= 32 && c <= 32);
+}

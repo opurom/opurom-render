@@ -738,6 +738,41 @@ pub fn round_rect_path_radii(x: i64, y: i64, w: i64, h: i64, radii: RoundingRadi
     segs
 }
 
+/// Number of quadratic segments needed to linearise a quadratic Bezier within
+/// Impeller's 1/4 px tolerance (`wangs_formula.cc:14`, `:31-37`).
+///
+/// `n = sqrt(scale * 0.25 * 4 * |p0 - 2p1 + p2|)`, with points in logical
+/// pixels and a 1024 fixed-point scale factor for subpixel precision. The
+/// result is capped at 32, matching Skia's maximum conic subdivision.
+pub fn quad_subdivisions(p0: (i64, i64), p1: (i64, i64), p2: (i64, i64)) -> u32 {
+    let dx = (p0.0 as i128 - 2 * p1.0 as i128 + p2.0 as i128) * 1024;
+    let dy = (p0.1 as i128 - 2 * p1.1 as i128 + p2.1 as i128) * 1024;
+    let len_sq = dx * dx + dy * dy;
+    let n = isqrt(len_sq);
+    // n is length*1024 where length = |p0-2p1+p2|; apply sqrt(scale*0.25*4)
+    // = sqrt(1024) = 32 in the same fixed-point domain.
+    let segments = isqrt((n as i128) * 32 * 1024) / 1024;
+    segments.max(1).min(32) as u32
+}
+
+/// Number of line segments needed to linearise a cubic Bezier within Impeller's
+/// 1/4 px tolerance (`wangs_formula.cc:14`, `:18-28`).
+pub fn cubic_subdivisions(p0: (i64, i64), p1: (i64, i64), p2: (i64, i64), p3: (i64, i64)) -> u32 {
+    let a = (
+        p0.0 as i128 - 2 * p1.0 as i128 + p2.0 as i128,
+        p0.1 as i128 - 2 * p1.1 as i128 + p2.1 as i128,
+    );
+    let b = (
+        p1.0 as i128 - 2 * p2.0 as i128 + p3.0 as i128,
+        p1.1 as i128 - 2 * p2.1 as i128 + p3.1 as i128,
+    );
+    let max_len = (a.0 * a.0 + a.1 * a.1).max(b.0 * b.0 + b.1 * b.1);
+    // sqrt(k * sqrt(max_len)), k = 0.75*4 = 3, in 1024 fixed point.
+    let inner = isqrt(max_len * 1_048_576);
+    let segments = isqrt((inner as i128) * 3 * 1024) / 1024;
+    segments.max(1).min(32) as u32
+}
+
 /// Integer square root of a non-negative i128, floor-rounded.
 fn isqrt(v: i128) -> i64 {
     if v <= 0 {
