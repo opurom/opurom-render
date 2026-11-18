@@ -14,7 +14,8 @@ regression in any layer of the stack is observable as a non-zero exit code.
    compares the fresh run against that baseline and emits the raw joint
    document.
 3. **Archive** — `gesture-evidence-archive.mjs --out --joint` writes the
-   canonical JSON set plus the SHA-256 manifest.
+   canonical JSON set plus the SHA-256 manifest. The set now carries the
+   performance, fairness and iOS bounce evidence.
 4. **Verify the manifest** — `gesture-evidence-archive.mjs --verify` re-hashes
    every archived file and the manifest itself.
 5. **Replay the verdict** — the joint gate runs again; the replayed status,
@@ -46,7 +47,8 @@ The report is `opurom.gesture.e2e/1` JSON on stdout.
 | `joint_evidence_status` | the baseline-compared joint verdict is `PASS` |
 | `manifest_verified` | the archiver verifies the SHA-256 manifest |
 | `manifest_self_hash` | `manifest.json` matches `manifest.json.sha256` |
-| `archive_files_present` | all four archived documents exist |
+| `archive_files_present` | all five archived documents exist |
+| `bounce_evidence_stable` | the archived bounce metrics match the joint verdict |
 | `replay_verdict_stable` | the replayed verdict equals the archived verdict |
 | `archive_deterministic` | two archives share one manifest hash |
 | `tamper_detected` | a modified archive is rejected |

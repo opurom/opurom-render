@@ -15,6 +15,8 @@ verdict:
    - `fairness_boundary_first_join_order_is_stable`
    - `multi_pointer_contest_is_deterministic_on_replay`
 2. The `opurom.gesture.gate/1` report from `gesture-perf-gate.mjs`.
+3. The `opurom.gesture.bounce.gate/1` report from `gesture-bounce-gate.mjs`
+   (the iOS bounce scroll physics).
 
 Flutter 3.50.0 source anchors (`ab2912035e160d9cad6306df307576da6128ebdb`):
 
@@ -42,6 +44,10 @@ that as valid perf evidence, not a failure.
 
 ## Usage
 
+The bounce evidence is optional input: when it is not supplied the gate
+generates it, and `bounce_gate_status` plus `bounce_machine_report` report
+its verdict.
+
 ```sh
 # Fresh evidence, absolute checks only (N/A when no baseline exists).
 node gesture-gate/gesture-fairness-perf-gate.mjs
@@ -54,7 +60,8 @@ node gesture-gate/gesture-fairness-perf-gate.mjs --baseline baseline.json
 
 # Reuse existing reports.
 node gesture-gate/gesture-fairness-perf-gate.mjs \
-  --perf perf.json --fairness fairness.json --baseline baseline.json
+  --perf perf.json --fairness fairness.json --bounce bounce.json \
+  --baseline baseline.json
 
 # Self tests: PASS, N/A and FAIL.
 node gesture-gate/gesture-fairness-perf-gate.mjs --self-test pass

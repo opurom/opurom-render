@@ -6,6 +6,7 @@
 //   node gesture-gate/gesture-fairness-perf-gate.mjs \
 //     [--perf <opurom.gesture.gate/1 JSON>] \
 //     [--fairness <opurom.gesture.fairness/1 JSON>] \
+//     [--bounce <opurom.gesture.bounce.gate/1 JSON>] \
 //     [--baseline <joint JSON>] [--write-baseline <joint JSON>] \
 //     [--self-test pass|na|fail]
 //
@@ -16,6 +17,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const PERF_GATE = join(ROOT, 'gesture-gate', 'gesture-perf-gate.mjs');
+const BOUNCE_GATE = join(ROOT, 'gesture-gate', 'gesture-bounce-gate.mjs');
 const FAIRNESS_TEST = 'multi_pointer_fairness';
 const FAIRNESS_CASES = [
   'simultaneous_downs_open_independent_arenas',
@@ -29,14 +31,24 @@ const FAIRNESS_CASES = [
 const JOINT_SCHEMA = 'opurom.gesture.joint/1';
 const FAIRNESS_SCHEMA = 'opurom.gesture.fairness/1';
 const PERF_SCHEMA = 'opurom.gesture.gate/1';
+const BOUNCE_SCHEMA = 'opurom.gesture.bounce.gate/1';
 const JOINT_SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 
 function parseArgs(argv) {
-  const args = { perf: null, fairness: null, baseline: null, writeBaseline: null, selfTest: null, raw: false };
+  const args = {
+    perf: null,
+    fairness: null,
+    bounce: null,
+    baseline: null,
+    writeBaseline: null,
+    selfTest: null,
+    raw: false,
+  };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--perf') args.perf = argv[++i];
     else if (arg === '--fairness') args.fairness = argv[++i];
+    else if (arg === '--bounce') args.bounce = argv[++i];
     else if (arg === '--baseline') args.baseline = argv[++i];
     else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
     else if (arg === '--self-test') args.selfTest = argv[++i];
@@ -97,13 +109,26 @@ function generateFairnessReport() {
   };
 }
 
-function makeJoint(perf, fairness) {
+function generateBounceReport() {
+  const child = spawnSync(process.execPath, [BOUNCE_GATE], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
+  if (child.status !== 0) throw new Error(`bounce gate failed (${child.status}): ${output.slice(-800)}`);
+  return readJsonFromText(output, BOUNCE_SCHEMA, 'bounce gate output');
+}
+
+function makeJoint(perf, fairness, bounce) {
   return {
     schema: JOINT_SCHEMA,
     source: JOINT_SOURCE,
     generated_by: basename(new URL(import.meta.url).pathname),
     perf,
     fairness,
+    bounce,
   };
 }
 
@@ -136,20 +161,42 @@ function evaluate(joint, baseline) {
     detail: `exit=${joint?.fairness?.runner_status}`,
     reason: 'cargo test multi_pointer_fairness must exit 0',
   });
+  const bounceStatus = joint?.bounce?.status;
+  results.push({
+    check: 'bounce_gate_status',
+    verdict: bounceStatus === 'PASS' || bounceStatus === 'N/A' ? 'PASS' : 'FAIL',
+    detail: `status=${bounceStatus ?? 'missing'}`,
+    reason: 'the bounce physics gate must not FAIL',
+  });
+  const bounceResults = joint?.bounce?.results ?? [];
+  results.push({
+    check: 'bounce_machine_report',
+    verdict: Array.isArray(bounceResults) && bounceResults.length > 0 ? 'PASS' : 'FAIL',
+    detail: `results=${Array.isArray(bounceResults) ? bounceResults.length : 0}`,
+    reason: 'machine-readable bounce evidence must be present',
+  });
   if (baseline) {
     const bCases = baseline?.fairness?.cases ?? [];
     const bResults = baseline?.perf?.results ?? [];
     const currentResults = joint?.perf?.results ?? [];
+    const bBounce = baseline?.bounce?.results ?? [];
+    const currentBounce = joint?.bounce?.results ?? [];
     const bMetrics = new Map(bResults.map((item) => [item.metric, item.detail]));
     const currentMetrics = new Map(currentResults.map((item) => [item.metric, item.detail]));
+    const bBounceMetrics = new Map(bBounce.map((item) => [item.metric, item.detail]));
+    const currentBounceMetrics = new Map(currentBounce.map((item) => [item.metric, item.detail]));
     const sameCases = bCases.length === FAIRNESS_CASES.length
       && FAIRNESS_CASES.every((name) => bCases.includes(name));
     const sameMetrics = bMetrics.size > 0
       && [...bMetrics.keys()].every((key) => currentMetrics.has(key));
+    const sameBounce = bBounceMetrics.size > 0
+      && [...bBounceMetrics.keys()].every((key) => currentBounceMetrics.has(key));
     results.push({
       check: 'baseline_comparability',
-      verdict: sameCases && sameMetrics ? 'PASS' : 'FAIL',
-      detail: sameCases && sameMetrics ? 'baseline schema and fields match' : 'baseline lacks matching fairness or perf results',
+      verdict: sameCases && sameMetrics && sameBounce ? 'PASS' : 'FAIL',
+      detail: sameCases && sameMetrics && sameBounce
+        ? 'baseline schema and fields match'
+        : 'baseline lacks matching fairness, perf or bounce results',
       reason: 'a frozen baseline must carry the same evidence fields',
     });
   }
@@ -168,6 +215,7 @@ function emit(status, joint, baseline, results, note, raw = false) {
   if (raw) {
     payload.perf = joint.perf;
     payload.fairness = joint.fairness;
+    payload.bounce = joint.bounce;
   }
   console.log(JSON.stringify(payload, null, 2));
 }
@@ -177,7 +225,8 @@ function main() {
   if (args.selfTest) {
     const perf = generatePerfReport();
     const fairness = generateFairnessReport();
-    const joint = makeJoint(perf, fairness);
+    const bounce = generateBounceReport();
+    const joint = makeJoint(perf, fairness, bounce);
     if (args.selfTest === 'pass') {
       const results = evaluate(joint, null);
       const ok = results.every((r) => r.verdict === 'PASS');
@@ -201,7 +250,8 @@ function main() {
 
   const perf = args.perf ? readJson(args.perf, 'perf report', PERF_SCHEMA) : generatePerfReport();
   const fairness = args.fairness ? readJson(args.fairness, 'fairness report', FAIRNESS_SCHEMA) : generateFairnessReport();
-  const joint = makeJoint(perf, fairness);
+  const bounce = args.bounce ? readJson(args.bounce, 'bounce report', BOUNCE_SCHEMA) : generateBounceReport();
+  const joint = makeJoint(perf, fairness, bounce);
   if (args.writeBaseline) {
     const path = resolve(args.writeBaseline);
     mkdirSync(dirname(path), { recursive: true });

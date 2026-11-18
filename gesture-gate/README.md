@@ -8,7 +8,8 @@ native ABI, or renderer sources.
 | script | purpose | doc |
 | --- | --- | --- |
 | `gesture-perf-gate.mjs` | machine-readable performance verdict | this file |
-| `gesture-fairness-perf-gate.mjs` | joint fairness + performance verdict | `JOINT_GATE.md` |
+| `gesture-bounce-gate.mjs` | iOS bounce physics verdict | `BOUNCE_GATE.md` |
+| `gesture-fairness-perf-gate.mjs` | joint fairness + performance + bounce verdict | `JOINT_GATE.md` |
 | `gesture-evidence-archive.mjs` | SHA-256 evidence archive | `EVIDENCE_ARCHIVE.md` |
 | `gesture-e2e-regression.mjs` | end-to-end regression over the stack | `E2E_REGRESSION.md` |
 

@@ -33,7 +33,13 @@ const JOINT_GATE = join(ROOT, 'gesture-gate', 'gesture-fairness-perf-gate.mjs');
 const ARCHIVER = join(ROOT, 'gesture-gate', 'gesture-evidence-archive.mjs');
 const E2E_SCHEMA = 'opurom.gesture.e2e/1';
 const SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
-const ARCHIVE_FILES = ['joint.json', 'perf.json', 'fairness.json', 'replay.json'];
+const ARCHIVE_FILES = [
+  'joint.json',
+  'perf.json',
+  'fairness.json',
+  'bounce.json',
+  'replay.json',
+];
 
 function parseArgs(argv) {
   const args = { out: null, selfTest: null };
@@ -152,6 +158,16 @@ function runRegression(archiveDir) {
   record('archive_files_present',
     archivedFiles && manifest.files.length === ARCHIVE_FILES.length ? 'PASS' : 'FAIL',
     `files=${manifest.files.length}`);
+
+  // The archived bounce evidence must carry the same metrics as the joint
+  // verdict it was built from.
+  const archivedBounce = JSON.parse(readFileSync(join(archiveDir, 'bounce.json'), 'utf8'));
+  const jointBounceMetrics = Object.fromEntries(
+    (evidence.json.bounce?.results ?? []).map((item) => [item.metric, item.detail]),
+  );
+  record('bounce_evidence_stable',
+    stableJson(archivedBounce.metrics ?? {}) === stableJson(jointBounceMetrics) ? 'PASS' : 'FAIL',
+    `metrics=${Object.keys(archivedBounce.metrics ?? {}).length}`);
 
   // Replay: regenerate the verdict from a fresh run and compare it with the
   // archived one. A deterministic gate must produce an identical verdict.
