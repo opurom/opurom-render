@@ -932,3 +932,57 @@ pub fn round_rect_walker_edges(
     }
     edges
 }
+
+/// Unified corner arc segment count for a rounded corner of logical-pixel
+/// `radius`, resolved from the two pinned sources:
+/// - Skia `SkConic::computeQuadPOW2` at 1/8 px tolerance
+///   (`SkGeometry.cpp:1492`; pinned revision
+///   0e5d8d1be81b22f5529a41cf4810dd89b63527ba via `DEPS:18,505`) — the rule
+///   already implemented by [`conic_quad_pow2`].
+/// - Impeller `ComputeConicSubdivisions` at `kPrecision = 4` (1/4 px)
+///   (`wangs_formula.cc:14,45-77`) — a second, independent bound.
+///
+/// The renderer takes the larger of the two bounds: Skia's tolerance is
+/// tighter at small radii, Impeller's bound dominates for very large radii,
+/// so neither can undershoot the pinned curve. The count is capped at 32
+/// (Skia `kMaxConicToQuadPOW2`) and floored at 1. Small radii keep a small
+/// count (no fixed 32-segment floor); large radii keep smoothness.
+pub fn corner_arc_segments(radius: i64) -> u32 {
+    let skia_pow2 = conic_quad_pow2(radius, 1, 8) as u32;
+    let skia_count = 1u32 << skia_pow2;
+    let wang_count = conic_quad_count_wang(radius);
+    skia_count.max(wang_count).clamp(1, 32)
+}
+
+#[cfg(test)]
+mod corner_density_tests {
+    use super::{conic_quad_count_wang, conic_quad_pow2, corner_arc_segments};
+
+    #[test]
+    fn corner_density_unifies_skia_and_impeller_bounds() {
+        // Small radii stay cheap: no fixed 32-segment floor.
+        assert_eq!(corner_arc_segments(1), 1);
+        assert_eq!(corner_arc_segments(2), 1);
+        // Skia's 1/8 px rule is the tighter bound here.
+        assert!(corner_arc_segments(10) > 1);
+        assert!(corner_arc_segments(10) <= 32);
+        // Both sources are respected: the result never falls below either.
+        for r in [1i64, 4, 8, 16, 32, 64, 128, 256, 512] {
+            let n = corner_arc_segments(r);
+            let skia = 1u32 << conic_quad_pow2(r, 1, 8);
+            let wang = conic_quad_count_wang(r);
+            assert!(
+                n >= skia && n >= wang,
+                "radius {r}: {n} < skia {skia} or wang {wang}"
+            );
+            assert!(n <= 32);
+        }
+        // Monotone in radius.
+        let mut prev = 0;
+        for r in 1..=1024 {
+            let n = corner_arc_segments(r);
+            assert!(n >= prev, "radius {r}: {n} < {prev}");
+            prev = n;
+        }
+    }
+}
