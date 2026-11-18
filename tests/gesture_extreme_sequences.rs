@@ -110,7 +110,12 @@ fn extreme_coordinates_converge_without_panic() {
         ];
         let first = result_stream(&mut e, &stream);
         assert_eq!(first, result_stream(&mut engine(), &stream));
-        assert!(e.next_deadline_ms().is_none_or(|d| d <= i64::MAX));
+        // The pointer is already up, so no timer remains.
+        assert_eq!(e.next_deadline_ms(), None);
+        // The sequence never wins a gesture: a down at those coordinates
+        // misses every registered node and never enters Pending.
+        assert_eq!(e.arena_winner(), None);
+        assert_eq!(e.phase(), opurom_render::Phase::Idle);
     }
 }
 
