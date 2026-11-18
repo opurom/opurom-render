@@ -588,6 +588,9 @@ pub enum Op {
     Set,
     Add,
     Sub,
+    Mul,
+    Div,
+    Backspace,
     Toggle,
     /// Append one element to a list state (`items.append(value)`).
     Append,
@@ -1826,6 +1829,9 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         "set" => Op::Set,
         "add" => Op::Add,
         "sub" => Op::Sub,
+        "mul" => Op::Mul,
+        "div" => Op::Div,
+        "backspace" => Op::Backspace,
         "toggle" => Op::Toggle,
         "append" => Op::Append,
         "removeAt" => Op::RemoveAt,
@@ -1910,10 +1916,15 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
                     "{what}.valueFrom type does not match {target:?}"
                 )));
             }
-            if matches!(op, Op::Add | Op::Sub) && decl.typ != ValueType::Int {
+            if matches!(op, Op::Add | Op::Sub | Op::Mul | Op::Div) && decl.typ != ValueType::Int {
                 return Err(bad(format!(
                     "{what}: {} needs an int target",
-                    if op == Op::Sub { "sub" } else { "add" }
+                    match op {
+                        Op::Add => "add",
+                        Op::Sub => "sub",
+                        Op::Mul => "mul",
+                        _ => "div",
+                    }
                 )));
             }
             Some(name)
@@ -1930,8 +1941,13 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
         None => None,
     };
     match op {
-        Op::Add | Op::Sub => {
-            let label = if op == Op::Sub { "sub" } else { "add" };
+        Op::Add | Op::Sub | Op::Mul | Op::Div => {
+            let label = match op {
+                Op::Add => "add",
+                Op::Sub => "sub",
+                Op::Mul => "mul",
+                _ => "div",
+            };
             let numeric = match &value {
                 Some(StateValue::Int(_)) => true,
                 Some(_) => false,
@@ -1941,6 +1957,16 @@ fn action(a: &Map<String, Value>, what: &str, decls: &[StateDecl]) -> Result<Act
                 return Err(bad(format!(
                     "{what}: {label} needs an int target and an int value or valueFrom"
                 )));
+            }
+        }
+        Op::Backspace => {
+            if !matches!(decl.typ, ValueType::Int | ValueType::Str) {
+                return Err(bad(format!(
+                    "{what}: backspace needs an int or string target"
+                )));
+            }
+            if value.is_some() || value_from.is_some() {
+                return Err(bad(format!("{what}: backspace takes no value")));
             }
         }
         Op::Toggle => {
