@@ -16,6 +16,10 @@ import { dirname, join, resolve } from 'node:path';
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const SCHEMA = 'opurom.gesture.trace/1';
 const SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
+const SOURCES = [
+  'src/gestures.rs',
+  'src/scroll_physics.rs',
+];
 const TESTS = [
   'advanced_gesture_parity.rs',
   'advanced_gesture_thresholds.rs',
@@ -58,6 +62,19 @@ function collectAnchors() {
   const anchors = [];
   for (const name of TESTS) {
     const path = join(ROOT, 'tests', name);
+    if (!existsSync(path)) continue;
+    const text = readFileSync(path, 'utf8');
+    for (const match of text.matchAll(PATTERN)) {
+      anchors.push({
+        test: name,
+        file: match[1],
+        start: Number(match[2]),
+        end: match[3] ? Number(match[3]) : Number(match[2]),
+      });
+    }
+  }
+  for (const name of SOURCES) {
+    const path = join(ROOT, name);
     if (!existsSync(path)) continue;
     const text = readFileSync(path, 'utf8');
     for (const match of text.matchAll(PATTERN)) {
@@ -117,7 +134,8 @@ function evaluate(flutterDir) {
     status: failed ? 'FAIL' : 'PASS',
     checks,
     stats: {
-      tests: TESTS.filter((name) => existsSync(join(ROOT, 'tests', name))).length,
+      tests: TESTS.filter((name) => existsSync(join(ROOT, 'tests', name))).length
+        + SOURCES.filter((name) => existsSync(join(ROOT, name))).length,
       anchors: anchors.length,
       files: byFile.size,
       lines_checked: linesOutOfRange === 0 ? linesChecked : 0,

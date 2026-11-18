@@ -3,10 +3,11 @@
 This is an additive gate over the gesture test suite. It does not edit shared
 CI files, IR, the native ABI, or renderer sources.
 
-Every gesture test documents its Flutter source anchors as
-`file.dart:start-end` comments. This gate extracts those anchors and checks
-that the referenced file exists in the pinned Flutter checkout and that every
-line is within the file. It catches comment drift after an upgrade.
+Every gesture test and the two gesture source files document their Flutter
+source anchors as `file.dart:start-end` comments. This gate extracts those
+anchors and checks that the referenced file exists in the pinned Flutter
+checkout and that every line is within the file. It catches comment drift
+after an upgrade, on both the test side and the implementation side.
 
 The checkout is the local read-only mirror at
 `/Users/mac/work/opurom/flutter-golden`, pinned at
