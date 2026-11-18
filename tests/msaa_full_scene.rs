@@ -88,9 +88,9 @@ fn full_scene_edge_pixels_match_the_fixed_coverage_oracle() {
     // Byte-for-byte oracle for the whole four-shape scene. The sub-sample
     // coverage values themselves are checked against an independent analytic
     // point-to-segment reference in raster.rs unit tests.
-    // Small corners/straight lines keep 8x8/4x4; large arcs (disc radius 6)
-    // use the analytic AAA coverage path.
-    assert_eq!(digest_hex(&aa), "5a1312f3b751ea44");
+    // All geometric edges now share the analytic convex-path coverage:
+    // corners, straight/thin lines and large arcs use Skia AAA area masks.
+    assert_eq!(digest_hex(&aa), "2ac2564791d504b6");
     assert!(
         count_partial(&aa) >= 20,
         "edge coverage must produce partial pixels"

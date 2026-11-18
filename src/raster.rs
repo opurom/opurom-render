@@ -101,6 +101,7 @@ pub struct Canvas {
 }
 
 /// Sub-samples per axis for opt-in straight-line coverage.
+#[cfg(test)]
 const EDGE_AA: i64 = 4;
 /// Finer sub-samples for curved edges (rounded boxes, discs, rings). Curvature
 /// needs more than the 16 straight-line samples to avoid visible stair-steps;
@@ -1089,6 +1090,7 @@ impl Canvas {
 /// live in an 8x integer grid (half-subpixel resolution); a squared
 /// point-to-segment distance keeps the whole test in integer arithmetic. The
 /// pen half-width is at least half a pixel so a 1px line stays visible.
+#[cfg(test)]
 fn line_coverage(x0: i64, y0: i64, x1: i64, y1: i64, x: i64, y: i64, width: i64) -> u8 {
     let (ax, ay, bx, by) = (x0 * 8, y0 * 8, x1 * 8, y1 * 8);
     let (dx, dy) = (bx - ax, by - ay);
@@ -1154,16 +1156,32 @@ fn line(canvas: &mut Canvas, x0: i64, y0: i64, x1: i64, y1: i64, c: Rgba, width:
         return;
     }
     if canvas.edge_aa {
-        // Thin lines keep the analytic 4x subsample fast path; the coverage
-        // test already accounts for pen width. Capture never reaches here.
-        let pad = width.max(1) / 2 + 1;
+        // Thin lines now share the analytic convex-path coverage used by
+        // corners and thick segments (Skia SkScan_AAAPath.cpp analytic edges).
+        // The pen is the same capsule rect, so the result is the polygon's
+        // exact area rather than a 4x subsample estimate.
+        let half_fp = ((width.max(1) as i128 * crate::aaa::ONE as i128 / 2)
+            .max(crate::aaa::ONE as i128 / 2)) as i64;
+        let pad = (half_fp >> 16) + 1;
         let xlo = x0.min(x1) - pad;
         let xhi = x0.max(x1) + pad;
         let ylo = y0.min(y1) - pad;
         let yhi = y0.max(y1) + pad;
+        let path = crate::aaa::line_path(x0, y0, x1, y1, half_fp);
+        let mut row = vec![0i64; canvas.width as usize];
         for y in ylo..=yhi {
+            if y < 0 || y >= canvas.height as i64 {
+                continue;
+            }
+            for a in row.iter_mut() {
+                *a = 0;
+            }
+            crate::aaa::rasterize_convex_row(&path, &mut row, 0, y);
             for x in xlo..=xhi {
-                let cov = line_coverage(x0, y0, x1, y1, x, y, width);
+                if x < 0 || x >= canvas.width as i64 {
+                    continue;
+                }
+                let cov = row[x as usize].clamp(0, 255) as u8;
                 canvas.set_covered(x, y, c, cov);
             }
         }
