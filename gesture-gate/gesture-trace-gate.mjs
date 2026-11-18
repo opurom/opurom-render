@@ -39,6 +39,7 @@ const TESTS = [
   'gesture_nested_report.rs',
   'gesture_perf_baseline.rs',
   'gesture_perf_report.rs',
+  'gesture_parallel_report.rs',
   'gesture_regression_parity.rs',
   'gesture_robustness.rs',
   'multi_pointer_fairness.rs',
