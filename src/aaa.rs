@@ -457,6 +457,64 @@ fn push_arc(pts: &mut Vec<(i64, i64)>, cx: i64, cy: i64, rx: i64, ry: i64, corne
     }
 }
 
+/// Skia's quarter-circle conic weight, sqrt(2)/2, in 16.16 fixed point.
+pub const CONIC_WEIGHT: i64 = 46_341;
+
+/// A quadratic Bezier control triple in 16.16 fixed point.
+pub type Quad = [(i64, i64); 3];
+
+/// Chop a rational conic into `2^pow2` quadratic curves, mirroring Skia's
+/// `SkConic::chop` (`SkGeometry.cpp:1430-1462`).
+///
+/// Skia works in floats; the weighted-point formula is reproduced here in
+/// 16.16 with i128 intermediates. The middle control point halves each outer
+/// term before summing, so the halves round towards zero rather than down:
+/// an arithmetic right shift would floor a negative half and bias the corner
+/// by one LSB.
+pub fn chop_conic(p: Quad, weight: i64, pow2: u32) -> Vec<Quad> {
+    let mut quads = vec![p];
+    let mut w = weight;
+    for _ in 0..pow2 {
+        let scale = ONE as i128 * ONE as i128 / (ONE as i128 + w as i128);
+        let ws = (w as i128 * scale) >> 16;
+        let mut next = Vec::with_capacity(quads.len() * 2);
+        for q in &quads {
+            let t0 = (q[0].0 as i128 * scale >> 16, q[0].1 as i128 * scale >> 16);
+            let t1 = (q[1].0 as i128 * ws >> 16, q[1].1 as i128 * ws >> 16);
+            let t2 = (q[2].0 as i128 * scale >> 16, q[2].1 as i128 * scale >> 16);
+            let p1 = ((t0.0 + t1.0) as i64, (t0.1 + t1.1) as i64);
+            let p3 = ((t1.0 + t2.0) as i64, (t1.1 + t2.1) as i64);
+            // Skia: p2 = 0.5f * t0 + t1 + 0.5f * t2.
+            let p2 = (
+                (t0.0 / 2 + t1.0 + t2.0 / 2) as i64,
+                (t0.1 / 2 + t1.1 + t2.1 / 2) as i64,
+            );
+            next.push([q[0], p1, p2]);
+            next.push([p2, p3, q[2]]);
+        }
+        // The sub-conic weight is sqrt(0.5 + w/2).
+        let half = (ONE as i128 * ONE as i128 / 2 + w as i128 * ONE as i128 / 2) as i128;
+        w = (isqrt(half << 32) >> 16) as i64;
+        quads = next;
+    }
+    quads
+}
+
+/// The conic that Skia uses for one rounded corner: the two tangent points and
+/// the corner itself, in the corner's own 16.16 coordinates.
+pub fn corner_conic(rx: i64, ry: i64, corner: usize) -> Quad {
+    match corner {
+        // Top-left: left tangent -> top tangent.
+        0 => [(-rx * ONE, 0), (0, 0), (0, -ry * ONE)],
+        // Top-right: top tangent -> right tangent.
+        1 => [(0, -ry * ONE), (0, 0), (rx * ONE, 0)],
+        // Bottom-right: right tangent -> bottom tangent.
+        2 => [(rx * ONE, 0), (0, 0), (0, ry * ONE)],
+        // Bottom-left: bottom tangent -> left tangent.
+        _ => [(0, ry * ONE), (0, 0), (-rx * ONE, 0)],
+    }
+}
+
 /// Convex path for a rectangle with independent, possibly elliptical corners.
 /// Radii must already be normalised by [`RoundingRadii::scaled`]. Straight
 /// edges stay exact; a flat corner (either component zero) contributes its
