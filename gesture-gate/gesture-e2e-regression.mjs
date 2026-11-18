@@ -35,6 +35,7 @@ const ARCHIVER = join(ROOT, 'gesture-gate', 'gesture-evidence-archive.mjs');
 const CONSISTENCY = join(ROOT, 'gesture-gate', 'gesture-schema-consistency.mjs');
 const FRESHNESS = join(ROOT, 'gesture-gate', 'gesture-archive-freshness.mjs');
 const BASELINE_LOOP = join(ROOT, 'gesture-gate', 'gesture-baseline-loop.mjs');
+const TRACE = join(ROOT, 'gesture-gate', 'gesture-trace-gate.mjs');
 const E2E_SCHEMA = 'opurom.gesture.e2e/1';
 const SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 const ARCHIVE_FILES = [
@@ -304,6 +305,13 @@ function runRegression(archiveDir) {
       stale.code === 1 && stale.json?.status === 'FAIL' ? 'PASS' : 'FAIL',
       stale.json?.detail ?? describeFailure(stale));
   }
+
+  // Every gesture test's Flutter source anchor must resolve in the pinned
+  // local checkout.
+  const trace = runNode(TRACE, ['--self-test', 'pass'], 'source anchor trace');
+  record('source_anchors_valid',
+    trace.code === 0 && trace.json?.status === 'PASS' ? 'PASS' : 'FAIL',
+    trace.json?.detail ?? describeFailure(trace));
 
   // The gates themselves must be falsifiable: an injected absolute-limit
   // fault and an injected baseline regression both have to be rejected.

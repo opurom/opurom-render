@@ -60,6 +60,7 @@ The report is `opurom.gesture.e2e/1` JSON on stdout.
 | `stale_document_detected` | a stale evidence document is rejected by the archive verifier |
 | `gate_faults_rejected` | the 13 absolute-limit fault injections are all rejected |
 | `baseline_faults_rejected` | the 37 baseline regression injections are all rejected |
+| `source_anchors_valid` | every gesture test's Flutter source anchor resolves in the pinned checkout |
 | `replay_verdict_stable` | the replayed verdict equals the archived verdict |
 | `archive_deterministic` | two archives share one manifest hash |
 | `tamper_detected` | a modified archive is rejected |
