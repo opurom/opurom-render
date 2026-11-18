@@ -61,6 +61,7 @@ pub mod raster;
 pub mod recipes;
 pub mod scroll_physics;
 pub mod svg;
+pub mod target_painter;
 pub mod text_span;
 pub mod typography;
 
@@ -122,6 +123,7 @@ pub use recipes::{
     COMPONENT_VARIANTS,
 };
 pub use svg::{svg, svg_at};
+pub use target_painter::{PainterRequirements, TargetPainter};
 pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
 pub use typography::{FontSource, TextRole, TypographySpec};
 
