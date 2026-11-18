@@ -71,6 +71,7 @@ const TESTS = [
   'text_baseline.rs',
   'scroll_physics.rs',
   'incremental_pipeline.rs',
+  'frame_boundary_hierarchy.rs',
   'scale_gesture.rs',
 ];
 const PATTERN = /([a-z_]+\.dart):(\d+)(?:-(\d+))?/g;
