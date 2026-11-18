@@ -24,6 +24,7 @@ const SOURCES = [
 ];
 const TESTS = [
   'advanced_gesture_parity.rs',
+  'gesture_advanced_report.rs',
   'advanced_gesture_thresholds.rs',
   'bounce_scroll_physics.rs',
   'gesture_bounce_report.rs',
