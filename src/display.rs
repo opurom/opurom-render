@@ -232,9 +232,11 @@ fn validate_effect(command: &Command, index: usize) -> Result<(), IrError> {
             level,
             ..
         } => {
-            if !matches!(level, 1 | 2 | 3 | 4 | 6) {
+            // The same Flutter 3.50.0 level set as the IR parser, which is
+            // the only producer of this command.
+            if !matches!(level, 1 | 2 | 3 | 4 | 6 | 8 | 9 | 12 | 16 | 24) {
                 return Err(bad(format!(
-                    "{what}.level {level} must be one of levels 1,2,3,4,6"
+                    "{what}.level {level} must be one of levels 1,2,3,4,6,8,9,12,16,24"
                 )));
             }
             push_rect(&mut values, rect);

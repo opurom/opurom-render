@@ -1213,8 +1213,15 @@ fn draw_shadow(canvas: &mut Canvas, n: &LaidOut) {
     // Per-node material elevation wins over the legacy strength shadow. The
     // level is already resolved/projected in layout; capture records it for
     // replay instead of rasterizing pixels.
-    let level = n.elevation.clamp(0, 6);
-    if matches!(level, 1 | 2 | 3 | 4 | 6) {
+    let level = n.elevation.max(0);
+    // Ten levels from Flutter kElevationToShadow (shadows.dart:40-221);
+    // levels 5, 7 and 10..11 etc. have no entry and fall back to legacy shadow.
+    if crate::effects::ELEVATION_TABLE
+        .get(level as usize)
+        .copied()
+        .flatten()
+        .is_some()
+    {
         if canvas.is_capturing() {
             crate::effects::emit_elevation_command(canvas, n, level);
         } else {

@@ -455,6 +455,39 @@ const CONIC_ERR_DEN: i128 = 1_000_000_000;
 /// number of quads is `2^pow2`, starting at one and doubling (error quartering)
 /// until the chord error is within `tol_num/tol_den` pixels, capped at
 /// `kMaxConicToQuadPOW2 = 5`. No fixed segment count.
+/// Impeller `ComputeConicSubdivisions` (`wangs_formula.cc:45-77`) specialised
+/// to a unit quarter circle at tolerance 1/4 px (`wangs_formula.cc:14`).
+/// Returns the number of quads directly, capped at Skia's
+/// `kMaxConicToQuadPOW2 = 32`. Integer fixed point with 1024 == 1 px;
+/// square roots use integer isqrt so the result is deterministic.
+pub fn conic_quad_count_wang(radius: i64) -> u32 {
+    // p0=(r,0), p1=(r,r), p2=(0,r) relative to the arc's corner centre,
+    // translated by the bbox centre (r/2, r/2) for translation invariance.
+    let r = radius.max(0) as i128;
+    let half = r / 2;
+    let (p0x, p0y) = (r - half, -half);
+    let (p1x, p1y) = (r - half, r - half);
+    let (p2x, p2y) = (-half, r - half);
+    let len2 = |x: i128, y: i128| x * x + y * y;
+    let max_len_sq = len2(p0x, p0y).max(len2(p1x, p1y)).max(len2(p2x, p2y));
+    let max_len = isqrt(max_len_sq * 1_048_576) as i128; // 1024 fixed
+                                                         // w = cos(45deg) = sqrt(2)/2; Impeller stores kConicWeight = sqrt(2)/2.
+                                                         // dp = -2*w*p1 + p0 + p2; with p0+p2 = 0 after centring, |dp| = 2*w*|p1|.
+    let w_num = 46_341i128; // sqrt(2)/2 * 65536, Skia CONIC_WEIGHT
+    let w2_num = w_num * w_num;
+    let dp2 = 4 * w2_num * len2(p1x, p1y) / (65_536i128 * 65_536);
+    let w = w_num as f64 / 65_536.0;
+    let dw = (2.0 - 2.0 * w).abs();
+    // k = precision(4) in 1024 fixed; rp_minus_1 = max(0, max_len*k - 1).
+    let rp_minus_1 = (max_len * 4 / 1024 - 1024).max(0);
+    let numer_sq = dp2 * 16
+        + rp_minus_1 * rp_minus_1 * ((dw * 1024.0) as i128) * ((dw * 1024.0) as i128) / 1_048_576;
+    let denom = (4.0 * w.min(1.0) * 1024.0) as i128;
+    // sqrt(numer / denom) in 1024 fixed point: sqrt(a/b) = sqrt(a*b) / b.
+    let n = isqrt((numer_sq.max(0) * denom.max(1)) as i128) as u32 / 1024;
+    n.clamp(1, 32)
+}
+
 pub fn conic_quad_pow2(radius: i64, tol_num: i64, tol_den: i64) -> u32 {
     let r = radius.max(0) as i128;
     let err2 = (CONIC_ERR_NUM * r) * (CONIC_ERR_NUM * r);

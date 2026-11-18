@@ -2,7 +2,9 @@
 //! coverage path. Subdivision follows Skia SkConic::computeQuadPOW2
 //! (SkGeometry.cpp:1492), integer ported.
 
-use opurom_render::aaa::{conic_quad_pow2, rasterize_convex_row, round_rect_path};
+use opurom_render::aaa::{
+    conic_quad_count_wang, conic_quad_pow2, rasterize_convex_row, round_rect_path,
+};
 
 #[test]
 fn conic_subdivision_matches_skia_radius_rule() {
@@ -107,4 +109,18 @@ fn analytic_corner_produces_many_blend_levels() {
         "analytic coverage levels = {}",
         levels.len()
     );
+}
+
+#[test]
+fn wang_conic_count_is_monotone_and_matches_impeller_tolerance() {
+    // Impeller kPrecision=4 (1/4 px); quarter-circle weights w=sqrt(2)/2.
+    // The count grows with radius and stays inside Skia's 32-quad cap.
+    let mut prev = 0;
+    for r in [1i64, 4, 8, 16, 32, 64, 128, 256, 512, 1024] {
+        let n = conic_quad_count_wang(r);
+        assert!(n >= 1 && n <= 32, "radius {r}: count {n}");
+        assert!(n >= prev, "radius {r}: count {n} < {prev}");
+        prev = n;
+    }
+    assert!(conic_quad_count_wang(512) > conic_quad_count_wang(32));
 }

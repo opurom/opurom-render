@@ -156,6 +156,36 @@
         "ambient": { "offset": [0, 1], "blur": 18, "spread": 0, "color": "#1F000000" },
         "source": "shadows.dart:94-103"
       },
+      "md-elev-8": {
+        "umbra": { "offset": [0, 5], "blur": 5, "spread": -3, "color": "#33000000" },
+        "penumbra": { "offset": [0, 8], "blur": 10, "spread": 1, "color": "#24000000" },
+        "ambient": { "offset": [0, 3], "blur": 14, "spread": 2, "color": "#1F000000" },
+        "source": "shadows.dart:105-122"
+      },
+      "md-elev-9": {
+        "umbra": { "offset": [0, 5], "blur": 6, "spread": -3, "color": "#33000000" },
+        "penumbra": { "offset": [0, 9], "blur": 12, "spread": 1, "color": "#24000000" },
+        "ambient": { "offset": [0, 3], "blur": 16, "spread": 2, "color": "#1F000000" },
+        "source": "shadows.dart:124-141"
+      },
+      "md-elev-12": {
+        "umbra": { "offset": [0, 7], "blur": 8, "spread": -4, "color": "#33000000" },
+        "penumbra": { "offset": [0, 12], "blur": 17, "spread": 2, "color": "#24000000" },
+        "ambient": { "offset": [0, 5], "blur": 22, "spread": 4, "color": "#1F000000" },
+        "source": "shadows.dart:143-160"
+      },
+      "md-elev-16": {
+        "umbra": { "offset": [0, 8], "blur": 10, "spread": -5, "color": "#33000000" },
+        "penumbra": { "offset": [0, 16], "blur": 24, "spread": 2, "color": "#24000000" },
+        "ambient": { "offset": [0, 6], "blur": 30, "spread": 5, "color": "#1F000000" },
+        "source": "shadows.dart:162-179"
+      },
+      "md-elev-24": {
+        "umbra": { "offset": [0, 11], "blur": 15, "spread": -7, "color": "#33000000" },
+        "penumbra": { "offset": [0, 24], "blur": 38, "spread": 3, "color": "#24000000" },
+        "ambient": { "offset": [0, 9], "blur": 46, "spread": 8, "color": "#1F000000" },
+        "source": "shadows.dart:181-198"
+      },
       "md-color-shadow-umbra": { "value": "#33000000", "source": "shadows.dart:43" },
       "md-color-shadow-penumbra": { "value": "#24000000", "source": "shadows.dart:44" },
       "md-color-shadow-ambient": { "value": "#1F000000", "source": "shadows.dart:45" }

@@ -595,23 +595,45 @@ fn shadow(canvas: &mut Canvas, e: &VisualEffect, bounds: Rect, mask: &[u8], soft
     }
 }
 
-/// One material elevation layer: (offset_x, offset_y, blur, spread, alpha).
-/// Colors are black at the table alpha; the three layers share the box radius.
+/// Flutter Material elevation: one layer is `(offset_x, offset_y, blur,
+/// spread, alpha)`. Alpha values are `@docImport` colours
+/// `_kKeyUmbraOpacity` (#33000000), `_kKeyPenumbraOpacity` (#24000000) and
+/// `_kAmbientShadowOpacity` (#1F000000).
+///
+/// Source of truth: Flutter stable 3.50.0, framework ab2912035e16,
+/// `packages/flutter/lib/src/material/shadows.dart:40-221`
+/// (`kElevationToShadow`, `:43-45` for the three colors). Each entry is
+/// `[ambient, penumbra, umbra]`; the draw order is far-to-near.
+/// Level 5 and levels above 24 are absent from Flutter's map, and level 0
+/// maps to an empty shadow list.
 pub type ElevationLayer = (i64, i64, i64, i64, u8);
 
-/// Material elevation table (DEFAULT_UI_GLASS_REFINEMENT.md §12.5), transcribed
-/// from opurom-ui/theme/material-tokens.json `tokens/elevation`. Indexed by
-/// level; levels 5 and 7+ are absent by spec. Each entry is
-/// `[ambient, penumbra, umbra]` drawn far-to-near. Alpha values are the
-/// #1F/#24/#33 AARRGGBB colors (31/36/51).
-pub const ELEVATION_TABLE: [Option<[ElevationLayer; 3]>; 7] = [
-    None,                                                            // 0
-    Some([(0, 1, 3, 0, 31), (0, 1, 1, 0, 36), (0, 2, 1, -1, 51)]),   // 1
-    Some([(0, 1, 5, 0, 31), (0, 2, 2, 0, 36), (0, 3, 1, -2, 51)]),   // 2
-    Some([(0, 1, 8, 0, 31), (0, 3, 4, 0, 36), (0, 3, 3, -2, 51)]),   // 3
-    Some([(0, 1, 10, 0, 31), (0, 4, 5, 0, 36), (0, 2, 4, -1, 51)]),  // 4
-    None,                                                            // 5 (no level)
-    Some([(0, 1, 18, 0, 31), (0, 6, 10, 0, 36), (0, 3, 5, -1, 51)]), // 6
+pub const ELEVATION_TABLE: [Option<[ElevationLayer; 3]>; 25] = [
+    None,                                                               // 0  shadows.dart:48
+    Some([(0, 1, 3, 0, 31), (0, 1, 1, 0, 36), (0, 2, 1, -1, 51)]),      // 1  :50-59
+    Some([(0, 1, 5, 0, 31), (0, 2, 2, 0, 36), (0, 3, 1, -2, 51)]),      // 2  :61-70
+    Some([(0, 1, 8, 0, 31), (0, 3, 4, 0, 36), (0, 3, 3, -2, 51)]),      // 3  :72-81
+    Some([(0, 1, 10, 0, 31), (0, 4, 5, 0, 36), (0, 2, 4, -1, 51)]),     // 4  :83-92
+    None,                                                               // 5  (no level)
+    Some([(0, 1, 18, 0, 31), (0, 6, 10, 0, 36), (0, 3, 5, -1, 51)]),    // 6  :94-103
+    None,                                                               // 7  (no level)
+    Some([(0, 3, 14, 2, 31), (0, 8, 10, 1, 36), (0, 5, 5, -3, 51)]),    // 8  :105-122
+    Some([(0, 3, 16, 2, 31), (0, 9, 12, 1, 36), (0, 5, 6, -3, 51)]),    // 9  :124-141
+    None,                                                               // 10 (no level)
+    None,                                                               // 11 (no level)
+    Some([(0, 5, 22, 4, 31), (0, 12, 17, 2, 36), (0, 7, 8, -4, 51)]),   // 12 :143-160
+    None,                                                               // 13 (no level)
+    None,                                                               // 14 (no level)
+    None,                                                               // 15 (no level)
+    Some([(0, 6, 30, 5, 31), (0, 16, 24, 2, 36), (0, 8, 10, -5, 51)]),  // 16 :162-179
+    None,                                                               // 17 (no level)
+    None,                                                               // 18 (no level)
+    None,                                                               // 19 (no level)
+    None,                                                               // 20 (no level)
+    None,                                                               // 21 (no level)
+    None,                                                               // 22 (no level)
+    None,                                                               // 23 (no level)
+    Some([(0, 9, 46, 8, 31), (0, 24, 38, 3, 36), (0, 11, 15, -7, 51)]), // 24 :181-198
 ];
 
 /// Resolve a `shadow` strength (0..8) to a table level: the largest level
@@ -661,7 +683,7 @@ pub(crate) fn emit_elevation_command(canvas: &mut Canvas, n: &LaidOut, level: i6
         radius: shape_radius(n),
         radii,
         level,
-        color: DARK,
+        color: n.shadow_color,
     });
 }
 
@@ -687,8 +709,10 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
         if box_r.w <= 0 || box_r.h <= 0 {
             continue;
         }
-        // Flutter convertRadiusToSigma, painting.dart:8720-8721:
-        // sigma = round(blur * 0.57735 + 0.5), 0 when blur <= 0.
+        // Flutter `Shadow.convertRadiusToSigma` (engine 371f772,
+        // lib/ui/painting.dart:8720-8721):
+        // sigma = radius > 0 ? radius * 0.57735 + 0.5 : 0.
+        // Integer form: floor(radius * 57735/100000) + 1 for radius > 0.
         let sigma = if blur > 0 {
             (blur * 57735) / 100000 + 1
         } else {
@@ -767,7 +791,8 @@ pub(crate) fn draw_elevation(canvas: &mut Canvas, n: &LaidOut, level: usize) {
                 // alpha while clipped content is erased: a dark fringe.
                 let clip_cov = canvas.clip_coverage(x, y);
                 let a = ((a as i64 * clip_cov as i64 + 127) / 255).clamp(0, 255) as u8;
-                composite(canvas, x, y, DARK, a);
+                let shadow_color = n.shadow_color;
+                composite(canvas, x, y, shadow_color, a);
             }
         }
     }

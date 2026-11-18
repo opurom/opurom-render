@@ -1,6 +1,6 @@
-//! Per-node M3 material elevation (ELEVATION_PER_NODE_PROPOSAL.md): the
-//! embedded table matches material-tokens.json, authored levels pass a strict
-//! six-level whitelist, state deltas use the separate M projector, and the
+//! Per-node Material elevation (Flutter 3.50.0 `kElevationToShadow`): the
+//! embedded table matches material-tokens.json, all ten authored levels pass
+//! the whitelist, state deltas use the separate legacy M projector, and the
 //! default (no elevation) path stays byte-identical.
 
 use opurom_render::{
@@ -10,9 +10,11 @@ use opurom_render::{
 use serde_json::Value;
 
 // CI checks out render without the sibling UI repo, so the fixture is the
-// source of truth here; a local sibling is checked for drift only.
+// source of truth here; a local sibling is checked for drift only. The
+// Flutter source itself is the authority; when present it is parsed below.
 const TOKENS: &str = "tests/fixtures/material-tokens.json";
 const SIBLING_TOKENS: &str = "../opurom-ui/theme/material-tokens.json";
+const FLUTTER_SHADOWS: &str = "../../flutter-golden/packages/flutter/lib/src/material/shadows.dart";
 const COUNTER: &str = "../opurom-examples/golden/counter.opuir.json";
 
 fn alpha_of(hex: &str) -> u8 {
@@ -23,11 +25,16 @@ fn alpha_of(hex: &str) -> u8 {
 fn embedded_table_matches_material_tokens_json() {
     let fixture = std::fs::read_to_string(TOKENS).unwrap();
     if let Ok(sibling) = std::fs::read_to_string(SIBLING_TOKENS) {
-        assert_eq!(sibling, fixture, "{SIBLING_TOKENS} drifted from fixture");
+        let expected: Value = serde_json::from_str(&fixture).unwrap();
+        let actual: Value = serde_json::from_str(&sibling).unwrap();
+        assert_eq!(
+            actual["tokens"]["elevation"], expected["tokens"]["elevation"],
+            "{SIBLING_TOKENS} elevation tokens drifted from fixture"
+        );
     }
     let v: Value = serde_json::from_str(&fixture).unwrap();
     let elev = &v["tokens"]["elevation"];
-    for level in 0..=6 {
+    for level in 0..ELEVATION_TABLE.len() {
         let Some(layers) = ELEVATION_TABLE[level] else {
             assert!(
                 elev.get(format!("md-elev-{level}")).is_none() || level == 0,
@@ -54,6 +61,46 @@ fn embedded_table_matches_material_tokens_json() {
     }
     assert!(ELEVATION_TABLE[5].is_none());
     assert!(ELEVATION_TABLE[0].is_none());
+    for level in [7, 10, 11] {
+        assert!(ELEVATION_TABLE[level].is_none());
+    }
+}
+
+/// Every table entry and the level whitelist are checked against the local
+/// Flutter 3.50.0 checkout when it is present. CI that checks out render alone
+/// keeps the JSON fixture as the portable copy of the same source.
+#[test]
+fn embedded_table_matches_flutter_350_source() {
+    let Ok(source) = std::fs::read_to_string(FLUTTER_SHADOWS) else {
+        return;
+    };
+    assert!(
+        source.contains("Flutter Authors") && source.contains("kElevationToShadow"),
+        "unexpected shadows.dart checkout"
+    );
+    for level in 0..ELEVATION_TABLE.len() {
+        let key = format!("{level}: <BoxShadow>[");
+        let declared = source.contains(&key);
+        let present = ELEVATION_TABLE[level].is_some();
+        assert_eq!(
+            declared, present,
+            "level {level} presence vs Flutter source"
+        );
+    }
+    for (color, alpha) in [("0x33000000", 51), ("0x24000000", 36), ("0x1F000000", 31)] {
+        assert!(
+            source.contains(color),
+            "Flutter source color {color} missing"
+        );
+        assert!(
+            ELEVATION_TABLE[1..]
+                .iter()
+                .flatten()
+                .flat_map(|layers| layers.iter())
+                .any(|layer| layer.4 == alpha),
+            "layer alpha {alpha} missing"
+        );
+    }
 }
 
 #[test]
@@ -97,21 +144,81 @@ fn box_ir(elevation: Option<i64>) -> String {
     )
 }
 
+fn themed_ir(shadow: &str, tint: &str) -> String {
+    format!(
+        r##"{{
+        "ir": "0.1.0", "app": "Elev", "state": [],
+        "tree": {{ "id": 0, "kind": "Column", "props": {{ "padding": 8 }},
+            "children": [ {{ "id": 1, "kind": "Container", "props": {{
+                "color": "#102030", "width": 60, "height": 40, "radius": 4,
+                "elevation": 4 }}, "children": [], "events": {{}} }} ], "events": {{}} }},
+        "theme": {{ "mode": "dark", "accent": "#097FEB", "radius": 4,
+            "tokens": {{ "shadow": "{shadow}", "surfaceTint": "{tint}" }} }}
+    }}"##
+    )
+}
+
+#[test]
+fn elevation_shadow_color_follows_theme_tokens() {
+    let neutral = render(&themed_ir("#000000", "#000000"));
+    let tinted = render(&themed_ir("#000000", "#FF0000"));
+    assert_ne!(
+        digest_hex(&neutral),
+        digest_hex(&tinted),
+        "a surface-tinted shadow must change pixels"
+    );
+    let ir = parse_ir(&themed_ir("#000000", "#FF0000")).unwrap();
+    let state = StateView::from_ir(&ir);
+    let dl = Renderer::new(240, 200).display_list(&ir, &state);
+    assert!(
+        dl.commands.iter().any(|c| matches!(
+            c,
+            Command::EffectElevation { color, .. } if color.r > 0 && color.g == 0 && color.b == 0
+        )),
+        "the display command must carry the tinted shadow colour"
+    );
+}
+
 fn render(ir_text: &str) -> Vec<u8> {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
     Renderer::new(240, 200).render(&ir, &state).pixels
 }
 
+/// The four levels newly added for Flutter 3.50 must be real draws, not just
+/// table entries: each level changes pixels vs the shadowless surface and
+/// records its own command for the GPU replay path.
+#[test]
+fn higher_flutter_levels_draw_and_record() {
+    let flat = render(&box_ir(None));
+    for level in [8, 9, 12, 16, 24] {
+        let pixels = render(&box_ir(Some(level)));
+        assert_ne!(
+            digest_hex(&pixels),
+            digest_hex(&flat),
+            "elevation {level} must change pixels"
+        );
+        let ir = parse_ir(&box_ir(Some(level))).unwrap();
+        let state = StateView::from_ir(&ir);
+        let list = Renderer::new(240, 200).display_list(&ir, &state);
+        assert!(
+            list.commands
+                .iter()
+                .any(|c| matches!(c, Command::EffectElevation { level: got, .. } if *got == level)),
+            "elevation {level} must be replayable"
+        );
+    }
+}
+
 #[test]
 fn authored_whitelist_rejects_illegal_levels() {
-    for bad in [5, 7, 8, -1, 9] {
+    for bad in [5, 7, -1, 10, 11, 25] {
         assert!(
             parse_ir(&box_ir(Some(bad))).is_err(),
             "elevation {bad} must fail loud"
         );
     }
-    for good in [0, 1, 2, 3, 4, 6] {
+    for good in [0, 1, 2, 3, 4, 6, 8, 9, 12, 16, 24] {
         assert!(
             parse_ir(&box_ir(Some(good))).is_ok(),
             "elevation {good} must be accepted"
