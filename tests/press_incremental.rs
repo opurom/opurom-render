@@ -3,6 +3,12 @@
 
 use opurom_render::{digest_hex, Node, PressPhase, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
 
 fn find_event_node(n: &Node, out: &mut u32) {
@@ -31,8 +37,8 @@ fn incremental_press_matches_full_render_byte_for_byte() {
         touch: None,
     };
 
-    let mut full = Renderer::new(w, h);
-    let mut incr = Renderer::new(w, h);
+    let mut full = compat_renderer(w, h);
+    let mut incr = compat_renderer(w, h);
     let _ = full.render_at(&ir, &state, 4000);
     let _ = incr.render_at(&ir, &state, 4000);
     for &ms in &[0i64, 25, 75, 150, 225, 300, 375] {
@@ -47,7 +53,7 @@ fn incremental_press_matches_full_render_byte_for_byte() {
     }
 
     // Clearing the press after incremental frames restores the exact settled frame.
-    let settled = Renderer::new(w, h).render_at(&ir, &state, 4000);
+    let settled = compat_renderer(w, h).render_at(&ir, &state, 4000);
     let cleared = incr.render_incremental_at(&ir, &state, 4000);
     assert_eq!(
         digest_hex(&settled.pixels),
@@ -84,8 +90,8 @@ fn press_with_frame_effect_falls_back_to_full_bytes() {
         touch: None,
     };
     let (w, h) = (120u32, 120u32);
-    let mut full = Renderer::new(w, h);
-    let mut incr = Renderer::new(w, h);
+    let mut full = compat_renderer(w, h);
+    let mut incr = compat_renderer(w, h);
     let _ = full.render_at(&ir, &state, 4000);
     let _ = incr.render_at(&ir, &state, 4000);
     for &ms in &[0i64, 75, 150, 225, 300] {
@@ -136,7 +142,7 @@ fn switching_press_host_clears_the_previous_ripple() {
     let ir = switch_ir();
     let state = StateView::from_ir(&ir);
     let (w, h) = (200u32, 200u32);
-    let mut incr = Renderer::new(w, h);
+    let mut incr = compat_renderer(w, h);
     let _ = incr.render_at(&ir, &state, 4000);
     for &ms in &[75i64, 300, 500] {
         let _ =
@@ -144,7 +150,7 @@ fn switching_press_host_clears_the_previous_ripple() {
     }
     let switched = incr.render_with_press_incremental(&ir, &state, 500, Some(&held(3, None)));
 
-    let mut full = Renderer::new(w, h);
+    let mut full = compat_renderer(w, h);
     let _ = full.render_at(&ir, &state, 4000);
     let expected = full.render_with_press(&ir, &state, 500, Some(&held(3, None)));
     assert_eq!(
@@ -163,12 +169,12 @@ fn switching_touch_position_clears_the_previous_disc() {
     let (w, h) = (200u32, 200u32);
     let p1 = held(1, Some((10, 10)));
     let p2 = held(1, Some((60, 30)));
-    let mut incr = Renderer::new(w, h);
+    let mut incr = compat_renderer(w, h);
     let _ = incr.render_at(&ir, &state, 4000);
     let _ = incr.render_with_press_incremental(&ir, &state, 500, Some(&p1));
     let switched = incr.render_with_press_incremental(&ir, &state, 500, Some(&p2));
 
-    let mut full = Renderer::new(w, h);
+    let mut full = compat_renderer(w, h);
     let _ = full.render_at(&ir, &state, 4000);
     let expected = full.render_with_press(&ir, &state, 500, Some(&p2));
     assert_eq!(
@@ -197,13 +203,13 @@ fn press_release_clear_is_byte_identical_and_skips_full_raster() {
         touch: Some((12, 9)),
     };
     let (w, h) = (320u32, 240u32);
-    let mut incr = Renderer::new(w, h);
+    let mut incr = compat_renderer(w, h);
     let _ = incr.render_at(&ir, &state, 4000);
     for &ms in &[0i64, 75, 225, 375] {
         let _ = incr.render_with_press_incremental(&ir, &state, ms, Some(&press));
     }
     let cleared = incr.render_incremental_at(&ir, &state, 4000);
-    let expected = Renderer::new(w, h).render_at(&ir, &state, 4000);
+    let expected = compat_renderer(w, h).render_at(&ir, &state, 4000);
     assert_eq!(
         digest_hex(&cleared.pixels),
         digest_hex(&expected.pixels),

@@ -5,6 +5,12 @@ use opurom_render::{
     digest_hex, parse_ir, Navigator, Op, Renderer, StateView, TransitionKind, ONE, TRANSITION_MS,
 };
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 // Home pushes Detail through a Button tap; Detail pops with `pop`. Detail
 // numbers its nodes from its own root id (2) to prove per-route id seeding.
 const ROUTES_IR: &str = r##"{
@@ -67,12 +73,12 @@ fn routes_parse_and_the_initial_route_is_the_root_tree() {
 fn the_initial_route_renders_deterministically() {
     let ir = parse_ir(ROUTES_IR).unwrap();
     let state = StateView::from_ir(&ir);
-    let first = Renderer::new(160, 240).render(&ir, &state);
-    let second = Renderer::new(160, 240).render(&ir, &state);
+    let first = compat_renderer(160, 240).render(&ir, &state);
+    let second = compat_renderer(160, 240).render(&ir, &state);
     assert_eq!(first.pixels.len(), 160 * 240 * 4);
     assert_eq!(digest_hex(&first.pixels), digest_hex(&second.pixels));
     // The mirrored tree and `with_route(initial)` render identically.
-    let via_helper = Renderer::new(160, 240).render(&ir.with_route("Home").unwrap(), &state);
+    let via_helper = compat_renderer(160, 240).render(&ir.with_route("Home").unwrap(), &state);
     assert_eq!(digest_hex(&via_helper.pixels), digest_hex(&first.pixels));
 }
 
@@ -80,7 +86,7 @@ fn the_initial_route_renders_deterministically() {
 fn push_renders_the_new_route_and_pop_returns_home() {
     let ir = parse_ir(ROUTES_IR).unwrap();
     let state = StateView::from_ir(&ir);
-    let home_digest = digest_hex(&Renderer::new(160, 240).render(&ir, &state).pixels);
+    let home_digest = digest_hex(&compat_renderer(160, 240).render(&ir, &state).pixels);
 
     let mut nav = Navigator::with_root(ir.initial_route.clone().unwrap(), TransitionKind::Slide);
     ir.check_push_target("Detail").unwrap();
@@ -96,14 +102,14 @@ fn push_renders_the_new_route_and_pop_returns_home() {
     // Detail's route tree root is its own Column, distinct from Home's.
     assert_eq!(detail.tree.kind.name(), "Column");
     assert_eq!(detail.tree.children[0].kind.name(), "Text");
-    let detail_digest = digest_hex(&Renderer::new(160, 240).render(&detail, &state).pixels);
+    let detail_digest = digest_hex(&compat_renderer(160, 240).render(&detail, &state).pixels);
     assert_ne!(detail_digest, home_digest, "each route paints its own tree");
 
     nav.apply_nav("..").unwrap();
     assert_eq!(nav.stack(), ["Home"]);
     let back = ir.with_route(nav.top().unwrap()).unwrap();
     assert_eq!(
-        digest_hex(&Renderer::new(160, 240).render(&back, &state).pixels),
+        digest_hex(&compat_renderer(160, 240).render(&back, &state).pixels),
         home_digest,
         "popping home must repaint the entry page exactly"
     );

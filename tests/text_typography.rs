@@ -8,6 +8,12 @@ use opurom_render::{
 };
 use serde_json::json;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
 
 fn text_doc(props: serde_json::Value) -> String {
@@ -132,11 +138,11 @@ fn typography_does_not_touch_the_raster_frame_bytes() {
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 
@@ -146,8 +152,8 @@ fn typography_does_not_touch_the_raster_frame_bytes() {
     let ps = StateView::from_ir(&plain_ir);
     let ts = StateView::from_ir(&typed_ir);
     assert_eq!(
-        digest_hex(&Renderer::new(240, 200).render(&plain_ir, &ps).pixels),
-        digest_hex(&Renderer::new(240, 200).render(&typed_ir, &ts).pixels),
+        digest_hex(&compat_renderer(240, 200).render(&plain_ir, &ps).pixels),
+        digest_hex(&compat_renderer(240, 200).render(&typed_ir, &ts).pixels),
         "typography must not alter raster bytes"
     );
 }

@@ -7,6 +7,12 @@ use opurom_render::{
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command as ProcessCommand};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const RECT_GRADIENT_IR: &str = include_str!("fixtures/rect-gradient.opuir.json");
 
 fn fixture() -> (Ir, StateView) {
@@ -18,11 +24,11 @@ fn fixture() -> (Ir, StateView) {
 #[test]
 fn command_json_is_deterministic_and_records_all_command_kinds() {
     let (ir, state) = fixture();
-    let first = Renderer::new(96, 64)
+    let first = compat_renderer(96, 64)
         .display_list(&ir, &state)
         .to_json()
         .unwrap();
-    let second = Renderer::new(96, 64)
+    let second = compat_renderer(96, 64)
         .display_list(&ir, &state)
         .to_json()
         .unwrap();
@@ -148,8 +154,11 @@ fn cli_commands_dump_keeps_golden_stdout_and_ppm() {
             .unwrap()
     };
 
-    let plain = run(&plain_ppm, &[]);
-    let with_commands = run(&commands_ppm, &["--commands", commands_arg]);
+    let plain = run(&plain_ppm, &["--quality", "compat"]);
+    let with_commands = run(
+        &commands_ppm,
+        &["--commands", commands_arg, "--quality", "compat"],
+    );
     assert!(
         plain.status.success(),
         "{}",
@@ -205,6 +214,7 @@ fn cli_commands_argument_errors_are_readable() {
 
     let transition = base()
         .args(["--commands", commands_arg, "--transition", "slide"])
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert_eq!(transition.status.code(), Some(1));
@@ -336,13 +346,13 @@ fn extreme_theme_tokens_are_rejected_with_typed_diagnostics() {
 #[test]
 fn quality_profile_is_frozen_in_the_renderer_state() {
     let (ir, state) = fixture();
-    let compat = Renderer::new(96, 64)
+    let compat = compat_renderer(96, 64)
         .display_list(&ir, &state)
         .to_json()
         .unwrap();
     assert!(!compat.contains("\"quality\""), "{compat}");
 
-    let mut renderer = Renderer::new(96, 64);
+    let mut renderer = compat_renderer(96, 64);
     renderer.set_quality(opurom_render::QualityProfile::Product);
     let product = renderer.display_list(&ir, &state).to_json().unwrap();
     assert_eq!(
@@ -352,7 +362,7 @@ fn quality_profile_is_frozen_in_the_renderer_state() {
     assert_eq!(renderer.quality(), opurom_render::QualityProfile::Product);
     assert!(renderer.quality().edge_coverage());
 
-    let mut probe = Renderer::new(96, 64);
+    let mut probe = compat_renderer(96, 64);
     probe.set_quality(opurom_render::QualityProfile::Compat);
     assert_eq!(probe.quality(), opurom_render::QualityProfile::Compat);
 }

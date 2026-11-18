@@ -5,13 +5,19 @@
 
 use opurom_render::{digest_hex, parse_ir, Renderer, StateView, SETTLED_MS};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const MOTION_IR: &str = include_str!("fixtures/motion.opuir.json");
 
 #[test]
 fn motion_frames_at_320x240_never_index_past_framebuffer() {
     let ir = parse_ir(MOTION_IR).expect("parse motion IR");
     let state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(320, 240);
+    let mut renderer = compat_renderer(320, 240);
     let mut digests = Vec::new();
     for tick in [0i64, 400, SETTLED_MS] {
         let frame = renderer.render_at(&ir, &state, tick);
@@ -27,8 +33,8 @@ fn motion_frames_at_320x240_never_index_past_framebuffer() {
 fn incremental_motion_redraw_stays_byte_identical() {
     let ir = parse_ir(MOTION_IR).expect("parse motion IR");
     let state = StateView::from_ir(&ir);
-    let mut full = Renderer::new(320, 240);
-    let mut inc = Renderer::new(320, 240);
+    let mut full = compat_renderer(320, 240);
+    let mut inc = compat_renderer(320, 240);
     for tick in [0i64, 200, 400, SETTLED_MS, 100, SETTLED_MS] {
         let f = full.render_at(&ir, &state, tick);
         let i = inc.render_incremental_at(&ir, &state, tick);

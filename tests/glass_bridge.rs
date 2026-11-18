@@ -4,6 +4,12 @@
 
 use opurom_render::{digest_hex, parse_ir, Command, Renderer, Rgba, StateView, ThemeMode};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const BASE: &str = r##"{
   "ir": "0.1.0", "app": "GlassBridge",
   "state": [],
@@ -27,13 +33,13 @@ fn ir(glass: bool) -> String {
 fn frame(glass: bool) -> Vec<u8> {
     let ir = parse_ir(&ir(glass)).unwrap();
     let state = StateView::from_ir(&ir);
-    Renderer::new(200, 140).pixels(&ir, &state)
+    compat_renderer(200, 140).pixels(&ir, &state)
 }
 
 fn command_kinds(glass: bool) -> Vec<&'static str> {
     let ir = parse_ir(&ir(glass)).unwrap();
     let state = StateView::from_ir(&ir);
-    let list = Renderer::new(200, 140).display_list(&ir, &state);
+    let list = compat_renderer(200, 140).display_list(&ir, &state);
     list.commands
         .iter()
         .filter_map(|c| match c {

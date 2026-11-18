@@ -10,6 +10,12 @@
 use opurom_render::{digest_hex, measure, parse_ir, FontMetrics, Renderer, StateView};
 use serde_json::json;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const TEXT: &str = "Wide il Wide";
 const SCALE: i64 = 3; // size 24 resolves to scale (24 + 3) / 7 = 3.
 
@@ -35,7 +41,7 @@ fn frame(metrics: Option<&str>) -> Vec<u8> {
     let ir = parse_ir(&text_ir(metrics)).unwrap();
     let state = StateView::from_ir(&ir);
     // 240 px keeps the whole run on one line for both modes at scale 3.
-    Renderer::new(240, 40).pixels(&ir, &state)
+    compat_renderer(240, 40).pixels(&ir, &state)
 }
 
 #[test]

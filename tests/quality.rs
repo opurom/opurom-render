@@ -6,6 +6,12 @@
 use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
 use std::{fs, path::PathBuf, process::Command};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const QUALITY_IR: &str = r##"{
   "ir": "0.1.0", "app": "Quality", "state": [],
   "tree": {
@@ -64,7 +70,7 @@ fn default_path_matches_library_render_and_has_no_quality_line() {
     let ir = parse_ir(QUALITY_IR).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         DEFAULT_DIGEST
     );
     assert!(fs::read(&ppm).unwrap().starts_with(b"P6\n320 240\n255\n"));

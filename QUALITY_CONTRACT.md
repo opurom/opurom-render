@@ -26,10 +26,17 @@ represent it.
 
 ## Renderer API
 
-- `Renderer::try_new` and `Renderer::new` start in Compat.
-- `Renderer::set_quality(QualityProfile::Product)` enables Product.
+- `Renderer::try_new` and `Renderer::new` start in Product; the normal path is always the highest visual specification.
+- `Renderer::set_quality(QualityProfile::Compat)` is the explicit downgrade used by digest regressions and low-dependency fallback.
 - `Renderer::quality()` reports the active profile.
 - Legacy `set_edge_aa(true)` keeps its historical boolean behavior.
+
+## DPR and coverage
+
+`DprScale` is a pure 1024-fixed-point transform. Compat uses 1x and no edge
+coverage; Product defaults to 2x with analytic edge coverage. Targets lower
+the same scale from the profile and their host DPR; no runtime IR parsing is
+needed. Logical-to-device mapping rounds half up.
 
 ## Determinism
 

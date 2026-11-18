@@ -1,4 +1,4 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--quality compat|product] [--incremental] [--edge-aa]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
@@ -24,9 +24,9 @@
 
 use opurom_render::{
     a11y_json_at, apply_policy, choose_quality, digest_hex, is_interactive, parse_ir, svg_at,
-    Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityTier, RenderConfig,
-    Renderer, StateValue, StateView, Transition, TransitionKind, ValueType, SETTLED_MS,
-    WINDOW_FRAMES,
+    Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityProfile, QualityTier,
+    RenderConfig, Renderer, StateValue, StateView, Transition, TransitionKind, ValueType,
+    SETTLED_MS, WINDOW_FRAMES,
 };
 use std::{env, fs, process};
 
@@ -269,7 +269,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
         return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--quality compat|product] [--incremental] [--edge-aa] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
                 .to_string(),
         );
     }
@@ -294,7 +294,8 @@ fn run() -> Result<(), String> {
     // Opt-in incremental raster: reuse the previous frame and redraw only the
     // changed region. Without it the full reference raster is used.
     let mut incremental = false;
-    // Opt-in 4x geometric edge coverage; off by default for golden parity.
+    // Explicit compatibility downgrade; the renderer default stays Product.
+    let mut quality: QualityProfile = QualityProfile::default();
     let mut edge_aa = false;
     // Opt-in measured-frame budget: inject explicit samples (the CLI has no
     // live render loop) and apply the resulting tier caps to the render config.
@@ -396,6 +397,15 @@ fn run() -> Result<(), String> {
                 incremental = true;
                 i += 1;
             }
+            "--quality" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or("--quality requires compat or product")?;
+                quality = QualityProfile::parse(value).ok_or_else(|| {
+                    format!("unknown quality {value:?}: expected compat or product")
+                })?;
+                i += 2;
+            }
             "--edge-aa" => {
                 edge_aa = true;
                 i += 1;
@@ -446,7 +456,7 @@ fn run() -> Result<(), String> {
             }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled|loading|success|error, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental, --edge-aa, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
+                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled|loading|success|error, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --quality compat|product, --incremental, --edge-aa, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
                 ));
             }
         }
@@ -498,6 +508,8 @@ fn run() -> Result<(), String> {
         tier_line = Some(auto_degrade_tier_line(rate, &frame_ms, n));
     }
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
+    let quality = QualityProfile::resolve(Some(quality), edge_aa, false);
+    renderer.set_quality(quality);
     renderer.set_edge_aa(edge_aa);
     let (mut frame, incremental_line) = if incremental {
         let frame = renderer.render_incremental_at(&ir, &state, elapsed_ms);

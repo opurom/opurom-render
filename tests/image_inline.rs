@@ -6,6 +6,12 @@ use opurom_render::image::{self, ImageFit};
 use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
 use std::sync::Mutex;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 static LOCK: Mutex<()> = Mutex::new(());
 
 fn png_data_uri() -> String {
@@ -72,7 +78,7 @@ fn malformed_inlined_png_is_a_cached_miss_not_an_error() {
     let ir = parse_ir(&ir_with(bad)).unwrap();
     let state = StateView::from_ir(&ir);
     // Rendering still succeeds with the deterministic placeholder tile.
-    let px = Renderer::new(160, 120).pixels(&ir, &state);
+    let px = compat_renderer(160, 120).pixels(&ir, &state);
     assert_eq!(px.len(), 160 * 120 * 4);
 }
 
@@ -101,7 +107,7 @@ fn translucent_png_edges_blend_with_premultiplied_rgb() {
     );
     let ir = parse_ir(&ir).unwrap();
     let state = StateView::from_ir(&ir);
-    let px = Renderer::new(16, 16).render(&ir, &state).pixels;
+    let px = compat_renderer(16, 16).render(&ir, &state).pixels;
     // Top-left pixel is a straight-alpha red edge over a light background.
     // Without premultiply the edge would stay 255; measured blend is 216.
     assert!(

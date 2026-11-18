@@ -5,6 +5,12 @@
 
 use opurom_render::{digest_hex, parse_ir, scroll_physics::*, Renderer, StateView, SETTLED_MS};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const COUNTER: &str = "../opurom-examples/golden/counter.opuir.json";
 const START_MS: i64 = 10_000;
 
@@ -288,7 +294,7 @@ fn v6_repeat_render_and_driver_are_byte_equal() {
     let mut digests = [[0u8; 8]; 2];
     for run in 0..2 {
         let driver = ScrollDriver::begin_fling(START_MS, 0.0, 2000.0, 0, 1_000_000, 1.0).unwrap();
-        let mut renderer = Renderer::new(320, 240);
+        let mut renderer = compat_renderer(320, 240);
         let mut out = Vec::new();
         for i in 0..=60 {
             let now_ms = START_MS + canonical_ms(i);
@@ -313,11 +319,11 @@ fn v7_no_fling_keeps_goldens_unchanged() {
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 }

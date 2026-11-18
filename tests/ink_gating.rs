@@ -4,6 +4,12 @@
 
 use opurom_render::{a11y_tree, digest_hex, parse_ir, PressPhase, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 fn ir() -> String {
     r##"{
   "ir": "0.1.0", "app": "InkGating", "state": [],
@@ -32,7 +38,7 @@ fn frame(node_id: u32, at: i64) -> Vec<u8> {
         confirm_tick: None,
         touch: None,
     };
-    Renderer::new(240, 200)
+    compat_renderer(240, 200)
         .render_with_press(&ir, &state, at, Some(&press))
         .pixels
 }
@@ -41,7 +47,7 @@ fn idle() -> Vec<u8> {
     let text = ir();
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
-    Renderer::new(240, 200)
+    compat_renderer(240, 200)
         .render_with_press(&ir, &state, 300, None)
         .pixels
 }
@@ -133,7 +139,7 @@ fn incremental_plain_press_is_byte_identical_to_idle() {
         confirm_tick: None,
         touch: None,
     };
-    let mut r = Renderer::new(240, 200);
+    let mut r = compat_renderer(240, 200);
     let idle_pixels = r.render_at(&ir, &state, 300).pixels;
     let pressed = r
         .render_with_press_incremental(&ir, &state, 300, Some(&press))

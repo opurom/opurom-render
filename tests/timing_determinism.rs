@@ -6,6 +6,12 @@
 use opurom_render::{digest_hex, parse_ir, PressPhase, Renderer, StateView, SETTLED_MS};
 use serde_json::json;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const ANIMATED: &str = r##"{
   "ir": "0.1.0", "app": "Timing", "state": [],
   "tree": { "id": 0, "kind": "Column", "props": { "gap": 4 },
@@ -51,7 +57,7 @@ fn identical_animation_timelines_have_identical_digests() {
     let state = StateView::from_ir(&ir);
     let ticks = [SETTLED_MS, 0, 40, 120, 260, 500];
     let run = |probe: bool| {
-        let mut r = Renderer::new(200, 120);
+        let mut r = compat_renderer(200, 120);
         let mut digests = Vec::new();
         for &t in &ticks {
             if probe {
@@ -69,14 +75,14 @@ fn identical_animation_timelines_have_identical_digests() {
 #[test]
 fn interleaved_press_and_idle_frames_are_order_stable() {
     let (ir, state, press) = press_ir();
-    let mut timeline = Renderer::new(320, 240);
+    let mut timeline = compat_renderer(320, 240);
     let _ = timeline.render_at(&ir, &state, SETTLED_MS);
     for &ms in &[0i64, 75, 225] {
         let _ = timeline.render_with_press_incremental(&ir, &state, ms, Some(&press));
     }
     let released = timeline.render_incremental_at(&ir, &state, SETTLED_MS);
 
-    let mut control = Renderer::new(320, 240);
+    let mut control = compat_renderer(320, 240);
     let _ = control.render_at(&ir, &state, SETTLED_MS);
     for &ms in &[0i64, 75, 225] {
         let _ = control.render_with_press(&ir, &state, ms, Some(&press));
@@ -92,7 +98,7 @@ fn malformed_animation_values_do_not_change_the_default_frame() {
     let bad = doc.to_string();
     assert!(parse_ir(&bad).is_err());
     let ir = parse_ir(ANIMATED).unwrap();
-    let a = Renderer::new(200, 120).render(&ir, &StateView::from_ir(&ir));
-    let b = Renderer::new(200, 120).render(&ir, &StateView::from_ir(&ir));
+    let a = compat_renderer(200, 120).render(&ir, &StateView::from_ir(&ir));
+    let b = compat_renderer(200, 120).render(&ir, &StateView::from_ir(&ir));
     assert_eq!(digest_hex(&a.pixels), digest_hex(&b.pixels));
 }

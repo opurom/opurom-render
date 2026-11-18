@@ -4,6 +4,12 @@
 use opurom_render::{layout, parse_ir, Align, StateView};
 use serde_json::json;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const W: u32 = 800;
 const H: u32 = 120;
 
@@ -153,7 +159,7 @@ fn no_bidi_glyph_run_is_byte_identical_between_ltr_and_rtl() {
     let render = |d: Option<&str>| {
         let ir = parse_ir(&ir_with(text.clone(), d)).unwrap();
         let state = StateView::from_ir(&ir);
-        Renderer::new(240, 60).pixels(&ir, &state)
+        compat_renderer(240, 60).pixels(&ir, &state)
     };
     let ltr = render(None);
     let rtl = render(Some("rtl"));
@@ -197,11 +203,11 @@ fn default_path_bytes_and_all_pinned_goldens_stay_identical() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
     let ppm = dir.join("rtl-effects.ppm");
@@ -209,6 +215,7 @@ fn default_path_bytes_and_all_pinned_goldens_stay_identical() {
         .arg("tests/fixtures/effects.opuir.json")
         .args(["96", "160"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(

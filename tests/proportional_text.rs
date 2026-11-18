@@ -13,6 +13,12 @@ use opurom_render::{
 };
 use serde_json::json;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 /// One `Text` node; `theme_metrics` / `node_metrics` are the optional
 /// `fontMetrics` values on the theme and on the node itself.
 fn text_ir(
@@ -237,7 +243,7 @@ fn proportional_rendering_is_deterministic_and_differs_from_fixed() {
     let render = |metrics: Option<&str>| {
         let ir = parse_ir(&text_ir(metrics, None, LINE, None)).unwrap();
         let state = StateView::from_ir(&ir);
-        digest_hex(&Renderer::new(320, 120).pixels(&ir, &state))
+        digest_hex(&compat_renderer(320, 120).pixels(&ir, &state))
     };
     let fixed = render(None);
     let prop = render(Some("proportional"));
@@ -271,7 +277,7 @@ fn a_proportional_line_paints_less_ink_than_the_fixed_baseline() {
     let render = |metrics: Option<&str>| {
         let ir = parse_ir(&text_ir(metrics, None, LINE, None)).unwrap();
         let state = StateView::from_ir(&ir);
-        Renderer::new(500, 120).pixels(&ir, &state)
+        compat_renderer(500, 120).pixels(&ir, &state)
     };
     let fixed = render(None);
     let prop = render(Some("proportional"));
@@ -297,13 +303,13 @@ fn the_three_canonical_goldens_stay_byte_identical_without_the_flag() {
     let ir = parse_ir(&doc).unwrap();
     assert_eq!(ir.theme.font_metrics, FontMetrics::Fixed);
     let state = StateView::from_ir(&ir);
-    let render = |w: u32, h: u32| digest_hex(&Renderer::new(w, h).pixels(&ir, &state));
+    let render = |w: u32, h: u32| digest_hex(&compat_renderer(w, h).pixels(&ir, &state));
     assert_eq!(render(320, 240), "8d45f412996a99c6");
     assert_eq!(render(800, 600), "318beb1dd337bc4e");
     let mut counted = StateView::from_ir(&ir);
     counted.set("count".to_string(), StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &counted)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &counted)),
         "40073cb95c912d80"
     );
 }

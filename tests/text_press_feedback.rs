@@ -5,6 +5,12 @@
 
 use opurom_render::{digest_hex, parse_ir, PressPhase, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const THEME: &str = r##""theme": { "mode": "light", "accent": "#097FEB", "radius": 4, "surface": "#FFFFFF", "onSurface": "#000000" }"##;
 
 fn action_ir(tappable: bool, in_button: bool) -> String {
@@ -37,7 +43,7 @@ fn action_ir(tappable: bool, in_button: bool) -> String {
 fn frame(ir_text: &str, suppress: bool, press: Option<&PressPhase>) -> Vec<u8> {
     let ir = parse_ir(ir_text).expect("action IR must parse");
     let state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(240, 120);
+    let mut renderer = compat_renderer(240, 120);
     renderer.set_suppress_text(suppress);
     renderer.render_with_press(&ir, &state, 300, press).pixels
 }
@@ -96,7 +102,7 @@ fn release_restores_the_idle_frame_byte_for_byte() {
     let ir = action_ir(true, true);
     let ir_parsed = parse_ir(&ir).unwrap();
     let state = StateView::from_ir(&ir_parsed);
-    let mut renderer = Renderer::new(240, 120);
+    let mut renderer = compat_renderer(240, 120);
     renderer.set_suppress_text(true);
     let idle = renderer
         .render_with_press(&ir_parsed, &state, 300, None)
@@ -115,6 +121,6 @@ fn no_phase_is_byte_identical_to_render() {
     let ir_text = action_ir(true, true);
     let ir = parse_ir(&ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    let plain = Renderer::new(240, 120).render(&ir, &state).pixels;
+    let plain = compat_renderer(240, 120).render(&ir, &state).pixels;
     assert_eq!(plain, frame(&ir_text, false, None));
 }

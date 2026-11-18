@@ -6,6 +6,12 @@
 use opurom_render::{digest, digest_hex, layout, parse_ir, Renderer, StateView};
 use serde_json::json;
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
 
 fn child_rect(fp: Option<i64>, kind: &str, w: u32, h: u32) -> (i64, i64) {
@@ -97,11 +103,11 @@ fn default_path_keeps_the_two_counter_goldens() {
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 }

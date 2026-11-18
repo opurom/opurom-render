@@ -5,6 +5,12 @@
 use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
 use std::{fs, path::PathBuf, process::Command};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 /// One rounded box with a large radius on a known stage; corner pixels are the
 /// only places where coverage can differ.
 const IR: &str = r##"{
@@ -42,6 +48,7 @@ fn cli(args: &[&str]) -> (std::process::Output, PathBuf) {
         .args(["80", "80"])
         .arg(&ppm)
         .args(args)
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     (out, ppm)
@@ -50,7 +57,7 @@ fn cli(args: &[&str]) -> (std::process::Output, PathBuf) {
 fn library(on: bool) -> Vec<u8> {
     let ir = parse_ir(IR).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(80, 80);
+    let mut renderer = compat_renderer(80, 80);
     renderer.set_edge_aa(on);
     renderer.render(&ir, &state).pixels
 }
@@ -61,11 +68,11 @@ fn default_path_is_byte_identical_with_or_without_the_setter() {
     let ir = parse_ir(IR).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(80, 80).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(80, 80).render(&ir, &state).pixels),
         digest_hex(&plain)
     );
     // The CLI with no flag emits no extra stdout line.
-    let (out, _) = cli(&[]);
+    let (out, _) = cli(&["--quality", "compat"]);
     assert!(
         out.status.success(),
         "{}",
@@ -141,10 +148,10 @@ fn capture_mode_ignores_the_flag() {
     // the library renderer has coverage enabled: set_edge_aa is a no-op there.
     let ir = parse_ir(IR).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(80, 80);
+    let mut renderer = compat_renderer(80, 80);
     renderer.set_edge_aa(true);
     let list = hex_of(renderer.display_list_at(&ir, &state, 0).to_json().unwrap());
-    let plain = Renderer::new(80, 80);
+    let plain = compat_renderer(80, 80);
     assert_eq!(
         list,
         hex_of(plain.display_list_at(&ir, &state, 0).to_json().unwrap())
@@ -176,7 +183,7 @@ fn rounded_corner_span_more_than_64_blend_levels() {
     }"##;
     let ir = parse_ir(text).unwrap();
     let state = StateView::from_ir(&ir);
-    let px = Renderer::new(200, 200).render(&ir, &state).pixels;
+    let px = compat_renderer(200, 200).render(&ir, &state).pixels;
     let at = |x: usize, y: usize| {
         let i = (y * 200 + x) * 4;
         [px[i], px[i + 1], px[i + 2]]
@@ -217,7 +224,7 @@ fn translucent_image_edge_is_composited_with_premultiplied_rgb() {
     );
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
-    let px = Renderer::new(16, 16).render(&ir, &state).pixels;
+    let px = compat_renderer(16, 16).render(&ir, &state).pixels;
     // Top-left pixel is a straight-alpha red border over the light stage.
     assert!(
         px[0] < 250 && px[0] > 180,

@@ -7,6 +7,12 @@ use opurom_render::{
 };
 use serde_json::json;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 /// A bound `Input`; `secure` is added only when requested so the absent case
 /// stays byte-identical to the pre-change schema.
 fn input_ir(secure: bool, placeholder: &str) -> String {
@@ -61,14 +67,14 @@ fn secure_render_pixels_differ_from_plaintext_and_never_leak() {
     let secure_ir = parse_ir(&input_ir(true, "Password")).unwrap();
     let plain = state_with(&plain_ir, SECRET);
     let secure = state_with(&secure_ir, SECRET);
-    let a = Renderer::new(300, 100).pixels(&plain_ir, &plain);
-    let b = Renderer::new(300, 100).pixels(&secure_ir, &secure);
+    let a = compat_renderer(300, 100).pixels(&plain_ir, &plain);
+    let b = compat_renderer(300, 100).pixels(&secure_ir, &secure);
     assert_ne!(a, b, "secure render must differ from plaintext render");
     // A secure frame equals one drawn from the all-mask string with no binding,
     // proving no raw glyph reaches the raster.
     let mask_only_ir = parse_ir(&input_ir(true, "Password")).unwrap();
     let mask_state = state_with(&mask_only_ir, &"*".repeat(SECRET.chars().count()));
-    let c = Renderer::new(300, 100).pixels(&mask_only_ir, &mask_state);
+    let c = compat_renderer(300, 100).pixels(&mask_only_ir, &mask_state);
     assert_eq!(b, c);
 }
 
@@ -88,8 +94,8 @@ fn secure_absent_is_byte_identical_and_ignores_masking() {
     let state = state_with(&ir, SECRET);
     assert_eq!(drawn_text(&ir, &state), SECRET);
     assert_eq!(
-        digest_hex(&Renderer::new(300, 100).pixels(&ir, &state)),
-        digest_hex(&Renderer::new(300, 100).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(300, 100).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(300, 100).pixels(&ir, &state)),
         "secure-absent render is deterministic"
     );
 }
@@ -98,8 +104,8 @@ fn secure_absent_is_byte_identical_and_ignores_masking() {
 fn secure_render_is_deterministic_across_runs() {
     let ir = parse_ir(&input_ir(true, "Password")).unwrap();
     let state = state_with(&ir, SECRET);
-    let d1 = digest_hex(&Renderer::new(300, 100).pixels(&ir, &state));
-    let d2 = digest_hex(&Renderer::new(300, 100).pixels(&ir, &state));
+    let d1 = digest_hex(&compat_renderer(300, 100).pixels(&ir, &state));
+    let d2 = digest_hex(&compat_renderer(300, 100).pixels(&ir, &state));
     assert_eq!(d1, d2);
     // Mask glyph is one of the documented choices.
     assert_eq!(font::glyph('*').is_some(), true);

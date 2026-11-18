@@ -113,7 +113,7 @@ pub use perf::{
     apply_policy, perf_report, FrameBudget, PerfReport, PerfWindow, QualityTier, RenderConfig,
     TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
 };
-pub use quality::QualityProfile;
+pub use quality::{DprScale, QualityProfile};
 pub use svg::{svg, svg_at};
 pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
 pub use typography::{FontSource, TextRole, TypographySpec};
@@ -325,8 +325,8 @@ impl Renderer {
             redrawn_nodes: 0,
             redraw_pixels: 0,
             anim: RefCell::new(AnimTable::new()),
-            edge_aa: false,
-            suppress_text: false,
+            edge_aa: QualityProfile::default().edge_coverage(),
+            suppress_text: QualityProfile::default().system_font_overlay(),
             quality: QualityProfile::default(),
         })
     }

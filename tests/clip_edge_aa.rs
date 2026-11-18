@@ -6,6 +6,12 @@
 
 use opurom_render::{digest_hex, parse_ir, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const IR: &str = r##"{
   "ir":"0.1.0","app":"ClipAA","state":[],
   "tree":{"id":0,"kind":"Column","props":{"padding":0,"align":"start"},
@@ -56,8 +62,8 @@ fn rounded_clip_content_uses_intermediate_coverage_when_opted_in() {
 fn default_clip_edge_path_is_byte_identical() {
     let ir = parse_ir(IR).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut plain = Renderer::new(48, 48);
-    let mut setter = Renderer::new(48, 48);
+    let mut plain = compat_renderer(48, 48);
+    let mut setter = compat_renderer(48, 48);
     setter.set_edge_aa(false);
     assert_eq!(
         plain.render(&ir, &state).pixels,
@@ -69,8 +75,8 @@ fn default_clip_edge_path_is_byte_identical() {
 fn clip_edge_aa_does_not_change_capture_commands() {
     let ir = parse_ir(IR).unwrap();
     let state = StateView::from_ir(&ir);
-    let plain = Renderer::new(48, 48);
-    let mut aa = Renderer::new(48, 48);
+    let plain = compat_renderer(48, 48);
+    let mut aa = compat_renderer(48, 48);
     aa.set_edge_aa(true);
     assert_eq!(
         plain.display_list(&ir, &state).to_json().unwrap(),
@@ -99,7 +105,7 @@ fn rounded_clip_links_disc_child_edge_without_touching_default() {
     fn frame(on: bool) -> (Vec<u8>, String) {
         let ir = parse_ir(CLIPPED_DISC).unwrap();
         let state = StateView::from_ir(&ir);
-        let mut r = Renderer::new(48, 48);
+        let mut r = compat_renderer(48, 48);
         r.set_edge_aa(on);
         let frame = r.render(&ir, &state);
         let list = r.display_list(&ir, &state).to_json().unwrap();

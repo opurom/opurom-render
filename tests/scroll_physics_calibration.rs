@@ -17,6 +17,12 @@
 
 use opurom_render::{digest_hex, parse_ir, scroll_physics::*, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const COUNTER: &str = "../opurom-examples/golden/counter.opuir.json";
 
 const START_MS: i64 = 20_000;
@@ -258,11 +264,11 @@ fn anchors_and_default_goldens_are_unchanged() {
     let ir = parse_ir(&std::fs::read_to_string(COUNTER).unwrap()).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 }

@@ -2,6 +2,12 @@
 //! only the nodes that changed. Every incremental frame is byte-identical to
 //! the full reference, while unchanged regions skip all rasterization work.
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 use opurom_render::{parse_ir, Renderer, StateValue, StateView, SETTLED_MS};
 
 const IR: &str = r##"{
@@ -45,8 +51,8 @@ fn state_at(ir: &opurom_render::Ir, v: i64) -> StateView {
 fn incremental_pixels_match_full_reference_every_frame() {
     let ir = parse_ir(IR).expect("parse");
     let states = [0i64, 1, 7, 2, 7, 7, 3];
-    let mut full = Renderer::new(400, 300);
-    let mut inc = Renderer::new(400, 300);
+    let mut full = compat_renderer(400, 300);
+    let mut inc = compat_renderer(400, 300);
     let mut full_frames = Vec::new();
     let mut inc_frames = Vec::new();
     for v in states {
@@ -71,7 +77,7 @@ fn incremental_pixels_match_full_reference_every_frame() {
 #[test]
 fn first_frame_is_a_full_raster() {
     let ir = parse_ir(IR).expect("parse");
-    let mut r = Renderer::new(200, 150);
+    let mut r = compat_renderer(200, 150);
     let s = state_at(&ir, 0);
     let frame = r.render_incremental_at(&ir, &s, SETTLED_MS);
     assert_eq!(frame.dirty.len(), 1, "a first frame is fully dirty");
@@ -83,7 +89,7 @@ fn first_frame_is_a_full_raster() {
 #[test]
 fn unchanged_rerender_redraws_nothing() {
     let ir = parse_ir(IR).expect("parse");
-    let mut r = Renderer::new(300, 200);
+    let mut r = compat_renderer(300, 200);
     let s = state_at(&ir, 5);
     let first = r.render_incremental_at(&ir, &s, SETTLED_MS);
     assert!(r.redraw_stats().0 > 0, "the first frame must redraw");
@@ -106,7 +112,7 @@ fn unchanged_rerender_redraws_nothing() {
 #[test]
 fn localized_change_redraws_fewer_nodes_than_full() {
     let ir = parse_ir(IR).expect("parse");
-    let mut r = Renderer::new(400, 300);
+    let mut r = compat_renderer(400, 300);
     let s0 = state_at(&ir, 0);
     r.render_incremental_at(&ir, &s0, SETTLED_MS);
     // A second render with the same state settles to zero redraw work.
@@ -126,7 +132,7 @@ fn localized_change_redraws_fewer_nodes_than_full() {
         "a localized change must redraw some pixels but not the whole frame ({pixels})"
     );
 
-    let mut ref_r = Renderer::new(400, 300);
+    let mut ref_r = compat_renderer(400, 300);
     ref_r.render_at(&ir, &s0, SETTLED_MS);
     let ref_frame = ref_r.render_at(&ir, &s1, SETTLED_MS);
     assert_eq!(
@@ -142,7 +148,7 @@ fn localized_change_redraws_fewer_nodes_than_full() {
 #[test]
 fn effect_frame_falls_back_to_a_full_raster() {
     let ir = parse_ir(IR_WITH_EFFECT).expect("parse");
-    let mut r = Renderer::new(300, 200);
+    let mut r = compat_renderer(300, 200);
     let s0 = state_at(&ir, 0);
     r.render_incremental_at(&ir, &s0, SETTLED_MS);
     let s1 = state_at(&ir, 7);
@@ -155,7 +161,7 @@ fn effect_frame_falls_back_to_a_full_raster() {
     );
     assert_eq!(pixels, 300u64 * 200);
 
-    let mut ref_r = Renderer::new(300, 200);
+    let mut ref_r = compat_renderer(300, 200);
     ref_r.render_at(&ir, &s0, SETTLED_MS);
     let ref_frame = ref_r.render_at(&ir, &s1, SETTLED_MS);
     assert_eq!(frame.pixels, ref_frame.pixels);
@@ -165,7 +171,7 @@ fn effect_frame_falls_back_to_a_full_raster() {
 #[test]
 fn resize_still_full_renders() {
     let ir = parse_ir(IR).expect("parse");
-    let mut r = Renderer::new(200, 150);
+    let mut r = compat_renderer(200, 150);
     let s = state_at(&ir, 3);
     let first = r.render_incremental_at(&ir, &s, SETTLED_MS);
     assert_eq!(first.dirty.len(), 1);
@@ -180,7 +186,7 @@ fn resize_still_full_renders() {
     );
     assert_eq!(pixels, 300u64 * 220);
 
-    let mut ref_r = Renderer::new(200, 150);
+    let mut ref_r = compat_renderer(200, 150);
     ref_r.render_at(&ir, &s, SETTLED_MS);
     ref_r.resize(300, 220).expect("resize");
     let ref_frame = ref_r.render_at(&ir, &s, SETTLED_MS);
