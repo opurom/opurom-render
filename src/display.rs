@@ -142,6 +142,10 @@ pub struct DisplayList {
     pub width: u32,
     pub height: u32,
     pub background: Rgba,
+    /// Frozen visual profile for this frame. Compat keeps the historical
+    /// wire header unchanged; Product uses the same header so sibling
+    /// encoders can stay compatible with older parsers.
+    pub quality: crate::QualityProfile,
     pub commands: Vec<Command>,
     /// Unsupported geometry encountered while recording. Carried out of band
     /// so the JSON wire format is unchanged; `to_json` reports it as an error.

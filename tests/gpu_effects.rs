@@ -253,6 +253,7 @@ fn empty_display_list_and_malformed_effect_commands_are_bounded() {
         width: 2,
         height: 1,
         background: Rgba::rgb(1, 2, 3),
+        quality: opurom_render::QualityProfile::Compat,
         commands: Vec::new(),
     };
     let json = empty.to_json().unwrap();

@@ -55,6 +55,7 @@ pub mod particles;
 pub mod path_ops;
 pub mod perf;
 pub mod primitives;
+pub mod quality;
 pub mod raster;
 pub mod scroll_physics;
 pub mod svg;
@@ -111,6 +112,7 @@ pub use perf::{
     apply_policy, perf_report, FrameBudget, PerfReport, PerfWindow, QualityTier, RenderConfig,
     TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
 };
+pub use quality::QualityProfile;
 pub use svg::{svg, svg_at};
 pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
 
@@ -238,6 +240,8 @@ pub struct Renderer {
     edge_aa: bool,
     /// Opt-in display-layer split: skip bitmap text for system-font overlay.
     suppress_text: bool,
+    /// Frozen visual quality profile for raster and display-list output.
+    quality: QualityProfile,
 }
 
 /// True when the IR node with `id` is tappable: either a `gesture: tap` prop
@@ -321,6 +325,7 @@ impl Renderer {
             anim: RefCell::new(AnimTable::new()),
             edge_aa: false,
             suppress_text: false,
+            quality: QualityProfile::default(),
         })
     }
 
@@ -334,6 +339,18 @@ impl Renderer {
     /// default path stays byte-identical; capture mode is unaffected.
     pub fn set_suppress_text(&mut self, on: bool) {
         self.suppress_text = on;
+    }
+
+    /// Select the frozen visual quality profile. Compat keeps historical
+    /// golden bytes; Product enables the full visual contract.
+    pub fn set_quality(&mut self, profile: QualityProfile) {
+        self.quality = profile;
+        self.edge_aa = profile.edge_coverage();
+        self.suppress_text = profile.system_font_overlay();
+    }
+
+    pub fn quality(&self) -> QualityProfile {
+        self.quality
     }
 
     /// Convenience constructor; use `try_new` for untrusted CLI input.
@@ -454,6 +471,7 @@ impl Renderer {
             width: self.width,
             height: self.height,
             background: pal.stage,
+            quality: self.quality,
             commands: canvas.into_commands(),
         }
     }

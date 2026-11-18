@@ -75,6 +75,7 @@ fn gradient_commands_keep_stop_and_draw_order() {
         width: 4,
         height: 2,
         background: Rgba::rgb(0, 0, 0),
+        quality: opurom_render::QualityProfile::Compat,
         commands: vec![
             RasterCommand::Gradient {
                 rect,
@@ -120,6 +121,7 @@ fn empty_display_list_serializes_as_empty_commands() {
         width: 2,
         height: 1,
         background: Rgba::rgb(7, 8, 9),
+        quality: opurom_render::QualityProfile::Compat,
         commands: Vec::new(),
     };
     let json = list.to_json().unwrap();
@@ -236,6 +238,7 @@ fn software_bounds_clipping_matches_recorded_command() {
         width: 4,
         height: 2,
         background: Rgba::rgb(0, 0, 0),
+        quality: opurom_render::QualityProfile::Compat,
         commands,
     };
     let doc: Value = serde_json::from_str(&list.to_json().unwrap()).unwrap();
@@ -262,6 +265,7 @@ fn zero_and_oversized_display_views_fail_closed() {
         width: w,
         height: h,
         background: Rgba::rgb(0, 0, 0),
+        quality: opurom_render::QualityProfile::Compat,
         commands: Vec::new(),
     };
     for (w, h) in [(0, 10), (10, 0), (0, 0), (4097, 10)] {
@@ -286,6 +290,7 @@ fn command_count_above_the_wire_limit_is_rejected() {
         width: 2,
         height: 2,
         background: Rgba::rgb(0, 0, 0),
+        quality: opurom_render::QualityProfile::Compat,
         commands: vec![
             RasterCommand::Solid {
                 rect,
@@ -326,4 +331,28 @@ fn extreme_theme_tokens_are_rejected_with_typed_diagnostics() {
         .display_list(&legal, &StateView::from_ir(&legal))
         .to_json()
         .unwrap();
+}
+
+#[test]
+fn quality_profile_is_frozen_in_the_renderer_state() {
+    let (ir, state) = fixture();
+    let compat = Renderer::new(96, 64)
+        .display_list(&ir, &state)
+        .to_json()
+        .unwrap();
+    assert!(!compat.contains("\"quality\""), "{compat}");
+
+    let mut renderer = Renderer::new(96, 64);
+    renderer.set_quality(opurom_render::QualityProfile::Product);
+    let product = renderer.display_list(&ir, &state).to_json().unwrap();
+    assert_eq!(
+        compat, product,
+        "product visual differences are raster-side"
+    );
+    assert_eq!(renderer.quality(), opurom_render::QualityProfile::Product);
+    assert!(renderer.quality().edge_coverage());
+
+    let mut probe = Renderer::new(96, 64);
+    probe.set_quality(opurom_render::QualityProfile::Compat);
+    assert_eq!(probe.quality(), opurom_render::QualityProfile::Compat);
 }
