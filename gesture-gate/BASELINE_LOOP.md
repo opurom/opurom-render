@@ -29,6 +29,9 @@ node gesture-gate/gesture-baseline-loop.mjs --self-test pass
 node gesture-gate/gesture-baseline-loop.mjs --self-test degrade
 node gesture-gate/gesture-baseline-loop.mjs --self-test missing
 
+# Fault matrix: all three parallel-gate faults must be rejected.
+node gesture-gate/gesture-baseline-loop.mjs --self-test parallel_faults
+
 # Default mode is pass.
 node gesture-gate/gesture-baseline-loop.mjs
 ```

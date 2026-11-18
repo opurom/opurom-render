@@ -4,7 +4,7 @@
 // Usage:
 //   node gesture-gate/gesture-parallel-gate.mjs [--report <json>]
 //     [--baseline <json>] [--write-baseline <json>]
-//     [--self-test pass|na|fail]
+//     [--self-test pass|na|fail|no_independent_win|replay_drift|no_deadline]
 //
 // Exit codes: 0 PASS or N/A, 1 FAIL, 2 usage/IO error.
 import { spawnSync } from 'node:child_process';
@@ -145,6 +145,33 @@ function emit(status, report, baseline, results, note) {
 
 function selfTest(state) {
   const base = generateReport();
+  if (state === 'no_independent_win') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.parallel_independent_wins = 0;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test no_independent_win: the secondary contest never resolved');
+    return failed ? 1 : 0;
+  }
+  if (state === 'replay_drift') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.parallel_replay_stable = 0;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test replay_drift: the replay produced a different winner');
+    return failed ? 1 : 0;
+  }
+  if (state === 'no_deadline') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.parallel_next_deadline_ms = 0;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test no_deadline: a pending pointer stopped reporting a deadline');
+    return failed ? 1 : 0;
+  }
   if (state === 'pass') {
     const results = evaluate(base, null);
     const failed = results.some((r) => r.verdict === 'FAIL');

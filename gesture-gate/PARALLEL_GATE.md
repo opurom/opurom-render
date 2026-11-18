@@ -62,10 +62,13 @@ node gesture-gate/gesture-parallel-gate.mjs
 node gesture-gate/gesture-parallel-gate.mjs --write-baseline parallel-baseline.json
 node gesture-gate/gesture-parallel-gate.mjs --baseline parallel-baseline.json
 
-# Self tests: PASS, N/A and FAIL.
+# Self tests: PASS, N/A, FAIL and three targeted fault injections.
 node gesture-gate/gesture-parallel-gate.mjs --self-test pass
 node gesture-gate/gesture-parallel-gate.mjs --self-test na
 node gesture-gate/gesture-parallel-gate.mjs --self-test fail
+node gesture-gate/gesture-parallel-gate.mjs --self-test no_independent_win
+node gesture-gate/gesture-parallel-gate.mjs --self-test replay_drift
+node gesture-gate/gesture-parallel-gate.mjs --self-test no_deadline
 ```
 
 The joint gate runs this gate as its sixth evidence source and reports
