@@ -51,11 +51,12 @@ const ARCHIVE_FILES = [
 ];
 
 function parseArgs(argv) {
-  const args = { out: null, selfTest: null };
+  const args = { out: null, selfTest: null, release: null };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--out') args.out = argv[++i];
     else if (arg === '--self-test') args.selfTest = argv[++i];
+    else if (arg === '--release') args.release = argv[++i];
     else throw new Error(`unknown argument: ${arg}`);
   }
   return args;
@@ -134,7 +135,7 @@ function verifyArchive(archiveDir) {
 
 // The full regression: archive, manifest check, verdict replay and the two
 // injected fault probes.
-function runRegression(archiveDir) {
+function runRegression(archiveDir, releasePath = null) {
   const checks = [];
   const record = (check, verdict, detail) => {
     checks.push({ check, verdict, detail });
@@ -342,6 +343,20 @@ function runRegression(archiveDir) {
     baselineFaults.code === 1 ? 'PASS' : 'FAIL',
     `exit=${baselineFaults.code}`);
 
+  // Verify a precomputed release report if supplied. The e2e chain does not
+  // generate it here, avoiding recursion into its own checks.
+  if (releasePath) {
+    const release = JSON.parse(readFileSync(releasePath, 'utf8'));
+    record('release_report_valid',
+      release.schema === 'opurom.gesture.release/1'
+        && release.status === 'PASS'
+        && Array.isArray(release.checks)
+        && release.checks.length > 0
+        && release.failed === 0
+      ? 'PASS' : 'FAIL',
+      `status=${release.status} checks=${release.checks?.length ?? 0}`);
+  }
+
   rmSync(workspace, { recursive: true, force: true });
   const failed = checks.some((item) => item.verdict === 'FAIL');
   return { status: failed ? 'FAIL' : 'PASS', checks };
@@ -364,7 +379,7 @@ function main() {
     try {
       const archiveDir = join(workspace, 'archive');
       if (args.selfTest === 'pass') {
-        const result = runRegression(archiveDir);
+        const result = runRegression(archiveDir, args.release);
         emit(result.status, result.status === 'PASS'
           ? 'archive, manifest, replay and fault probes behaved as expected'
           : 'end-to-end regression failed', { checks: result.checks });
@@ -391,7 +406,7 @@ function main() {
     }
   }
   if (!args.out) throw new Error('--out <dir> is required unless --self-test is used');
-  const result = runRegression(resolve(args.out));
+  const result = runRegression(resolve(args.out), args.release);
   emit(result.status, result.status === 'PASS'
     ? 'end-to-end gesture gate regression passed'
     : 'end-to-end gesture gate regression failed',
