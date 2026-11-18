@@ -463,7 +463,10 @@ const CONIC_ERR_DEN: i128 = 1_000_000_000;
 pub fn conic_quad_count_wang(radius: i64) -> u32 {
     // p0=(r,0), p1=(r,r), p2=(0,r) relative to the arc's corner centre,
     // translated by the bbox centre (r/2, r/2) for translation invariance.
-    let r = radius.max(0) as i128;
+    // The result is clamped to 1..=32 and already saturates at 32 for modest
+    // radii. Clamp the input before squaring: i64::MIN/MAX radii otherwise
+    // overflow the i128 intermediates. Normal inputs keep the exact history.
+    let r = radius.max(0).min(1i64 << 20) as i128;
     let half = r / 2;
     let (p0x, p0y) = (r - half, -half);
     let (p1x, p1y) = (r - half, r - half);
@@ -489,7 +492,10 @@ pub fn conic_quad_count_wang(radius: i64) -> u32 {
 }
 
 pub fn conic_quad_pow2(radius: i64, tol_num: i64, tol_den: i64) -> u32 {
-    let r = radius.max(0) as i128;
+    // pow2 is capped at 5 (32 quads) and saturates at a modest radius, so
+    // clamping the input before squaring preserves every normal result while
+    // keeping i64 extremes inside i128 arithmetic.
+    let r = radius.max(0).min(1i64 << 20) as i128;
     let err2 = (CONIC_ERR_NUM * r) * (CONIC_ERR_NUM * r);
     let tol = (tol_num.max(0) as i128 * CONIC_ERR_DEN) / tol_den.max(1) as i128;
     let tol2 = tol * tol;
@@ -745,8 +751,12 @@ pub fn round_rect_path_radii(x: i64, y: i64, w: i64, h: i64, radii: RoundingRadi
 /// pixels and a 1024 fixed-point scale factor for subpixel precision. The
 /// result is capped at 32, matching Skia's maximum conic subdivision.
 pub fn quad_subdivisions(p0: (i64, i64), p1: (i64, i64), p2: (i64, i64)) -> u32 {
-    let dx = (p0.0 as i128 - 2 * p1.0 as i128 + p2.0 as i128) * 1024;
-    let dy = (p0.1 as i128 - 2 * p1.1 as i128 + p2.1 as i128) * 1024;
+    // The result is capped at 32; clamp each coordinate before the 3x/4x i128
+    // expansion so extreme control points saturate instead of overflowing.
+    const C: i128 = 1i128 << 40;
+    let clamp = |v: i64| -> i128 { (v as i128).clamp(-C, C) };
+    let dx = (clamp(p0.0) - 2 * clamp(p1.0) + clamp(p2.0)) * 1024;
+    let dy = (clamp(p0.1) - 2 * clamp(p1.1) + clamp(p2.1)) * 1024;
     let len_sq = dx * dx + dy * dy;
     let n = isqrt(len_sq);
     // n is length*1024 where length = |p0-2p1+p2|; apply sqrt(scale*0.25*4)
@@ -758,13 +768,17 @@ pub fn quad_subdivisions(p0: (i64, i64), p1: (i64, i64), p2: (i64, i64)) -> u32 
 /// Number of line segments needed to linearise a cubic Bezier within Impeller's
 /// 1/4 px tolerance (`wangs_formula.cc:14`, `:18-28`).
 pub fn cubic_subdivisions(p0: (i64, i64), p1: (i64, i64), p2: (i64, i64), p3: (i64, i64)) -> u32 {
+    // The result is capped at 32; clamp before the i128 squared expansion so
+    // extreme control points saturate deterministically without overflow.
+    const C: i128 = 1i128 << 40;
+    let clamp = |v: i64| -> i128 { (v as i128).clamp(-C, C) };
     let a = (
-        p0.0 as i128 - 2 * p1.0 as i128 + p2.0 as i128,
-        p0.1 as i128 - 2 * p1.1 as i128 + p2.1 as i128,
+        clamp(p0.0) - 2 * clamp(p1.0) + clamp(p2.0),
+        clamp(p0.1) - 2 * clamp(p1.1) + clamp(p2.1),
     );
     let b = (
-        p1.0 as i128 - 2 * p2.0 as i128 + p3.0 as i128,
-        p1.1 as i128 - 2 * p2.1 as i128 + p3.1 as i128,
+        clamp(p1.0) - 2 * clamp(p2.0) + clamp(p3.0),
+        clamp(p1.1) - 2 * clamp(p2.1) + clamp(p3.1),
     );
     let max_len = (a.0 * a.0 + a.1 * a.1).max(b.0 * b.0 + b.1 * b.1);
     // sqrt(k * sqrt(max_len)), k = 0.75*4 = 3, in 1024 fixed point.
@@ -984,5 +998,41 @@ mod corner_density_tests {
             assert!(n >= prev, "radius {r}: {n} < {prev}");
             prev = n;
         }
+    }
+}
+
+#[cfg(test)]
+mod boundary_overflow_tests {
+    use super::{conic_quad_count_wang, conic_quad_pow2, cubic_subdivisions, quad_subdivisions};
+
+    #[test]
+    fn wang_counts_are_bounded_and_deterministic_at_i64_extremes() {
+        for r in [i64::MIN, -1, 0, 1, 1 << 15, i64::MAX] {
+            let a = conic_quad_count_wang(r);
+            assert!((1..=32).contains(&a), "r={r}: {a}");
+            assert_eq!(a, conic_quad_count_wang(r), "r={r} nondeterministic");
+        }
+    }
+
+    #[test]
+    fn pow2_subdivision_never_overflows_or_loops_at_extreme_radius() {
+        // CONIC_ERR_NUM ~= 6e7; squaring (num*r) for r=i64::MAX needs ~137
+        // bits, so the kernel must clamp the radius before the multiply.
+        let n = conic_quad_pow2(i64::MAX, 1, 8);
+        assert!((0..=5).contains(&n), "{n}");
+        assert_eq!(n, conic_quad_pow2(i64::MAX, 1, 8));
+        assert_eq!(conic_quad_pow2(i64::MIN, 1, 8), 0);
+        assert!(
+            (0..=5).contains(&conic_quad_pow2(100, 1, 0)),
+            "zero denominator is safe"
+        );
+    }
+
+    #[test]
+    fn bezier_subdivisions_are_bounded_at_i64_extreme_control_points() {
+        let p = (i64::MIN, i64::MAX);
+        let q = (i64::MAX, i64::MIN);
+        assert!((1..=32).contains(&quad_subdivisions(p, q, p)));
+        assert!((1..=32).contains(&cubic_subdivisions(p, q, p, q)));
     }
 }

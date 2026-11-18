@@ -962,3 +962,20 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod boundary_level_tests {
+    use super::{elevation_level, project_state_level};
+
+    #[test]
+    fn strength_and_state_levels_are_total_over_i64() {
+        for v in [i64::MIN, -1, 0, 1, 5, 6, 7, 8, 9, i64::MAX] {
+            assert!(elevation_level(v) <= 6, "{v}");
+            assert!(project_state_level(v) <= 6, "{v}");
+        }
+        assert_eq!(elevation_level(i64::MIN), 0);
+        assert_eq!(elevation_level(i64::MAX), 6);
+        assert_eq!(project_state_level(5), 4);
+        assert_eq!(elevation_level(5), 4);
+    }
+}
