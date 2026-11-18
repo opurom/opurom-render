@@ -1,0 +1,15 @@
+{
+  "schema": "opurom.gesture.perf/1",
+  "source": "flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb",
+  "clock": "logical",
+  "metrics": {
+    "gesture_burst_small": 244,
+    "gesture_burst_large": 484,
+    "arena_slots_one": 62,
+    "arena_slots_four": 248,
+    "packet_loss_full": 92,
+    "packet_loss_lossy": 83,
+    "replay_bytes": 487,
+    "slop_threshold": 18
+  }
+}

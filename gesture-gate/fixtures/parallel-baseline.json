@@ -1,0 +1,12 @@
+{
+  "schema": "opurom.gesture.parallel/1",
+  "source": "flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb",
+  "clock": "logical",
+  "metrics": {
+    "parallel_active_arenas": 2,
+    "parallel_resolved_arenas": 1,
+    "parallel_independent_wins": 1,
+    "parallel_replay_stable": 1,
+    "parallel_next_deadline_ms": 500
+  }
+}

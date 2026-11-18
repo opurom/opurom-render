@@ -1,0 +1,12 @@
+{
+  "schema": "opurom.gesture.advanced/1",
+  "source": "flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb",
+  "clock": "logical",
+  "metrics": {
+    "rotation_quarter_turn_milli": -1571,
+    "rotation_horizontal_milli": 0,
+    "drag_down_origin_delta": 20,
+    "drag_start_origin_delta": 0,
+    "drag_threshold_px": 18
+  }
+}

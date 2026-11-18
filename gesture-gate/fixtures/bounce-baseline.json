@@ -1,0 +1,15 @@
+{
+  "schema": "opurom.gesture.bounce/1",
+  "source": "flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb",
+  "clock": "logical",
+  "metrics": {
+    "bounce_friction_ppm": 135000,
+    "bounce_transfer_cap": 5000,
+    "rubber_band_half_life_ms": 70,
+    "rubber_band_lambda_micro": 9902103,
+    "rubber_band_decay_ppm": 500005,
+    "bounce_overshoot_px": 122,
+    "bounce_settle_steps": 33,
+    "bounce_handover_steps": 53
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "opurom.gesture.semantics/1",
+  "source": "flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb",
+  "clock": "logical",
+  "digest": "7f41a3d89c3eb167",
+  "metrics": {
+    "semantics_nodes": 8,
+    "semantics_focusable": 3,
+    "semantics_roles": 6,
+    "semantics_json_bytes": 653,
+    "semantics_state_delta": 2
+  }
+}

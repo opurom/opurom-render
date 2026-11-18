@@ -27,8 +27,7 @@ const METRICS = [
 // only bounded, so a different libm rounding cannot fail the gate.
 const LIMITS = {
   rotation_quarter_turn_milli: {
-    min: -3142,
-    max: 3142,
+    exact: -1571,
     reason: 'the signed rotation is bounded to one full turn',
   },
   rotation_horizontal_milli: {
@@ -119,7 +118,10 @@ function evaluate(report, baseline) {
     if (verdict === 'PASS' && baseline) {
       const previous = baseline.metrics[key];
       const allowed = limit.exact !== undefined ? previous : previous * BASELINE_FACTOR + BASELINE_SLACK;
-      if (actual > allowed) {
+      const regressed = limit.exact !== undefined
+        ? actual !== previous
+        : actual > allowed;
+      if (regressed) {
         verdict = 'FAIL';
         detail += ` baseline=${previous} allowed=${allowed}`;
       }

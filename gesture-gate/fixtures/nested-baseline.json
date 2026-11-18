@@ -1,0 +1,13 @@
+{
+  "schema": "opurom.gesture.nested/1",
+  "source": "flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb",
+  "clock": "logical",
+  "metrics": {
+    "nested_handoff_steps": 5,
+    "nested_outer_consumed_milli": 140000,
+    "nested_inner_consumed_milli": 80000,
+    "nested_unconsumed_milli": 0,
+    "nested_overscroll_px": 40,
+    "nested_notification_depth": 2
+  }
+}
