@@ -26,6 +26,7 @@ const TESTS = [
   'advanced_gesture_parity.rs',
   'advanced_gesture_thresholds.rs',
   'bounce_scroll_physics.rs',
+  'gesture_bounce_report.rs',
   'drag_start_behavior.rs',
   'drag_start_parity.rs',
   'gesture_conflict_team.rs',
