@@ -421,6 +421,13 @@ impl Canvas {
             self.pixels[i + 3] = 255;
             return true;
         }
+        // Flutter 3.50.0 / Impeller `Color::Blend(kSrcOver)`
+        // (engine 371f772, impeller/geometry/color.cc:165-168):
+        // `src.Premultiply() + dst.Premultiply() * (1 - src.alpha)`.
+        // The framebuffer is opaque, so premultiply and unpremultiply cancel
+        // and this reduces to integer src-over. This path keeps truncating
+        // (historical audit FLUTTER_DETAIL_CHECKLIST.md:31-35): switching to
+        // round changes pinned goldens with no systematic Skia gain.
         let a = c.a as u32;
         let inv = 255 - a;
         let src = [c.r, c.g, c.b];
