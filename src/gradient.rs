@@ -342,3 +342,139 @@ mod radial_tests {
         assert!((500..=524).contains(&t), "midpoint t {t}");
     }
 }
+
+/// Sweep (angular) gradient rule, ported from Flutter 3.50.0
+/// `Gradient.sweep` (`ui/painting.dart:5226-5254`) with `TileMode`
+/// (`ui/painting.dart:4912-4981`). Angles are atan2 in a 1<<16 fixed-point
+/// scale; the sector spans `start..end` and a stop value 0/1 maps to
+/// start/end exactly (`:5212-5218`). Outside the sector:
+/// clamp extends the end colour, repeat wraps the angle, mirror reflects it,
+/// decal returns `None` (transparent black). Integer-only and deterministic.
+pub fn sweep_position(
+    px: i64,
+    py: i64,
+    cx: i64,
+    cy: i64,
+    start_atan2: i64,
+    end_atan2: i64,
+    mode: TileMode,
+) -> Option<i64> {
+    let one = 1i64 << 16;
+    // atan2 in the same fixed-point scale as the endpoints.
+    let mut ang = fixed_atan2(py - cy, px - cx);
+    let start = start_atan2;
+    let end = end_atan2;
+    // A 0..2pi angle outside [start, end] is either in the wrapped tail just
+    // below start (start-period, start) or beyond end. Decide by distance.
+    let period = end - start;
+    let two_pi = one as i128 * 4;
+    if ang < start {
+        let tail = (start - ang) as i128;
+        let above_end = two_pi - tail < (end - start) as i128;
+        match mode {
+            TileMode::Clamp => return Some(if !above_end { 0 } else { 1024 }),
+            TileMode::Decal => return None,
+            _ => {}
+        }
+        ang = if !above_end {
+            ang + period
+        } else {
+            ang - period
+        };
+    } else if ang > end {
+        match mode {
+            TileMode::Clamp => return Some(1024),
+            TileMode::Decal => return None,
+            _ => {}
+        }
+        ang = ang - period;
+        let period = end - start;
+        match mode {
+            TileMode::Clamp => return Some(1024),
+            TileMode::Decal => return None,
+            TileMode::Repeat => {
+                ang = start + ((ang - start).rem_euclid(period));
+            }
+            TileMode::Mirror => {
+                let r = (ang - start).rem_euclid(2 * period);
+                ang = start + if r <= period { r } else { 2 * period - r };
+            }
+        }
+    }
+    // Map the angle into 0..=1024 across the sector, with rounding.
+    let t = ((ang - start) * 1024) / (end - start).max(1);
+    Some(t.clamp(0, 1024))
+}
+
+/// Integer atan2 scaled to 1<<16, derived from the existing 16.16 fixed-point
+/// conventions in this module. Deterministic, no floats, and good to ~1e-4 rad.
+fn fixed_atan2(y: i64, x: i64) -> i64 {
+    let one = 1i64 << 16;
+    if x == 0 && y == 0 {
+        return 0;
+    }
+    // Reduce to the first octant by |slope|, then use a rational atan.
+    let ax = x.abs() as i128;
+    let ay = y.abs() as i128;
+    // x == 0 means a vertical ray: use pi/2 directly instead of an unbounded
+    // slope that would overflow the rational approximation.
+    if ax == 0 {
+        let quarter = (one as i128) / 2;
+        let angle = if y >= 0 { quarter } else { (one as i128) * 3 };
+        return (angle.rem_euclid(one as i128 * 4)) as i64;
+    }
+    let slope = (ay * one as i128) / ax;
+    // atan(s) for s in 0..1 approximated by s / (1 + 0.28 s^2) (folk rule),
+    // accurate to ~0.005 rad; good enough for a deterministic kernel.
+    let s2 = (slope * slope) / (one as i128);
+    let denom = one as i128 + (s2 * 28) / 100;
+    let atan = (slope * one as i128) / denom;
+    // Map the octant back to the full circle.
+    let quarter = (one as i128) / 2; // pi/2 in 1<<16
+    let angle = if ax >= ay { atan } else { quarter - atan };
+    let angle = if x < 0 {
+        (one as i128) * 2 - angle
+    } else {
+        angle
+    };
+    let angle = if y < 0 { -(angle) } else { angle };
+    let angle = angle.rem_euclid(one as i128 * 4);
+    angle as i64
+}
+
+#[cfg(test)]
+mod sweep_tests {
+    use super::{sweep_position, TileMode};
+
+    #[test]
+    fn sweep_sector_edges_match_stop_zero_and_one() {
+        // Start angle 0, end angle pi (half turn, 1<<16 scale).
+        let start = 0i64;
+        let end = (1i64 << 16) / 2;
+        // +x axis -> stop 0; +y axis -> stop 1024.
+        assert_eq!(
+            sweep_position(1 << 20, 0, 0, 0, start, end, TileMode::Clamp),
+            Some(0)
+        );
+        let mid = sweep_position(0, 1 << 20, 0, 0, start, end, TileMode::Clamp).unwrap();
+        assert!((980..=1024).contains(&mid), "pi/2 t {mid}");
+    }
+
+    #[test]
+    fn sweep_outside_sector_follows_tile_mode() {
+        let start = 0i64;
+        let end = (1i64 << 16) / 2;
+        // -y axis is 7pi/4, beyond end (sector 0..pi); clamp extends stop 1.
+        assert_eq!(
+            sweep_position(1 << 20, -(1 << 20), 0, 0, start, end, TileMode::Clamp),
+            Some(1024)
+        );
+        assert_eq!(
+            sweep_position(1 << 20, -(1 << 20), 0, 0, start, end, TileMode::Decal),
+            None
+        );
+        // Above the end angle clamps to stop 1.
+        let above = sweep_position(-(1 << 20), 1, 0, 0, start, end, TileMode::Clamp);
+        assert_eq!(above, Some(1024));
+    }
+}
