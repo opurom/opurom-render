@@ -33,6 +33,7 @@ const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const JOINT_GATE = join(ROOT, 'gesture-gate', 'gesture-fairness-perf-gate.mjs');
 const ARCHIVER = join(ROOT, 'gesture-gate', 'gesture-evidence-archive.mjs');
 const CONSISTENCY = join(ROOT, 'gesture-gate', 'gesture-schema-consistency.mjs');
+const FRESHNESS = join(ROOT, 'gesture-gate', 'gesture-archive-freshness.mjs');
 const E2E_SCHEMA = 'opurom.gesture.e2e/1';
 const SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 const ARCHIVE_FILES = [
@@ -277,6 +278,31 @@ function runRegression(archiveDir) {
       && driftResult.json?.status === 'FAIL'
       ? 'PASS' : 'FAIL',
     driftResult.json?.detail ?? describeFailure(driftResult));
+
+  // Archive freshness: compare the current archive with a second independent
+  // build, then inject a stale document into a copy and require rejection.
+  const previousDir = join(workspace, 'archive-previous');
+  const previous = runNode(ARCHIVER,
+    ['--out', previousDir, '--joint', built.evidencePath], 'previous archive');
+  if (previous.code !== 0 || previous.json?.status !== 'PASS') {
+    record('archive_freshness', 'FAIL', describeFailure(previous));
+    record('stale_document_detected', 'FAIL', describeFailure(previous));
+  } else {
+    const freshness = runNode(FRESHNESS,
+      ['--current', archiveDir, '--previous', previousDir], 'archive freshness');
+    record('archive_freshness',
+      freshness.code === 0 && freshness.json?.status === 'PASS' ? 'PASS' : 'FAIL',
+      freshness.json?.detail ?? describeFailure(freshness));
+
+    const staleDir = copyTree(archiveDir, join(workspace, 'archive-stale'));
+    const staleDoc = JSON.parse(readFileSync(join(previousDir, 'advanced.json'), 'utf8'));
+    staleDoc.status = 'FAIL';
+    writeFileSync(join(staleDir, 'advanced.json'), `${JSON.stringify(staleDoc, null, 2)}\n`);
+    const stale = verifyArchive(staleDir);
+    record('stale_document_detected',
+      stale.code === 1 && stale.json?.status === 'FAIL' ? 'PASS' : 'FAIL',
+      stale.json?.detail ?? describeFailure(stale));
+  }
 
   rmSync(workspace, { recursive: true, force: true });
   const failed = checks.some((item) => item.verdict === 'FAIL');
