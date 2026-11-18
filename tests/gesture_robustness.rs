@@ -95,6 +95,8 @@ fn cancel_with_zero_node_rejects_every_arena_member() {
     ] {
         assert!(e.arena_rejected(kind));
     }
+    // The cancel rejected every member, so no arena can have a winner.
+    assert_eq!(e.arena_winner(), None);
     assert_eq!(e.on_tick(10_000), None);
 }
 

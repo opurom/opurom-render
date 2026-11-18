@@ -160,6 +160,8 @@ fn cancel_storm_leaves_no_pending_arena_or_timer() {
     ] {
         assert!(e.arena_rejected(kind));
     }
+    // The cancel rejected every member, so no arena can have a winner.
+    assert_eq!(e.arena_winner(), None);
 }
 
 #[test]
