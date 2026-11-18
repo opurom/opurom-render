@@ -26,6 +26,7 @@ Given `--out <dir>`, the archiver writes:
 - `bounce.json` — canonical iOS bounce physics metrics.
 - `semantics.json` — canonical semantics and focus chain metrics.
 - `nested.json` — canonical nested scroll coordination metrics.
+- `parallel.json` — canonical parallel pointer arena metrics.
 - `replay.json` — `opurom.gesture.replay/1` canonical case/order projection.
 - `manifest.json` — `opurom.gesture.manifest/1` with sorted-key JSON, byte
   count and SHA-256 for every file.

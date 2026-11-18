@@ -40,6 +40,7 @@ const ARCHIVE_FILES = [
   'bounce.json',
   'semantics.json',
   'nested.json',
+  'parallel.json',
   'replay.json',
 ];
 
@@ -192,6 +193,16 @@ function runRegression(archiveDir) {
   record('nested_evidence_stable',
     stableJson(archivedNested.metrics ?? {}) === stableJson(jointNestedMetrics) ? 'PASS' : 'FAIL',
     `metrics=${Object.keys(archivedNested.metrics ?? {}).length}`);
+
+  // The archived parallel pointer evidence must carry the same metrics as the
+  // joint verdict it was built from.
+  const archivedParallel = JSON.parse(readFileSync(join(archiveDir, 'parallel.json'), 'utf8'));
+  const jointParallelMetrics = Object.fromEntries(
+    (evidence.json.parallel?.results ?? []).map((item) => [item.metric, item.detail]),
+  );
+  record('parallel_evidence_stable',
+    stableJson(archivedParallel.metrics ?? {}) === stableJson(jointParallelMetrics) ? 'PASS' : 'FAIL',
+    `metrics=${Object.keys(archivedParallel.metrics ?? {}).length}`);
 
   // Replay: regenerate the verdict from a fresh run and compare it with the
   // archived one. A deterministic gate must produce an identical verdict.

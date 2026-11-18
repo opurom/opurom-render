@@ -21,6 +21,8 @@ verdict:
    `gesture-semantics-gate.mjs` (the accessibility tree and focus chain).
 5. The `opurom.gesture.nested.gate/1` report from `gesture-nested-gate.mjs`
    (the nested scroll coordination).
+6. The `opurom.gesture.parallel.gate/1` report from
+   `gesture-parallel-gate.mjs` (the parallel pointer arenas).
 
 Flutter 3.50.0 source anchors (`ab2912035e160d9cad6306df307576da6128ebdb`):
 
@@ -48,11 +50,11 @@ that as valid perf evidence, not a failure.
 
 ## Usage
 
-The bounce, semantics and nested evidence are optional inputs: when they are
-not supplied the gate generates them, and `bounce_gate_status`,
+The bounce, semantics, nested and parallel evidence are optional inputs:
+when they are not supplied the gate generates them, and `bounce_gate_status`,
 `bounce_machine_report`, `semantics_gate_status`,
-`semantics_machine_report`, `nested_gate_status` and `nested_machine_report`
-report their verdicts.
+`semantics_machine_report`, `nested_gate_status`, `nested_machine_report`,
+`parallel_gate_status` and `parallel_machine_report` report their verdicts.
 
 ```sh
 # Fresh evidence, absolute checks only (N/A when no baseline exists).
@@ -67,7 +69,8 @@ node gesture-gate/gesture-fairness-perf-gate.mjs --baseline baseline.json
 # Reuse existing reports.
 node gesture-gate/gesture-fairness-perf-gate.mjs \
   --perf perf.json --fairness fairness.json --bounce bounce.json \
-  --semantics semantics.json --nested nested.json --baseline baseline.json
+  --semantics semantics.json --nested nested.json \
+  --parallel parallel.json --baseline baseline.json
 
 # Self tests: PASS, N/A and FAIL.
 node gesture-gate/gesture-fairness-perf-gate.mjs --self-test pass
