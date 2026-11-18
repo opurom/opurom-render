@@ -131,3 +131,24 @@ mod tests {
         );
     }
 }
+
+/// Flutter `OpacityLayer.alpha` (engine 371f772,
+/// `packages/flutter/lib/src/rendering/layer.dart:2150-2160`): alpha 255
+/// pushes only an offset layer, so a fully opaque opacity must not create a
+/// compositing layer. This pure rule is a prerequisite for a future static
+/// layer cache; it does not change the IR protocol.
+pub fn needs_opacity_layer(alpha: u8, has_children: bool) -> bool {
+    has_children && alpha < 255
+}
+
+#[cfg(test)]
+mod layer_tests {
+    use super::needs_opacity_layer;
+
+    #[test]
+    fn opacity_layer_rule_matches_flutter() {
+        assert!(!needs_opacity_layer(255, true));
+        assert!(!needs_opacity_layer(200, false));
+        assert!(needs_opacity_layer(254, true));
+    }
+}
