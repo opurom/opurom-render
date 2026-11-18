@@ -276,6 +276,8 @@ pub struct LaidOut {
     /// Authored `elevation` for the default path; M-projected for state-driven
     /// and in-flight values. Draws the material shadow when > 0.
     pub elevation: i64,
+    /// Resolved theme shadow colour (surface-tinted in M3).
+    pub shadow_color: Rgba,
     /// Typed software effects, in IR array order.
     pub visual_effects: Vec<VisualEffect>,
     /// Opt-in deterministic particle field for this node's rect.
@@ -336,6 +338,10 @@ pub struct Palette {
     pub info: Option<Rgba>,
     pub primary: Option<Rgba>,
     pub secondary: Option<Rgba>,
+    /// Elevation shadow colour: `ColorScheme.shadow` tinted by
+    /// `ColorScheme.surfaceTint` at the M3 elevation opacity. The default is
+    /// black, so every existing golden frame stays byte-identical.
+    pub shadow: Rgba,
 }
 
 impl Palette {
@@ -372,6 +378,7 @@ impl Palette {
             info: theme.tokens.info,
             primary: theme.tokens.primary,
             secondary: theme.tokens.secondary,
+            shadow: resolve_shadow_color(theme),
         }
     }
 
@@ -386,6 +393,26 @@ impl Palette {
             Tone::Neutral => crate::interaction::DEEP_INK,
         }
     }
+}
+
+/// Flutter 3.50.0 `ColorScheme.shadow` (`color_scheme.dart:1098-1099`) is black
+/// by default; M3 blends `surfaceTint` over it at an elevation-dependent
+/// opacity. The renderer has one shadow colour per theme, so level 4's
+/// 0.12 opacity is used as the representative elevation
+/// (`elevation_overlay.dart:170-177`, generated surface-tint table :173).
+/// Opaque integer channels: `out = tint * 0.12 + shadow * 0.88`.
+fn resolve_shadow_color(theme: &Theme) -> Rgba {
+    let base = theme.tokens.shadow.unwrap_or(Rgba::rgb(0, 0, 0));
+    let Some(tint) = theme.tokens.surface_tint else {
+        return base;
+    };
+    let mix =
+        |a: u8, b: u8| -> u8 { ((a as i64 * 31 + b as i64 * 225 + 128) / 256).clamp(0, 255) as u8 };
+    Rgba::rgb(
+        mix(tint.r, base.r),
+        mix(tint.g, base.g),
+        mix(tint.b, base.b),
+    )
 }
 
 /// Integer lerp between two colours; `t` is 0..=1024.
@@ -1417,6 +1444,7 @@ fn place(
             image_fit: n.props.fit,
             effects: target_effects,
             elevation: authored_elevation,
+            shadow_color: pal.shadow,
             visual_effects: target_visual_effects,
             particles: n.props.particles,
             control: None,
@@ -1507,6 +1535,7 @@ fn place(
         image_fit: n.props.fit,
         effects,
         elevation: authored_elevation,
+        shadow_color: pal.shadow,
         visual_effects,
         particles: n.props.particles,
         control: control_of(n, state),

@@ -686,6 +686,11 @@ impl Default for Contrast {
 pub struct ThemeTokens {
     pub surface: Option<Rgba>,
     pub on_surface: Option<Rgba>,
+    /// Full Material 3 colour-role overlay, flattened from a compile-time
+    /// `md-*` token import. Keys are bare role names (`primary`,
+    /// `on-primary`, ...); values are literal `#RRGGBB` from the pinned
+    /// token file. No runtime lookup or object model is introduced.
+    pub m3: BTreeMap<String, Rgba>,
     /// Flat tinted page backdrop a glass lamina refracts. Distinct from
     /// `surface`, which remains the contrast reference for on-surface ink.
     pub stage: Option<Rgba>,
@@ -1489,9 +1494,11 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         other => other,
     };
     let elevation = match opt_integer(o, "elevation", what)? {
-        Some(n) if !matches!(n, 0 | 1 | 2 | 3 | 4 | 6) => {
+        // Flutter 3.50.0 defines exactly these ten non-zero levels in
+        // kElevationToShadow (shadows.dart:40-221); 0 disables the shadow.
+        Some(n) if !matches!(n, 0 | 1 | 2 | 3 | 4 | 6 | 8 | 9 | 12 | 16 | 24) => {
             return Err(bad(format!(
-                "{what}.elevation must be one of levels 0,1,2,3,4,6"
+                "{what}.elevation must be one of levels 0,1,2,3,4,6,8,9,12,16,24"
             )));
         }
         other => other,
