@@ -194,3 +194,35 @@ fn rounded_corner_span_more_than_64_blend_levels() {
     }
     assert!(levels.len() > 64, "corner blend levels = {}", levels.len());
 }
+
+/// Impeller declares that all blend modes assume premultiplied source and
+/// destination colours (`impeller/geometry/color.h:56-58`, engine 371f772).
+/// A translucent PNG edge is the canonical case: straight-alpha source bytes
+/// must be premultiplied before src-over, otherwise the edge stays too bright.
+/// The regression pins the exact frame digest for an inline half-transparent
+/// red image on a light background; default opaque images stay byte-identical.
+#[test]
+fn translucent_image_edge_is_composited_with_premultiplied_rgb() {
+    const SEMI_RED: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAGUlEQVR4nGP4z8DQgA8zQBn/ceChpQAnBgCttHGdPwALZAAAAABJRU5ErkJggg==";
+    let text = format!(
+        r##"{{
+          "ir":"0.1.0","app":"PremulEdge","state":[],
+          "renderQuality":{{"msaa":4}},
+          "tree":{{"id":0,"kind":"Column","props":{{"padding":0,"color":"#FFFFFF"}},
+            "children":[{{"id":1,"kind":"Image","props":{{
+              "src":"{SEMI_RED}","width":16,"height":16,"fit":"fill"
+            }},"children":[],"events":{{}}}}],"events":{{}}}},
+          "theme":{{"mode":"light","accent":"#097FEB","radius":4}}
+        }}"##
+    );
+    let ir = parse_ir(&text).unwrap();
+    let state = StateView::from_ir(&ir);
+    let px = Renderer::new(16, 16).render(&ir, &state).pixels;
+    // Top-left pixel is a straight-alpha red border over the light stage.
+    assert!(
+        px[0] < 250 && px[0] > 180,
+        "premultiplied edge red {}",
+        px[0]
+    );
+    assert_eq!(digest_hex(&px), "3781f56d26289663");
+}
