@@ -1035,6 +1035,9 @@ fn color_role_prop(
     let Some(_role) = s.strip_prefix("@md-sys-color-") else {
         return Ok(None);
     };
+    if _role.is_empty() {
+        return Err(bad(format!("{what}.{key} has an empty design token role")));
+    }
     Ok(Some(s))
 }
 

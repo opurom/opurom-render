@@ -2406,7 +2406,7 @@ fn place_grid(
                 x += gutter;
             }
         }
-        y += h;
+        y += h + if row + 1 < rows as usize { gutter } else { 0 };
     }
 }
 
