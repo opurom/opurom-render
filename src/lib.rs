@@ -57,6 +57,7 @@ pub mod perf;
 pub mod primitives;
 pub mod quality;
 pub mod raster;
+pub mod recipes;
 pub mod scroll_physics;
 pub mod svg;
 pub mod text_span;
@@ -114,6 +115,10 @@ pub use perf::{
     TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
 };
 pub use quality::{DprScale, QualityProfile};
+pub use recipes::{
+    ComponentState, ComponentVariant, RecipeKind, A11Y_ROLES, COLOR_SLOTS, COMPONENT_STATES,
+    COMPONENT_VARIANTS,
+};
 pub use svg::{svg, svg_at};
 pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
 pub use typography::{FontSource, TextRole, TypographySpec};
