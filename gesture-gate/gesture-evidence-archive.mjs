@@ -33,6 +33,7 @@ const FILES = {
   fairness: 'fairness.json',
   bounce: 'bounce.json',
   semantics: 'semantics.json',
+  nested: 'nested.json',
   replay: 'replay.json',
 };
 
@@ -94,8 +95,9 @@ function canonicalInputs(joint) {
   const fairness = joint?.fairness ?? null;
   const bounce = joint?.bounce ?? null;
   const semantics = joint?.semantics ?? null;
-  if (!perf || !fairness || !bounce || !semantics) {
-    throw new Error('joint evidence lacks perf, fairness, bounce or semantics data');
+  const nested = joint?.nested ?? null;
+  if (!perf || !fairness || !bounce || !semantics || !nested) {
+    throw new Error('joint evidence lacks perf, fairness, bounce, semantics or nested data');
   }
   if (!Array.isArray(perf.results) || perf.results.length === 0) {
     throw new Error('perf evidence lacks machine results');
@@ -108,6 +110,9 @@ function canonicalInputs(joint) {
   }
   if (!Array.isArray(semantics.results) || semantics.results.length === 0) {
     throw new Error('semantics evidence lacks machine results');
+  }
+  if (!Array.isArray(nested.results) || nested.results.length === 0) {
+    throw new Error('nested evidence lacks machine results');
   }
   const perfCanonical = {
     schema: perf.schema,
@@ -136,6 +141,12 @@ function canonicalInputs(joint) {
     digest: semantics.digest ?? null,
     metrics: Object.fromEntries(semantics.results.map((item) => [item.metric, item.detail])),
   };
+  const nestedCanonical = {
+    schema: nested.schema,
+    status: nested.status,
+    source: nested.source,
+    metrics: Object.fromEntries(nested.results.map((item) => [item.metric, item.detail])),
+  };
   const replayCanonical = {
     schema: 'opurom.gesture.replay/1',
     source: fairness.source,
@@ -143,8 +154,16 @@ function canonicalInputs(joint) {
     perf_order: perfCanonical.metrics,
     bounce_order: bounceCanonical.metrics,
     semantics_order: semanticsCanonical.metrics,
+    nested_order: nestedCanonical.metrics,
   };
-  return { perfCanonical, fairnessCanonical, bounceCanonical, semanticsCanonical, replayCanonical };
+  return {
+    perfCanonical,
+    fairnessCanonical,
+    bounceCanonical,
+    semanticsCanonical,
+    nestedCanonical,
+    replayCanonical,
+  };
 }
 
 function writeArchive(outDir, joint) {
@@ -153,6 +172,7 @@ function writeArchive(outDir, joint) {
     fairnessCanonical,
     bounceCanonical,
     semanticsCanonical,
+    nestedCanonical,
     replayCanonical,
   } = canonicalInputs(joint);
   const documents = {
@@ -168,6 +188,7 @@ function writeArchive(outDir, joint) {
     fairness: fairnessCanonical,
     bounce: bounceCanonical,
     semantics: semanticsCanonical,
+    nested: nestedCanonical,
     replay: replayCanonical,
   };
   mkdirSync(resolve(outDir), { recursive: true });

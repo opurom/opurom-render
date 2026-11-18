@@ -1143,3 +1143,240 @@ impl ScrollDriver {
         x.round() as i64
     }
 }
+
+/// Flutter's `precisionErrorTolerance` (`foundation/constants.dart:8`).
+pub const PRECISION_ERROR_TOLERANCE: f64 = 1e-10;
+
+/// One scroll axis of a nested scroll coordinator.
+///
+/// The pixels run from `min_scroll_extent` to `max_scroll_extent`; a negative
+/// value is an overscroll above the leading edge (`NSV:1268-1293`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollAxisPosition {
+    pub pixels: f64,
+    pub min_scroll_extent: f64,
+    pub max_scroll_extent: f64,
+}
+
+impl ScrollAxisPosition {
+    pub fn new(pixels: f64, min_scroll_extent: f64, max_scroll_extent: f64) -> Self {
+        Self {
+            pixels,
+            min_scroll_extent,
+            max_scroll_extent,
+        }
+    }
+
+    /// `NSV:1262-1313` (`applyClampedDragUpdate`): applies the delta without
+    /// entering an overscroll and returns the delta that was not used.
+    pub fn apply_clamped_drag_update(&mut self, delta: f64) -> f64 {
+        let min = if delta < 0.0 {
+            f64::NEG_INFINITY
+        } else {
+            self.min_scroll_extent.min(self.pixels)
+        };
+        let max = if delta > 0.0 {
+            f64::INFINITY
+        } else if self.pixels < 0.0 {
+            0.0
+        } else {
+            self.max_scroll_extent.max(self.pixels)
+        };
+        let old_pixels = self.pixels;
+        let new_pixels = (self.pixels - delta).clamp(min, max);
+        let clamped_delta = new_pixels - old_pixels;
+        if clamped_delta == 0.0 {
+            return delta;
+        }
+        // The clamping physics never produce an overscroll
+        // (`SP:875-876`), so the boundary conditions are zero.
+        let overscroll = 0.0;
+        let actual_new_pixels = new_pixels - overscroll;
+        let offset = actual_new_pixels - old_pixels;
+        if offset != 0.0 {
+            self.pixels = actual_new_pixels;
+        }
+        let result = delta + offset;
+        if result.abs() < PRECISION_ERROR_TOLERANCE {
+            return 0.0;
+        }
+        result
+    }
+
+    /// `NSV:1315-1340` (`applyFullDragUpdate`): applies the whole delta, so
+    /// the position may enter an overscroll, and returns the overscroll.
+    pub fn apply_full_drag_update(&mut self, delta: f64) -> f64 {
+        let old_pixels = self.pixels;
+        let new_pixels = self.pixels - delta;
+        if (old_pixels - new_pixels).abs() < PRECISION_ERROR_TOLERANCE {
+            return 0.0;
+        }
+        self.pixels = new_pixels;
+        0.0
+    }
+}
+
+/// The outcome of one user drag update on a nested coordinator.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NestedDragOutcome {
+    /// The delta applied to the outer position.
+    pub outer_applied: f64,
+    /// The delta applied to the inner positions, summed over them.
+    pub inner_applied: f64,
+    /// The delta that no position could consume.
+    pub unconsumed: f64,
+}
+
+/// The nested scroll coordinator.
+///
+/// Flutter's `_NestedScrollCoordinator` (`NSV:618-1130`) splits one user drag
+/// between the inner and the outer scrollable: the inner consumes what it can
+/// and the outer takes the remainder. The projection is data only: no widget
+/// tree, no IR field and no host ABI change.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NestedScrollCoordinator {
+    outer: ScrollAxisPosition,
+    inner: Vec<ScrollAxisPosition>,
+}
+
+impl NestedScrollCoordinator {
+    pub fn new(outer: ScrollAxisPosition, inner: Vec<ScrollAxisPosition>) -> Self {
+        Self { outer, inner }
+    }
+
+    pub fn outer(&self) -> ScrollAxisPosition {
+        self.outer
+    }
+
+    /// Moves the outer position, for example when the host resolves a
+    /// gesture outside the coordinator.
+    pub fn set_outer_pixels(&mut self, pixels: f64) {
+        self.outer.pixels = pixels;
+    }
+
+    /// Moves one inner position.
+    pub fn set_inner_pixels(&mut self, index: usize, pixels: f64) {
+        if let Some(position) = self.inner.get_mut(index) {
+            position.pixels = pixels;
+        }
+    }
+
+    pub fn inner(&self) -> &[ScrollAxisPosition] {
+        &self.inner
+    }
+
+    /// `NSV:1068-1130` (`applyUserOffset`).
+    ///
+    /// A negative delta drags up: the inner overscroll is removed first and
+    /// the outer view moves as soon as possible. A positive delta drags down:
+    /// the inner positions consume what they can and the remainder goes to the
+    /// outer view.
+    pub fn apply_user_offset(&mut self, delta: f64) -> NestedDragOutcome {
+        let outer_before = self.outer.pixels;
+        let inner_before: Vec<f64> = self.inner.iter().map(|p| p.pixels).collect();
+        if delta < 0.0 {
+            // NSV:1074-1096.
+            let mut outer_delta = delta;
+            for position in self.inner.iter_mut() {
+                if position.pixels < 0.0 {
+                    let potential = position.apply_clamped_drag_update(delta);
+                    outer_delta = outer_delta.max(potential);
+                }
+            }
+            if outer_delta.abs() > PRECISION_ERROR_TOLERANCE {
+                let inner_delta = self.outer.apply_clamped_drag_update(outer_delta);
+                if inner_delta != 0.0 {
+                    for position in self.inner.iter_mut() {
+                        position.apply_full_drag_update(inner_delta);
+                    }
+                }
+            }
+        } else {
+            // NSV:1097-1128.
+            let inner_delta = delta;
+            let mut outer_delta: f64 = 0.0;
+            let mut overscrolls: Vec<f64> = Vec::with_capacity(self.inner.len());
+            for position in self.inner.iter_mut() {
+                let overscroll = position.apply_clamped_drag_update(inner_delta);
+                outer_delta = outer_delta.max(overscroll);
+                overscrolls.push(overscroll);
+            }
+            if outer_delta != 0.0 {
+                outer_delta -= self.outer.apply_clamped_drag_update(outer_delta);
+            }
+            for (index, position) in self.inner.iter_mut().enumerate() {
+                let remaining = overscrolls[index] - outer_delta;
+                if remaining > 0.0 {
+                    position.apply_full_drag_update(remaining);
+                }
+            }
+        }
+        // The applied delta keeps the sign of the drag: the pixels move
+        // against the drag direction (`NSV:1295`).
+        let outer_applied = outer_before - self.outer.pixels;
+        let inner_applied: f64 = self
+            .inner
+            .iter()
+            .zip(inner_before.iter())
+            .map(|(position, before)| before - position.pixels)
+            .sum();
+        NestedDragOutcome {
+            outer_applied,
+            inner_applied,
+            unconsumed: delta - outer_applied - inner_applied,
+        }
+    }
+}
+
+/// The kind of a scroll notification (`SN:47-60`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollNotificationKind {
+    Start,
+    Update,
+    Overscroll,
+    End,
+}
+
+/// One scroll notification record.
+///
+/// `SN:31-42`: the depth is zero for the local notification and grows while
+/// the notification bubbles to the ancestors.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollNotificationRecord {
+    pub kind: ScrollNotificationKind,
+    pub depth: u32,
+    pub pixels: f64,
+}
+
+impl ScrollNotificationRecord {
+    pub fn new(kind: ScrollNotificationKind, depth: u32, pixels: f64) -> Self {
+        Self {
+            kind,
+            depth,
+            pixels,
+        }
+    }
+}
+
+/// `NL:92-138`: a notification is delivered to the dispatch target and then
+/// to every ancestor, until a listener consumes it.
+///
+/// The chain is ordered from the target to the root, so the returned records
+/// carry the depth of every ancestor that saw the notification.
+pub fn bubble_notifications(
+    chain: &[ScrollNotificationRecord],
+    consume_at: Option<usize>,
+) -> Vec<ScrollNotificationRecord> {
+    let mut seen = Vec::new();
+    for (depth, record) in chain.iter().enumerate() {
+        seen.push(ScrollNotificationRecord::new(
+            record.kind,
+            depth as u32,
+            record.pixels,
+        ));
+        if consume_at == Some(depth) {
+            break;
+        }
+    }
+    seen
+}

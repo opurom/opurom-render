@@ -19,6 +19,7 @@ const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const PERF_GATE = join(ROOT, 'gesture-gate', 'gesture-perf-gate.mjs');
 const BOUNCE_GATE = join(ROOT, 'gesture-gate', 'gesture-bounce-gate.mjs');
 const SEMANTICS_GATE = join(ROOT, 'gesture-gate', 'gesture-semantics-gate.mjs');
+const NESTED_GATE = join(ROOT, 'gesture-gate', 'gesture-nested-gate.mjs');
 const FAIRNESS_TEST = 'multi_pointer_fairness';
 const FAIRNESS_CASES = [
   'simultaneous_downs_open_independent_arenas',
@@ -34,6 +35,7 @@ const FAIRNESS_SCHEMA = 'opurom.gesture.fairness/1';
 const PERF_SCHEMA = 'opurom.gesture.gate/1';
 const BOUNCE_SCHEMA = 'opurom.gesture.bounce.gate/1';
 const SEMANTICS_SCHEMA = 'opurom.gesture.semantics.gate/1';
+const NESTED_SCHEMA = 'opurom.gesture.nested.gate/1';
 const JOINT_SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 
 function parseArgs(argv) {
@@ -42,6 +44,7 @@ function parseArgs(argv) {
     fairness: null,
     bounce: null,
     semantics: null,
+    nested: null,
     baseline: null,
     writeBaseline: null,
     selfTest: null,
@@ -53,6 +56,7 @@ function parseArgs(argv) {
     else if (arg === '--fairness') args.fairness = argv[++i];
     else if (arg === '--bounce') args.bounce = argv[++i];
     else if (arg === '--semantics') args.semantics = argv[++i];
+    else if (arg === '--nested') args.nested = argv[++i];
     else if (arg === '--baseline') args.baseline = argv[++i];
     else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
     else if (arg === '--self-test') args.selfTest = argv[++i];
@@ -137,7 +141,19 @@ function generateSemanticsReport() {
   return readJsonFromText(output, SEMANTICS_SCHEMA, 'semantics gate output');
 }
 
-function makeJoint(perf, fairness, bounce, semantics) {
+function generateNestedReport() {
+  const child = spawnSync(process.execPath, [NESTED_GATE], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
+  if (child.status !== 0) throw new Error(`nested gate failed (${child.status}): ${output.slice(-800)}`);
+  return readJsonFromText(output, NESTED_SCHEMA, 'nested gate output');
+}
+
+function makeJoint(perf, fairness, bounce, semantics, nested) {
   return {
     schema: JOINT_SCHEMA,
     source: JOINT_SOURCE,
@@ -146,6 +162,7 @@ function makeJoint(perf, fairness, bounce, semantics) {
     fairness,
     bounce,
     semantics,
+    nested,
   };
 }
 
@@ -206,6 +223,20 @@ function evaluate(joint, baseline) {
     detail: `results=${Array.isArray(semanticsResults) ? semanticsResults.length : 0}`,
     reason: 'machine-readable semantics evidence must be present',
   });
+  const nestedStatus = joint?.nested?.status;
+  results.push({
+    check: 'nested_gate_status',
+    verdict: nestedStatus === 'PASS' || nestedStatus === 'N/A' ? 'PASS' : 'FAIL',
+    detail: `status=${nestedStatus ?? 'missing'}`,
+    reason: 'the nested scroll gate must not FAIL',
+  });
+  const nestedResults = joint?.nested?.results ?? [];
+  results.push({
+    check: 'nested_machine_report',
+    verdict: Array.isArray(nestedResults) && nestedResults.length > 0 ? 'PASS' : 'FAIL',
+    detail: `results=${Array.isArray(nestedResults) ? nestedResults.length : 0}`,
+    reason: 'machine-readable nested scroll evidence must be present',
+  });
   if (baseline) {
     const bCases = baseline?.fairness?.cases ?? [];
     const bResults = baseline?.perf?.results ?? [];
@@ -214,6 +245,8 @@ function evaluate(joint, baseline) {
     const currentBounce = joint?.bounce?.results ?? [];
     const bSemantics = baseline?.semantics?.results ?? [];
     const currentSemantics = joint?.semantics?.results ?? [];
+    const bNested = baseline?.nested?.results ?? [];
+    const currentNested = joint?.nested?.results ?? [];
     const bMetrics = new Map(bResults.map((item) => [item.metric, item.detail]));
     const currentMetrics = new Map(currentResults.map((item) => [item.metric, item.detail]));
     const bBounceMetrics = new Map(bBounce.map((item) => [item.metric, item.detail]));
@@ -228,12 +261,17 @@ function evaluate(joint, baseline) {
     const currentSemanticsMetrics = new Map(currentSemantics.map((item) => [item.metric, item.detail]));
     const sameSemantics = bSemanticsMetrics.size > 0
       && [...bSemanticsMetrics.keys()].every((key) => currentSemanticsMetrics.has(key));
+    const bNestedMetrics = new Map(bNested.map((item) => [item.metric, item.detail]));
+    const currentNestedMetrics = new Map(currentNested.map((item) => [item.metric, item.detail]));
+    const sameNested = bNestedMetrics.size > 0
+      && [...bNestedMetrics.keys()].every((key) => currentNestedMetrics.has(key));
     results.push({
       check: 'baseline_comparability',
-      verdict: sameCases && sameMetrics && sameBounce && sameSemantics ? 'PASS' : 'FAIL',
-      detail: sameCases && sameMetrics && sameBounce && sameSemantics
+      verdict: sameCases && sameMetrics && sameBounce && sameSemantics && sameNested
+        ? 'PASS' : 'FAIL',
+      detail: sameCases && sameMetrics && sameBounce && sameSemantics && sameNested
         ? 'baseline schema and fields match'
-        : 'baseline lacks matching fairness, perf, bounce or semantics results',
+        : 'baseline lacks matching fairness, perf, bounce, semantics or nested results',
       reason: 'a frozen baseline must carry the same evidence fields',
     });
   }
@@ -254,6 +292,7 @@ function emit(status, joint, baseline, results, note, raw = false) {
     payload.fairness = joint.fairness;
     payload.bounce = joint.bounce;
     payload.semantics = joint.semantics;
+    payload.nested = joint.nested;
   }
   console.log(JSON.stringify(payload, null, 2));
 }
@@ -265,7 +304,8 @@ function main() {
     const fairness = generateFairnessReport();
     const bounce = generateBounceReport();
     const semantics = generateSemanticsReport();
-    const joint = makeJoint(perf, fairness, bounce, semantics);
+    const nested = generateNestedReport();
+    const joint = makeJoint(perf, fairness, bounce, semantics, nested);
     if (args.selfTest === 'pass') {
       const results = evaluate(joint, null);
       const ok = results.every((r) => r.verdict === 'PASS');
@@ -293,7 +333,10 @@ function main() {
   const semantics = args.semantics
     ? readJson(args.semantics, 'semantics report', SEMANTICS_SCHEMA)
     : generateSemanticsReport();
-  const joint = makeJoint(perf, fairness, bounce, semantics);
+  const nested = args.nested
+    ? readJson(args.nested, 'nested report', NESTED_SCHEMA)
+    : generateNestedReport();
+  const joint = makeJoint(perf, fairness, bounce, semantics, nested);
   if (args.writeBaseline) {
     const path = resolve(args.writeBaseline);
     mkdirSync(dirname(path), { recursive: true });

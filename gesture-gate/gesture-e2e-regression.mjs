@@ -39,6 +39,7 @@ const ARCHIVE_FILES = [
   'fairness.json',
   'bounce.json',
   'semantics.json',
+  'nested.json',
   'replay.json',
 ];
 
@@ -181,6 +182,16 @@ function runRegression(archiveDir) {
       && (archivedSemantics.digest ?? null) === (evidence.json.semantics?.digest ?? null)
       ? 'PASS' : 'FAIL',
     `metrics=${Object.keys(archivedSemantics.metrics ?? {}).length}`);
+
+  // The archived nested scroll evidence must carry the same metrics as the
+  // joint verdict it was built from.
+  const archivedNested = JSON.parse(readFileSync(join(archiveDir, 'nested.json'), 'utf8'));
+  const jointNestedMetrics = Object.fromEntries(
+    (evidence.json.nested?.results ?? []).map((item) => [item.metric, item.detail]),
+  );
+  record('nested_evidence_stable',
+    stableJson(archivedNested.metrics ?? {}) === stableJson(jointNestedMetrics) ? 'PASS' : 'FAIL',
+    `metrics=${Object.keys(archivedNested.metrics ?? {}).length}`);
 
   // Replay: regenerate the verdict from a fresh run and compare it with the
   // archived one. A deterministic gate must produce an identical verdict.
