@@ -35,6 +35,7 @@ pub mod aaa;
 mod aaa_inverse;
 pub mod aaa_walker;
 pub mod anim;
+pub mod canvas_prims;
 pub mod curve;
 pub mod display;
 pub mod effects;
