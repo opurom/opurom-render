@@ -37,17 +37,17 @@ fn span(props: serde_json::Value, with_metrics: bool) -> String {
 fn baseline_activates_only_with_fontpx_and_matching_family_metrics() {
     // With metrics + fontPx: ascent round(928*24/1024)=22, descent round(244*24/1024)=6,
     // box=28, baseline=rect.y+22=22.
-    let on = span(json!({"value":"Hello世界","fontPx":24}), true);
+    let on = span(json!({"value":"Hello\u{4e16}\u{754c}","fontPx":24}), true);
     assert!(on.contains("\"baseline\":22"), "baseline present: {on}");
     assert!(on.contains("\"h\":28"), "metrics box height: {on}");
     // No metrics in theme -> no baseline key, legacy behaviour.
-    let off = span(json!({"value":"Hello世界","fontPx":24}), false);
+    let off = span(json!({"value":"Hello\u{4e16}\u{754c}","fontPx":24}), false);
     assert!(
         !off.contains("baseline"),
         "no metrics -> no baseline key: {off}"
     );
     // Metrics but no fontPx -> no baseline.
-    let nopx = span(json!({"value":"Hello世界"}), true);
+    let nopx = span(json!({"value":"Hello\u{4e16}\u{754c}"}), true);
     assert!(
         !nopx.contains("baseline"),
         "no fontPx -> no baseline: {nopx}"
@@ -56,7 +56,10 @@ fn baseline_activates_only_with_fontpx_and_matching_family_metrics() {
 
 #[test]
 fn mixed_script_run_has_one_baseline() {
-    let text = doc(json!({"value":"Hello世界gyjp","fontPx":24}), true);
+    let text = doc(
+        json!({"value":"Hello\u{4e16}\u{754c}gyjp","fontPx":24}),
+        true,
+    );
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
     let spans = text_spans(&layout(&ir, &state, 400, 200));
@@ -118,7 +121,7 @@ fn invalid_new_values_are_rejected() {
 #[test]
 fn baseline_kind_ideographic_is_wire_parity() {
     let text = doc(
-        json!({"value":"世界","fontPx":24,"baselineKind":"ideographic"}),
+        json!({"value":"\u{4e16}\u{754c}","fontPx":24,"baselineKind":"ideographic"}),
         true,
     );
     let ir = parse_ir(&text).unwrap();

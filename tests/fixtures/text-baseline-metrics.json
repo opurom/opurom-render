@@ -96,7 +96,7 @@
     },
     {
       "fontPx": 12,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 11.1328125,
@@ -106,7 +106,7 @@
     },
     {
       "fontPx": 12,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 9.5,
@@ -116,7 +116,7 @@
     },
     {
       "fontPx": 12,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 14.25,
@@ -126,7 +126,7 @@
     },
     {
       "fontPx": 12,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 19.0,
@@ -136,7 +136,7 @@
     },
     {
       "fontPx": 12,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 11.1328125,
@@ -146,7 +146,7 @@
     },
     {
       "fontPx": 12,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 9.5,
@@ -156,7 +156,7 @@
     },
     {
       "fontPx": 12,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 14.25,
@@ -166,7 +166,7 @@
     },
     {
       "fontPx": 12,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 19.0,
@@ -256,7 +256,7 @@
     },
     {
       "fontPx": 14,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 12.98828125,
@@ -266,7 +266,7 @@
     },
     {
       "fontPx": 14,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 11.083333969116211,
@@ -276,7 +276,7 @@
     },
     {
       "fontPx": 14,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 16.625,
@@ -286,7 +286,7 @@
     },
     {
       "fontPx": 14,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 22.166667938232422,
@@ -296,7 +296,7 @@
     },
     {
       "fontPx": 14,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 12.98828125,
@@ -306,7 +306,7 @@
     },
     {
       "fontPx": 14,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 11.083333969116211,
@@ -316,7 +316,7 @@
     },
     {
       "fontPx": 14,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 16.625,
@@ -326,7 +326,7 @@
     },
     {
       "fontPx": 14,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 22.166667938232422,
@@ -416,7 +416,7 @@
     },
     {
       "fontPx": 16,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 14.84375,
@@ -426,7 +426,7 @@
     },
     {
       "fontPx": 16,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 12.666666984558105,
@@ -436,7 +436,7 @@
     },
     {
       "fontPx": 16,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 19.0,
@@ -446,7 +446,7 @@
     },
     {
       "fontPx": 16,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 25.33333396911621,
@@ -456,7 +456,7 @@
     },
     {
       "fontPx": 16,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 14.84375,
@@ -466,7 +466,7 @@
     },
     {
       "fontPx": 16,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 12.666666984558105,
@@ -476,7 +476,7 @@
     },
     {
       "fontPx": 16,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 19.0,
@@ -486,7 +486,7 @@
     },
     {
       "fontPx": 16,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 25.33333396911621,
@@ -576,7 +576,7 @@
     },
     {
       "fontPx": 20,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 18.5546875,
@@ -586,7 +586,7 @@
     },
     {
       "fontPx": 20,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 15.833333969116211,
@@ -596,7 +596,7 @@
     },
     {
       "fontPx": 20,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 23.75,
@@ -606,7 +606,7 @@
     },
     {
       "fontPx": 20,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 31.666667938232422,
@@ -616,7 +616,7 @@
     },
     {
       "fontPx": 20,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 18.5546875,
@@ -626,7 +626,7 @@
     },
     {
       "fontPx": 20,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 15.833333969116211,
@@ -636,7 +636,7 @@
     },
     {
       "fontPx": 20,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 23.75,
@@ -646,7 +646,7 @@
     },
     {
       "fontPx": 20,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 31.666667938232422,
@@ -736,7 +736,7 @@
     },
     {
       "fontPx": 24,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 22.265625,
@@ -746,7 +746,7 @@
     },
     {
       "fontPx": 24,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 19.0,
@@ -756,7 +756,7 @@
     },
     {
       "fontPx": 24,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 28.5,
@@ -766,7 +766,7 @@
     },
     {
       "fontPx": 24,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 38.0,
@@ -776,7 +776,7 @@
     },
     {
       "fontPx": 24,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 22.265625,
@@ -786,7 +786,7 @@
     },
     {
       "fontPx": 24,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 19.0,
@@ -796,7 +796,7 @@
     },
     {
       "fontPx": 24,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 28.5,
@@ -806,7 +806,7 @@
     },
     {
       "fontPx": 24,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 38.0,
@@ -896,7 +896,7 @@
     },
     {
       "fontPx": 32,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 29.6875,
@@ -906,7 +906,7 @@
     },
     {
       "fontPx": 32,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 25.33333396911621,
@@ -916,7 +916,7 @@
     },
     {
       "fontPx": 32,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 38.0,
@@ -926,7 +926,7 @@
     },
     {
       "fontPx": 32,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 50.66666793823242,
@@ -936,7 +936,7 @@
     },
     {
       "fontPx": 32,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 29.6875,
@@ -946,7 +946,7 @@
     },
     {
       "fontPx": 32,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 25.33333396911621,
@@ -956,7 +956,7 @@
     },
     {
       "fontPx": 32,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 38.0,
@@ -966,7 +966,7 @@
     },
     {
       "fontPx": 32,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 50.66666793823242,
@@ -1056,7 +1056,7 @@
     },
     {
       "fontPx": 48,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 44.53125,
@@ -1066,7 +1066,7 @@
     },
     {
       "fontPx": 48,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 38.0,
@@ -1076,7 +1076,7 @@
     },
     {
       "fontPx": 48,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 57.0,
@@ -1086,7 +1086,7 @@
     },
     {
       "fontPx": 48,
-      "sample": "Hello世界",
+      "sample": "Hello\u4e16\u754c",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 76.0,
@@ -1096,7 +1096,7 @@
     },
     {
       "fontPx": 48,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": null,
       "ascent_px": 44.53125,
@@ -1106,7 +1106,7 @@
     },
     {
       "fontPx": 48,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.0,
       "ascent_px": 38.0,
@@ -1116,7 +1116,7 @@
     },
     {
       "fontPx": 48,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 1.5,
       "ascent_px": 57.0,
@@ -1126,7 +1126,7 @@
     },
     {
       "fontPx": 48,
-      "sample": "Hello世界gyjp",
+      "sample": "Hello\u4e16\u754cgyjp",
       "script": "cjk",
       "lineHeight": 2.0,
       "ascent_px": 76.0,
