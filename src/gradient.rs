@@ -152,3 +152,78 @@ mod layer_tests {
         assert!(needs_opacity_layer(254, true));
     }
 }
+
+/// Convert a straight-alpha pixel to premultiplied RGB with the same 8-bit
+/// quantisation Impeller uses (`Color::Premultiply`,
+/// engine 371f772, impeller/geometry/color.h:212-215). Opaque pixels are
+/// returned unchanged so every existing render stays byte-identical.
+pub fn premultiply_rgba(c: crate::Rgba) -> crate::Rgba {
+    if c.a == 255 {
+        return c;
+    }
+    let a = c.a as i64;
+    let m = |v: u8| -> u8 { ((v as i64 * a + 127) / 255).clamp(0, 255) as u8 };
+    crate::Rgba {
+        r: m(c.r),
+        g: m(c.g),
+        b: m(c.b),
+        a: c.a,
+    }
+}
+
+/// Inverse of [`premultiply_rgba`] (`Color::Unpremultiply`, color.h:217-221).
+/// Fully transparent maps to black-transparent, matching Impeller.
+pub fn unpremultiply_rgba(c: crate::Rgba) -> crate::Rgba {
+    if c.a == 0 {
+        return crate::Rgba::rgb(0, 0, 0);
+    }
+    if c.a == 255 {
+        return c;
+    }
+    let a = c.a as i64;
+    let m = |v: u8| -> u8 { ((v as i64 * 255 + a / 2) / a).clamp(0, 255) as u8 };
+    crate::Rgba {
+        r: m(c.r),
+        g: m(c.g),
+        b: m(c.b),
+        a: c.a,
+    }
+}
+
+#[cfg(test)]
+mod premul_tests {
+    use super::{premultiply_rgba, unpremultiply_rgba};
+    use crate::Rgba;
+
+    #[test]
+    fn impeller_premultiply_roundtrip_is_exact_for_representable_channels() {
+        let p = Rgba {
+            r: 200,
+            g: 100,
+            b: 50,
+            a: 128,
+        };
+        let pm = premultiply_rgba(p);
+        assert_eq!(pm.r, 100);
+        assert_eq!(pm.g, 50);
+        assert_eq!(pm.b, 25);
+        assert_eq!(pm.a, 128);
+        let straight = unpremultiply_rgba(pm);
+        assert!((straight.r as i32 - 200).abs() <= 1);
+        assert!((straight.g as i32 - 100).abs() <= 1);
+        assert!((straight.b as i32 - 50).abs() <= 1);
+        assert_eq!(
+            premultiply_rgba(Rgba::rgb(12, 34, 56)),
+            Rgba::rgb(12, 34, 56)
+        );
+        assert_eq!(
+            unpremultiply_rgba(Rgba {
+                r: 50,
+                g: 50,
+                b: 50,
+                a: 0
+            }),
+            Rgba::rgb(0, 0, 0)
+        );
+    }
+}
