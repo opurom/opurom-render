@@ -6,15 +6,17 @@
 // Usage:
 //   node gesture-gate/gesture-trace-gate.mjs --flutter <dir>
 //   node gesture-gate/gesture-trace-gate.mjs --self-test pass|drift
+//   node gesture-gate/gesture-trace-gate.mjs --coverage <json>
 //
 // Exit codes: 0 PASS, 1 FAIL, 2 usage/IO error.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const SCHEMA = 'opurom.gesture.trace/1';
+const COVERAGE_SCHEMA = 'opurom.gesture.trace.coverage/1';
 const SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 const SOURCES = [
   'src/gestures.rs',
@@ -57,10 +59,11 @@ const TESTS = [
 const PATTERN = /([a-z_]+\.dart):(\d+)(?:-(\d+))?/g;
 
 function parseArgs(argv) {
-  const args = { flutter: null, selfTest: null };
+  const args = { flutter: null, selfTest: null, coverage: null };
   for (let i = 2; i < argv.length; i += 1) {
     if (argv[i] === '--flutter') args.flutter = argv[++i];
     else if (argv[i] === '--self-test') args.selfTest = argv[++i];
+    else if (argv[i] === '--coverage') args.coverage = argv[++i];
     else throw new Error(`unknown argument: ${argv[i]}`);
   }
   return args;
@@ -153,6 +156,38 @@ function evaluate(flutterDir) {
   };
 }
 
+function coverage(flutterDir, result) {
+  const anchors = collectAnchors();
+  const bySource = new Map();
+  const byTest = new Map();
+  for (const anchor of anchors) {
+    bySource.set(anchor.file, (bySource.get(anchor.file) ?? 0) + 1);
+    byTest.set(anchor.test, (byTest.get(anchor.test) ?? 0) + 1);
+  }
+  const sources = [...bySource.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([file, count]) => ({ file, anchors: count }));
+  const tests = [...byTest.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([file, count]) => ({ file, anchors: count }));
+  return {
+    schema: COVERAGE_SCHEMA,
+    status: result.status,
+    source: SOURCE,
+    stats: {
+      ...result.stats,
+      minimum_anchors_per_source: sources.length
+        ? Math.min(...sources.map((item) => item.anchors))
+        : 0,
+      maximum_anchors_per_source: sources.length
+        ? Math.max(...sources.map((item) => item.anchors))
+        : 0,
+    },
+    sources,
+    tests,
+  };
+}
+
 function emit(result, detail) {
   console.log(JSON.stringify({
     schema: SCHEMA,
@@ -167,6 +202,13 @@ function emit(result, detail) {
 function main() {
   const args = parseArgs(process.argv);
   const flutterDir = args.flutter ?? '/Users/mac/work/opurom/flutter-golden';
+  if (args.coverage) {
+    const result = evaluate(flutterDir);
+    const report = coverage(flutterDir, result);
+    writeFileSync(resolve(args.coverage), `${JSON.stringify(report, null, 2)}\n`);
+    console.log(`TRACE_COVERAGE=${resolve(args.coverage)}`);
+    return result.status === 'PASS' ? 0 : 1;
+  }
   if (args.selfTest) {
     const workspace = mkdtempSync(join(tmpdir(), 'opurom-gesture-trace-'));
     try {

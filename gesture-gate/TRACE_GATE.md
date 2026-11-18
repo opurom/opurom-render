@@ -17,9 +17,17 @@ reads a network.
 Output schema: `opurom.gesture.trace/1`. `PASS` exits `0`, `FAIL` exits `1`,
 usage or IO errors exit `2`.
 
+`--coverage <json>` writes an `opurom.gesture.trace.coverage/1` report with
+the anchor count per source file and per test file, sorted descending. The
+minimum and maximum per-source counts expose thinly traced areas (currently
+one anchor for some utility files, 47 for `arena.dart`).
+
 ```sh
 # Validate every anchor in the pinned checkout.
 node gesture-gate/gesture-trace-gate.mjs --flutter /path/to/flutter
+
+# Write a coverage report.
+node gesture-gate/gesture-trace-gate.mjs --coverage trace-coverage.json
 
 # Self tests: PASS, and a drifted checkout must be rejected.
 node gesture-gate/gesture-trace-gate.mjs --self-test pass
