@@ -60,6 +60,7 @@ fn two_pointers_accept_scale_after_span_slop() {
                 scale: 1536,
                 focal_x: 100,
                 focal_y: 40,
+                rotation_milli: 0,
             }
         ))
     );
@@ -85,6 +86,7 @@ fn scale_updates_track_either_pointer_and_keeps_focal_at_the_midpoint() {
                 scale: 1536,
                 focal_x: 110,
                 focal_y: 60,
+                rotation_milli: 0,
             }
         ))
     );
@@ -97,6 +99,7 @@ fn scale_updates_track_either_pointer_and_keeps_focal_at_the_midpoint() {
                 scale: 2048,
                 focal_x: 90,
                 focal_y: 65,
+                rotation_milli: 0,
             }
         ))
     );
@@ -119,6 +122,7 @@ fn focal_move_alone_accepts_at_pan_slop() {
                 scale: 1049,
                 focal_x: 137,
                 focal_y: 100,
+                rotation_milli: 0,
             }
         ))
     );

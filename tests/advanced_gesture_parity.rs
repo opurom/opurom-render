@@ -131,6 +131,7 @@ fn rotation_with_span_change_uses_integer_midpoint_focal() {
                 scale: 358,
                 focal_x: 100,
                 focal_y: 100,
+                rotation_milli: -1571,
             }
         ))
     );
@@ -142,6 +143,7 @@ fn rotation_with_span_change_uses_integer_midpoint_focal() {
                 scale: 512,
                 focal_x: 105,
                 focal_y: 90,
+                rotation_milli: -1571,
             }
         ))
     );
@@ -153,6 +155,7 @@ fn rotation_with_span_change_uses_integer_midpoint_focal() {
                 scale: 768,
                 focal_x: 100,
                 focal_y: 100,
+                rotation_milli: 0,
             }
         ))
     );

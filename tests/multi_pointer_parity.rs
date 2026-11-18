@@ -96,6 +96,7 @@ fn two_pointer_scale_uses_mean_focal_point() {
                 scale: 1126,
                 focal_x: 100,
                 focal_y: 160,
+                rotation_milli: -1571,
             }
         ))
     );
@@ -118,6 +119,7 @@ fn third_pointer_does_not_hijack_an_active_scale_pair() {
                 scale: 1126,
                 focal_x: 100,
                 focal_y: 160,
+                rotation_milli: -1571,
             }
         ))
     );

@@ -165,6 +165,10 @@ pub enum Gesture {
         scale: i64,
         focal_x: i64,
         focal_y: i64,
+        /// Signed rotation in thousandths of a radian. Flutter computes
+        /// `angle2 - angle1` with `atan2` (`scale.dart:487-509`); Opurom uses
+        /// a deterministic integer projection on the host's 1024 angle grid.
+        rotation_milli: i64,
     },
 }
 
@@ -419,6 +423,25 @@ impl ScaleTrack {
         )
     }
 
+    /// Signed rotation in thousandths of a radian. Flutter uses
+    /// `atan2(fy - sy, fx - sx)` for the initial and current line and
+    /// subtracts the angles (`scale.dart:487-509`). Opurom uses a fixed
+    /// integer quadrant projection: one full turn on the 1024 grid is
+    /// `2 * PI`, so a quarter turn is 1571 milli-radians.
+    fn rotation_milli(&self) -> i64 {
+        const QUARTER_TURN_MILLI: i64 = 1571;
+        let initial = angle_quadrant(self.init_y1 - self.init_y2, self.init_x1 - self.init_x2);
+        let current = angle_quadrant(self.cur_y1 - self.cur_y2, self.cur_x1 - self.cur_x2);
+        let mut delta = current - initial;
+        while delta > 2 {
+            delta -= 4;
+        }
+        while delta < -2 {
+            delta += 4;
+        }
+        delta * QUARTER_TURN_MILLI
+    }
+
     /// `currentSpan / initialSpan` in 1024 fixed point (`scale.dart:455,463`).
     fn scale(&self) -> i64 {
         let initial = self.span(false);
@@ -438,6 +461,17 @@ impl ScaleTrack {
             );
             distance_sq(fx, fy, ix, iy) > (PAN_SLOP as i128) * (PAN_SLOP as i128)
         }
+    }
+}
+
+/// The quadrant of an integer vector, matching the sign pattern of
+/// Dart's `atan2(dy, dx)` (`scale.dart:500-501`).
+fn angle_quadrant(dy: i64, dx: i64) -> i64 {
+    match (dy >= 0, dx >= 0) {
+        (true, true) => 0,
+        (false, true) => 1,
+        (false, false) => 2,
+        (true, false) => 3,
     }
 }
 
@@ -865,10 +899,16 @@ impl GestureEngine {
                 };
                 if accepted {
                     let (focal_x, focal_y) = track.focal();
+                    let rotation = if track.exceeded() {
+                        track.rotation_milli()
+                    } else {
+                        0
+                    };
                     return Some(Gesture::Scale {
                         scale: track.scale(),
                         focal_x,
                         focal_y,
+                        rotation_milli: rotation,
                     });
                 }
                 // Two pointers in one sequence form a scale candidate, not a
