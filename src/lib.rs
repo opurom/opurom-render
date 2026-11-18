@@ -306,6 +306,56 @@ pub fn ink_host(node: &crate::ir::Node, target: u32, ancestor: Option<u32>) -> O
     None
 }
 
+type NodeStateMap = std::collections::BTreeMap<u32, NodeState>;
+
+/// Resolve one host-supplied id → state entry to its ink host. Duplicate ids
+/// are resolved in input order (the last entry wins), so a caller that supplies
+/// several states for one pointer gets a deterministic result. A hit id is
+/// never painted directly: `ink_host` maps a nested Text/Row pointer to its
+/// Button/FAB/button-role ancestor, matching Flutter's Material ink host.
+fn resolve_node_state_entries(ir: &Ir, entries: &[(u32, NodeState)]) -> NodeStateMap {
+    let mut by_host = NodeStateMap::new();
+    for &(id, state) in entries {
+        if let Some(host) = ink_host(&ir.tree, id, None) {
+            by_host.insert(host, state);
+        }
+    }
+    by_host
+}
+
+/// Apply resolved host states to a laid-out frame. Only paint fields change;
+/// geometry, layout identity and animation tracks stay byte-identical.
+fn apply_node_states(laid: &mut [LaidOut], states: &NodeStateMap) {
+    for node in laid.iter_mut() {
+        let Some(&target) = states.get(&node.id) else {
+            continue;
+        };
+        let resolved = NodeState::resolve(
+            Some(target),
+            node_authored_state(node),
+            node_authored_disabled(node),
+        );
+        if resolved == node.state {
+            continue;
+        }
+        node.state = resolved;
+        if node.state_paint.as_ref().is_some() {
+            let styled = crate::interaction::style_node(node);
+            node.state_paint = crate::interaction::StatePaintSlot(Some(
+                crate::interaction::StatePaint::capture(&styled),
+            ));
+        }
+    }
+}
+
+fn node_authored_state(node: &LaidOut) -> NodeState {
+    node.authored_state
+}
+
+fn node_authored_disabled(node: &LaidOut) -> bool {
+    node.authored_disabled
+}
+
 fn is_ink_node(node: &crate::ir::Node) -> bool {
     node.kind == Kind::Button
         || node.props.variant == Some(Variant::Fab)
@@ -547,6 +597,40 @@ impl Renderer {
             elapsed_ms,
             &mut self.anim.borrow_mut(),
         );
+        let pixels = self.raster_laid(&laid, ir);
+        self.finish_frame(laid, pixels)
+    }
+
+    /// Render with a read-only caller-owned `(hit node id, state)` table.
+    ///
+    /// `None` (or an empty table) produces the exact `render_at` frame. Each id
+    /// is resolved through `ink_host`, so a nested Text/Row pointer paints the
+    /// enclosing Button/FAB/button-role node, matching Flutter's shared
+    /// `MaterialStatesController`. `disabled` always wins over the caller
+    /// state, exactly as in `NodeState::resolve`. Duplicate ids resolve in
+    /// input order (last wins). This slot changes paint only: IR 0.1.0, layout
+    /// geometry and all emitter contracts stay untouched.
+    pub fn render_with_node_states(
+        &mut self,
+        ir: &Ir,
+        state: &StateView,
+        elapsed_ms: i64,
+        node_states: Option<&[(u32, NodeState)]>,
+    ) -> Frame {
+        let mut laid = crate::layout::layout_animated_at(
+            ir,
+            state,
+            self.width,
+            self.height,
+            elapsed_ms,
+            &mut self.anim.borrow_mut(),
+        );
+        if let Some(entries) = node_states {
+            let resolved = resolve_node_state_entries(ir, entries);
+            if !resolved.is_empty() {
+                apply_node_states(&mut laid, &resolved);
+            }
+        }
         let pixels = self.raster_laid(&laid, ir);
         self.finish_frame(laid, pixels)
     }

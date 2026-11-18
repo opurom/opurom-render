@@ -309,6 +309,9 @@ pub struct LaidOut {
     pub on_accent: Rgba,
     /// Resolved interaction state, design-system variant and semantic tone.
     pub state: NodeState,
+    /// Authored `props.state` / `props.disabled`, kept for host-side overrides.
+    pub authored_state: NodeState,
+    pub authored_disabled: bool,
     /// Blended state paint during a state transition; `None` on the default
     /// path, where `raster::draw` applies the discrete transform as before.
     pub state_paint: crate::interaction::StatePaintSlot,
@@ -1535,6 +1538,8 @@ fn place(
             accent: pal.accent,
             on_accent: pal.on_accent,
             state: node_state,
+            authored_state: n.props.state,
+            authored_disabled: n.props.disabled,
             variant: n.props.variant,
             tone: n.props.tone,
             tone_color: n.props.tone.map(|t| pal.tone_color(t)),
@@ -1633,6 +1638,8 @@ fn place(
         accent: pal.accent,
         on_accent: pal.on_accent,
         state: node_state,
+        authored_state: n.props.state,
+        authored_disabled: n.props.disabled,
         state_paint: crate::interaction::StatePaintSlot(state_paint),
         variant: n.props.variant,
         tone: n.props.tone,
