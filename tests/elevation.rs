@@ -79,8 +79,10 @@ fn embedded_table_matches_flutter_350_source() {
         "unexpected shadows.dart checkout"
     );
     for level in 0..ELEVATION_TABLE.len() {
-        let key = format!("{level}: <BoxShadow>[");
-        let declared = source.contains(&key);
+        // Flutter `shadows.dart:48` maps 0 to an empty shadow list; the
+        // renderer represents that as `None` (no shadow to draw), while every
+        // non-zero level in the map has three layers.
+        let declared = level != 0 && source.contains(&format!("{level}: <BoxShadow>["));
         let present = ELEVATION_TABLE[level].is_some();
         assert_eq!(
             declared, present,
