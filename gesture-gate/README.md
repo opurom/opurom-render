@@ -3,6 +3,15 @@
 This directory is an add-on gate. It does not edit shared CI files, IR, the
 native ABI, or renderer sources.
 
+## Gate stack
+
+| script | purpose | doc |
+| --- | --- | --- |
+| `gesture-perf-gate.mjs` | machine-readable performance verdict | this file |
+| `gesture-fairness-perf-gate.mjs` | joint fairness + performance verdict | `JOINT_GATE.md` |
+| `gesture-evidence-archive.mjs` | SHA-256 evidence archive | `EVIDENCE_ARCHIVE.md` |
+| `gesture-e2e-regression.mjs` | end-to-end regression over the stack | `E2E_REGRESSION.md` |
+
 ## Why these metrics
 
 Flutter 3.50.0 (`ab2912035e160d9cad6306df307576da6128ebdb`) pins the relevant
