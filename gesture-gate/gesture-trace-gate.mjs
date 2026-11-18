@@ -52,6 +52,7 @@ const TESTS = [
   'recognizer_registration.rs',
   'hit_test_behavior.rs',
   'detector_combination.rs',
+  'long_press_move_update.rs',
   'multidrag_pointer_state.rs',
   'scrollable_config.rs',
   'dismissible_thresholds.rs',
