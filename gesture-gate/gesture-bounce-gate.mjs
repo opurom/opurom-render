@@ -177,6 +177,24 @@ function selfTest(state) {
     emit(failed ? 'FAIL' : 'PASS', bad, null, results, 'self-test fail: rubber band half life drift');
     return failed ? 1 : 0;
   }
+  if (state === 'transfer_drift') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.bounce_transfer_cap = 8000;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test transfer_drift: the spring transfer cap left the Flutter constant');
+    return failed ? 1 : 0;
+  }
+  if (state === 'overshoot_drift') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.bounce_overshoot_px = 4096;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test overshoot_drift: the visible stretch exceeded its bound');
+    return failed ? 1 : 0;
+  }
   throw new Error(`unknown self-test state: ${state}`);
 }
 

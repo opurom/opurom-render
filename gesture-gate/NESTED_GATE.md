@@ -78,6 +78,8 @@ node gesture-gate/gesture-nested-gate.mjs --self-test pass
 node gesture-gate/gesture-nested-gate.mjs --self-test na
 node gesture-gate/gesture-nested-gate.mjs --self-test fail
 ```
+Targeted fault self tests: `dropped_drag`, `notification_flat` (each exits 1 when detected).
+
 
 The joint gate runs this gate as its fifth evidence source and reports
 `nested_gate_status` plus `nested_machine_report`; the evidence archiver

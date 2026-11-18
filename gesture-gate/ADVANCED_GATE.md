@@ -68,6 +68,8 @@ node gesture-gate/gesture-advanced-gate.mjs --self-test pass
 node gesture-gate/gesture-advanced-gate.mjs --self-test na
 node gesture-gate/gesture-advanced-gate.mjs --self-test fail
 ```
+Targeted fault self tests: `rotation_flat`, `start_origin_lost` (each exits 1 when detected).
+
 
 The joint gate runs this gate as its seventh evidence source and reports
 `advanced_gate_status` plus `advanced_machine_report`; the evidence archiver

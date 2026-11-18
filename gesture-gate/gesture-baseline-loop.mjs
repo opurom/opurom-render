@@ -118,37 +118,59 @@ function emit(result, mode) {
   }, null, 2));
 }
 
+function runFaultMatrix(gate, states) {
+  let allDetected = true;
+  const checks = [];
+  for (const state of states) {
+    const child = spawnSync(process.execPath,
+      [join(ROOT, 'gesture-gate', `gesture-${gate}-gate.mjs`), '--self-test', state],
+      { cwd: ROOT, encoding: 'utf8', timeout: 300_000, maxBuffer: 8 * 1024 * 1024 });
+    const detected = child.status === 1;
+    if (!detected) allDetected = false;
+    checks.push({
+      gate,
+      check: state,
+      verdict: detected ? 'PASS' : 'FAIL',
+      detail: detected ? 'expected FAIL verdict' : `exit=${child.status}`,
+    });
+  }
+  console.log(JSON.stringify({
+    schema: SCHEMA,
+    status: allDetected ? 'FAIL' : 'PASS',
+    detail: `${gate} fault matrix: ${states.join(', ')}`,
+    source: SOURCE,
+    checks,
+  }, null, 2));
+  return allDetected ? 1 : 0;
+}
+
 function main() {
   const args = parseArgs(process.argv);
   const mode = args.selfTest ?? 'pass';
-  if (!['pass', 'degrade', 'missing', 'parallel_faults'].includes(mode)) {
+  if (!['pass', 'degrade', 'missing', 'parallel_faults', 'gate_faults'].includes(mode)) {
     throw new Error(`unknown self-test state: ${mode}`);
   }
   if (mode === 'parallel_faults') {
-    const states = ['no_independent_win', 'replay_drift', 'no_deadline'];
+    return runFaultMatrix('parallel', ['no_independent_win', 'replay_drift', 'no_deadline']);
+  }
+  if (mode === 'gate_faults') {
     let allDetected = true;
-    for (const state of states) {
-      const child = spawnSync(process.execPath,
-        [join(ROOT, 'gesture-gate', 'gesture-parallel-gate.mjs'), '--self-test', state],
-        {
-          cwd: ROOT,
-          encoding: 'utf8',
-          timeout: 300_000,
-          maxBuffer: 8 * 1024 * 1024,
-        });
-      if (child.status !== 1) allDetected = false;
+    for (const [gate, states] of Object.entries({
+      perf: ['burst_drift', 'slop_drift'],
+      bounce: ['transfer_drift', 'overshoot_drift'],
+      semantics: ['digest_drift', 'state_delta_lost'],
+      nested: ['dropped_drag', 'notification_flat'],
+      parallel: ['no_independent_win', 'replay_drift', 'no_deadline'],
+      advanced: ['rotation_flat', 'start_origin_lost'],
+    })) {
+      if (runFaultMatrix(gate, states) !== 1) allDetected = false;
     }
     console.log(JSON.stringify({
       schema: SCHEMA,
       status: allDetected ? 'FAIL' : 'PASS',
-      detail: `parallel fault matrix: ${states.join(', ')}`,
+      detail: 'gate fault matrix: 13 injections across six gates',
       source: SOURCE,
-      checks: states.map((state) => ({
-        gate: 'parallel',
-        check: state,
-        verdict: 'PASS',
-        detail: 'expected FAIL verdict',
-      })),
+      checks: [],
     }, null, 2));
     return allDetected ? 1 : 0;
   }

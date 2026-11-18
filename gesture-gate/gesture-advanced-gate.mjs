@@ -164,6 +164,24 @@ function selfTest(state) {
     emit(failed ? 'FAIL' : 'PASS', bad, null, results, 'self-test fail: a horizontal move reports rotation');
     return failed ? 1 : 0;
   }
+  if (state === 'rotation_flat') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.rotation_quarter_turn_milli = 0;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test rotation_flat: the quarter turn stopped reporting');
+    return failed ? 1 : 0;
+  }
+  if (state === 'start_origin_lost') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.drag_start_origin_delta = 20;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test start_origin_lost: the drag start fell back to the down origin');
+    return failed ? 1 : 0;
+  }
   throw new Error(`unknown self-test state: ${state}`);
 }
 

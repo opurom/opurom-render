@@ -138,6 +138,24 @@ function selfTest() {
     emit(failed ? 'FAIL' : 'PASS', bad, null, results, 'self-test fail: replay digest drift');
     return failed ? 1 : 0;
   }
+  if (selfTestArg === 'burst_drift') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.gesture_burst_large = 4096;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test burst_drift: the large burst exceeded its visit bound');
+    return failed ? 1 : 0;
+  }
+  if (selfTestArg === 'slop_drift') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.slop_threshold = 20;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test slop_drift: the touch slop left the Flutter constant');
+    return failed ? 1 : 0;
+  }
   throw new Error(`unknown self-test state: ${selfTestArg}`);
 }
 

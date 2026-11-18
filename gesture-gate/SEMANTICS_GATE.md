@@ -70,6 +70,8 @@ node gesture-gate/gesture-semantics-gate.mjs --self-test pass
 node gesture-gate/gesture-semantics-gate.mjs --self-test na
 node gesture-gate/gesture-semantics-gate.mjs --self-test fail
 ```
+Targeted fault self tests: `digest_drift`, `state_delta_lost` (each exits 1 when detected).
+
 
 The joint gate runs this gate as its fourth evidence source and reports
 `semantics_gate_status` plus `semantics_machine_report`; the evidence

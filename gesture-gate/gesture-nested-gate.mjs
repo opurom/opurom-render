@@ -43,8 +43,7 @@ const LIMITS = {
     reason: 'the inner view must consume part of the drag',
   },
   nested_unconsumed_milli: {
-    min: 0,
-    max: 1000000,
+    exact: 0,
     reason: 'a drag must not be silently dropped',
   },
   nested_overscroll_px: {
@@ -169,6 +168,24 @@ function selfTest(state) {
     const results = evaluate(bad, null);
     const failed = results.some((r) => r.verdict === 'FAIL');
     emit(failed ? 'FAIL' : 'PASS', bad, null, results, 'self-test fail: the outer view never takes the drag');
+    return failed ? 1 : 0;
+  }
+  if (state === 'dropped_drag') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.nested_unconsumed_milli = 5000;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test dropped_drag: part of the drag was silently dropped');
+    return failed ? 1 : 0;
+  }
+  if (state === 'notification_flat') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.nested_notification_depth = 0;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test notification_flat: the notification never reached an ancestor');
     return failed ? 1 : 0;
   }
   throw new Error(`unknown self-test state: ${state}`);

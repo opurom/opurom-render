@@ -77,6 +77,8 @@ node gesture-gate/gesture-bounce-gate.mjs --self-test pass
 node gesture-gate/gesture-bounce-gate.mjs --self-test na
 node gesture-gate/gesture-bounce-gate.mjs --self-test fail
 ```
+Targeted fault self tests: `transfer_drift`, `overshoot_drift` (each exits 1 when detected).
+
 
 The joint gate runs this gate as its third evidence source and reports
 `bounce_gate_status` and `bounce_machine_report`; the evidence archiver

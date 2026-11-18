@@ -93,6 +93,8 @@ node gesture-gate/gesture-perf-gate.mjs --self-test pass
 node gesture-gate/gesture-perf-gate.mjs --self-test na
 node gesture-gate/gesture-perf-gate.mjs --self-test fail
 ```
+Targeted fault self tests: `burst_drift`, `slop_drift` (each exits 1 when detected).
+
 
 CI integration can be added later by calling this script from an existing
 check; that wiring is intentionally outside this additive patch.

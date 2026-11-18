@@ -32,6 +32,9 @@ node gesture-gate/gesture-baseline-loop.mjs --self-test missing
 # Fault matrix: all three parallel-gate faults must be rejected.
 node gesture-gate/gesture-baseline-loop.mjs --self-test parallel_faults
 
+# Full matrix: 13 targeted injections across all six gates must be rejected.
+node gesture-gate/gesture-baseline-loop.mjs --self-test gate_faults
+
 # Default mode is pass.
 node gesture-gate/gesture-baseline-loop.mjs
 ```

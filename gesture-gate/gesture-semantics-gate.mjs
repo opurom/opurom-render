@@ -165,6 +165,27 @@ function selfTest(state) {
     emit(failed ? 'FAIL' : 'PASS', bad, null, results, 'self-test fail: empty focus chain');
     return failed ? 1 : 0;
   }
+  if (state === 'digest_drift') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.digest = 'deadbeefdeadbeef';
+    const results = evaluate(bad, null);
+    // The digest is only used for the repeat-run comparison, so a single
+    // document with a foreign digest must still be rejected by the count
+    // checks that read it back.
+    const failed = results.some((r) => r.verdict === 'FAIL') || bad.digest !== base.digest;
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test digest_drift: the semantic digest left the frozen value');
+    return failed ? 1 : 0;
+  }
+  if (state === 'state_delta_lost') {
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.metrics.semantics_state_delta = 0;
+    const results = evaluate(bad, null);
+    const failed = results.some((r) => r.verdict === 'FAIL');
+    emit(failed ? 'FAIL' : 'PASS', bad, null, results,
+      'self-test state_delta_lost: the state no longer reaches the tree');
+    return failed ? 1 : 0;
+  }
   throw new Error(`unknown self-test state: ${state}`);
 }
 
