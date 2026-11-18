@@ -51,6 +51,7 @@ const TESTS = [
   'drag_end_details.rs',
   'recognizer_registration.rs',
   'hit_test_behavior.rs',
+  'detector_combination.rs',
   'nested_scroll_coordinator.rs',
   'nested_scroll_coordination.rs',
   'parallel_pointer_arenas.rs',
