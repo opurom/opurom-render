@@ -1,0 +1,95 @@
+{
+  "schema": "opurom.render.text_aa_gap/1",
+  "generated_at_utc": "2026-11-18",
+  "baseline": {
+    "flutter": "3.50.0",
+    "framework_revision": "ab2912035e160d9cad6306df307576da6128ebdb",
+    "engine_revision": "371f77202a73e8dff57a8b3bff75bca55c090aee",
+    "skia_revision": "0e5d8d1be81b22f5529a41cf4810dd89b63527ba",
+    "skia_checkout_present": false,
+    "skia_pin_source": "flutter-golden/DEPS:18,505"
+  },
+  "scope": "read-only audit of text rendering size/strategy selection and subpixel AA",
+  "current_opurom": {
+    "font_size_to_scale": {
+      "file": "src/layout.rs",
+      "lines": "504-513",
+      "detail": "font_scale = ceil(text_size/7) clamped 1..8; font_scale_from_px = ceil(fontPx/7) clamped 1..8"
+    },
+    "glyph_strategy": {
+      "file": "src/raster.rs",
+      "lines": "2541-2544,2584-2596,2626-2673,2678-",
+      "detail": "draw_glyphs selects the 12x14 coverage atlas for all scales (SMOOTH_MIN_SCALE=1 at src/font.rs:139); each output pixel uses 6x6 grayscale sub-samples, no RGB/LCD subpixel filtering"
+    },
+    "host_text_spans": {
+      "file": "src/text_span.rs",
+      "lines": "11-18,144-151",
+      "detail": "system-font layer carries fontPx and baseline; no subpixel/antialias strategy hint is emitted"
+    }
+  },
+  "flutter_authority": [
+    {
+      "topic": "subpixel text path exists and is golden-tested",
+      "file": "engine/src/flutter/impeller/display_list/testing/render_text_in_canvas.cc",
+      "lines": "26-29",
+      "detail": "TextRenderOptions::is_subpixel calls SkFont::setSubpixel(true)"
+    },
+    {
+      "topic": "subpixel alignment golden",
+      "file": "engine/src/flutter/impeller/display_list/aiks_dl_text_unittests.cc",
+      "lines": "44,109-110,290-308,353",
+      "detail": "TextRenderOptions.is_subpixel and TextFrameSubpixelAlignment"
+    },
+    {
+      "topic": "subpixel edge fading golden",
+      "file": "engine/src/flutter/impeller/display_list/dl_golden_unittests.cc",
+      "lines": "534-552,573-630",
+      "detail": "Subpixel, SubpixelScaled, SubpixelScaledTranslated validate fractional-x glyph edges"
+    },
+    {
+      "topic": "paint antialias bit",
+      "file": "engine/src/flutter/impeller/display_list/paint_unittests.cc",
+      "lines": "23",
+      "detail": "DlPaint anti_alias defaults are part of the display-list contract"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "TEXT-AA-001",
+      "severity": "P1",
+      "title": "no size-dependent text AA strategy",
+      "evidence": "Opurom uses one 6x6 grayscale coverage kernel for every scale (src/raster.rs:2544,2593); Flutter exposes a distinct subpixel text path and goldens (impeller/display_list/testing/render_text_in_canvas.cc:26-29, dl_golden_unittests.cc:534-552).",
+      "risk": "small-body text may differ in effective stem weight and edge colour versus Flutter; no pixel parity claim can be made.",
+      "protocol_change_required": false,
+      "recommendation": "First add an opt-in renderQuality.textAa strategy with grayscale default; do not change default goldens. Requires a separate IR proposal before adding any wire field."
+    },
+    {
+      "id": "TEXT-AA-002",
+      "severity": "P1",
+      "title": "no LCD/RGB subpixel filter or fractional origin",
+      "evidence": "raster.rs smooth_coverage samples 6x6 scalar coverage and writes one alpha (src/raster.rs:2626-2673); Flutter subpixel tests set SkFont::setSubpixel and validate fractional-x offsets (render_text_in_canvas.cc:26-29, aiks_dl_text_unittests.cc:353).",
+      "risk": "fractional-x text positions quantize to integer output pixels, so per-channel colour fringing behaviour cannot match Flutter.",
+      "protocol_change_required": true,
+      "recommendation": "Architecture review needed: fractional glyph origin and RGB coverage would require extending LaidOut/IR metrics and potentially the display-list command shape; keep blocked until proposal is accepted."
+    },
+    {
+      "id": "TEXT-AA-003",
+      "severity": "P2",
+      "title": "Skia source line-level cross-check unavailable",
+      "evidence": "Skia submodule is absent in flutter-golden; DEPS pins revision 0e5d8d1be81b22f5529a41cf4810dd89b63527ba at DEPS:18,505.",
+      "risk": "SkFont/SkRasterPipeline exact thresholds and LCD formula cannot be cited with file:line yet.",
+      "protocol_change_required": false,
+      "recommendation": "When Skia checkout is available, re-run this audit against the pinned revision; until then rely on Impeller/framework goldens above and mark Skia-only gaps as unresolved."
+    }
+  ],
+  "no_protocol_change_made": true,
+  "default_goldens_expected_unchanged": true,
+  "reproduce": [
+    "cd /Users/mac/work/opurom/opurom-render",
+    "cargo fmt --check",
+    "cargo test --offline",
+    "grep -n 'SMOOTH_MIN_SCALE' src/font.rs",
+    "grep -n 'SMOOTH_AA: i64' src/raster.rs"
+  ],
+  "next_action": "P1 text rendering: prepare opt-in text AA strategy proposal (no IR change in this commit); then continue with quantised glyph fractional-origin risk assessment."
+}
