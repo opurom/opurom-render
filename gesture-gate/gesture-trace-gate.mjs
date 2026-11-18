@@ -55,6 +55,7 @@ const TESTS = [
   'multidrag_pointer_state.rs',
   'scrollable_config.rs',
   'dismissible_thresholds.rs',
+  'drag_target_parity.rs',
   'nested_scroll_coordinator.rs',
   'nested_scroll_coordination.rs',
   'parallel_pointer_arenas.rs',
