@@ -70,7 +70,10 @@ fn nested_text_pointer_colors_the_ink_host_not_the_text() {
     // Both ids must resolve to the same host paint, and the Button's state
     // must actually change. The Text child's own styled box is untouched: its
     // layout text colour and state are unchanged by the host override.
-    assert_eq!(digest_hex(&pressed), digest_hex(&frame(Some(&[(1, NodeState::Active)]))));
+    assert_eq!(
+        digest_hex(&pressed),
+        digest_hex(&frame(Some(&[(1, NodeState::Active)])))
+    );
     assert_eq!(text.state, NodeState::Default);
     assert_eq!(
         text.text_color,
@@ -80,10 +83,8 @@ fn nested_text_pointer_colors_the_ink_host_not_the_text() {
 
 #[test]
 fn disabled_authored_state_wins_over_host_state() {
-    let ir: opurom_render::Ir = parse_ir(
-        &IR.replace("\"elevation\": 2", "\"elevation\": 2, \"disabled\": true"),
-    )
-    .unwrap();
+    let ir: opurom_render::Ir =
+        parse_ir(&IR.replace("\"elevation\": 2", "\"elevation\": 2, \"disabled\": true")).unwrap();
     let state = StateView::from_ir(&ir);
     let normal = Renderer::new(240, 200).render_at(&ir, &state, 0).pixels;
     let overridden = Renderer::new(240, 200)

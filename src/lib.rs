@@ -386,6 +386,10 @@ fn press_host<'a>(
     ))
 }
 
+/// ABI helpers for the native host event loop. They are public so the C
+/// ABI can lay out once, apply its node-state table and raster the press
+/// ripple over the M3 state colors without a second layout pass.
+
 impl Renderer {
     pub fn try_new(width: u32, height: u32) -> Result<Renderer, IrError> {
         if width == 0 || height == 0 || width as u64 * height as u64 > MAX_PIXELS {
