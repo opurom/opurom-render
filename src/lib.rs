@@ -51,6 +51,7 @@ pub mod layer;
 pub mod layout;
 pub mod nav;
 pub mod particles;
+pub mod path_ops;
 pub mod perf;
 pub mod primitives;
 pub mod raster;
