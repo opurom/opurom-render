@@ -67,6 +67,10 @@ const TESTS = [
   'parallel_pointer_arenas.rs',
   'pointer_resampling.rs',
   'rotation_callback.rs',
+  'elevation_radii.rs',
+  'text_baseline.rs',
+  'scroll_physics.rs',
+  'incremental_pipeline.rs',
   'scale_gesture.rs',
 ];
 const PATTERN = /([a-z_]+\.dart):(\d+)(?:-(\d+))?/g;
@@ -135,7 +139,11 @@ function evaluate(flutterDir) {
     const foundationPath = join(flutterDir, 'packages', 'flutter', 'lib', 'src', 'foundation', file);
     const renderingPath = join(flutterDir, 'packages', 'flutter', 'lib', 'src', 'rendering', file);
     const semanticsPath = join(flutterDir, 'packages', 'flutter', 'lib', 'src', 'semantics', file);
-    const candidates = [path, physicsPath, widgetsPath, foundationPath, semanticsPath, renderingPath];
+    const paintingPath = join(flutterDir, 'packages', 'flutter', 'lib', 'src', 'painting', file);
+    const engineUiPath = join(flutterDir, 'engine', 'src', 'flutter', 'lib', 'ui', file);
+    const candidates = file === 'object.dart'
+      ? [renderingPath]
+      : [path, physicsPath, widgetsPath, semanticsPath, renderingPath, paintingPath, engineUiPath];
     const found = candidates.find((candidate) => existsSync(candidate));
     if (!found) {
       filesMissing += 1;
