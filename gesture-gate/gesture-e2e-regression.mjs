@@ -34,6 +34,7 @@ const JOINT_GATE = join(ROOT, 'gesture-gate', 'gesture-fairness-perf-gate.mjs');
 const ARCHIVER = join(ROOT, 'gesture-gate', 'gesture-evidence-archive.mjs');
 const CONSISTENCY = join(ROOT, 'gesture-gate', 'gesture-schema-consistency.mjs');
 const FRESHNESS = join(ROOT, 'gesture-gate', 'gesture-archive-freshness.mjs');
+const BASELINE_LOOP = join(ROOT, 'gesture-gate', 'gesture-baseline-loop.mjs');
 const E2E_SCHEMA = 'opurom.gesture.e2e/1';
 const SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 const ARCHIVE_FILES = [
@@ -303,6 +304,18 @@ function runRegression(archiveDir) {
       stale.code === 1 && stale.json?.status === 'FAIL' ? 'PASS' : 'FAIL',
       stale.json?.detail ?? describeFailure(stale));
   }
+
+  // The gates themselves must be falsifiable: an injected absolute-limit
+  // fault and an injected baseline regression both have to be rejected.
+  const gateFaults = runNode(BASELINE_LOOP, ['--self-test', 'gate_faults'], 'gate fault matrix');
+  record('gate_faults_rejected',
+    gateFaults.code === 1 ? 'PASS' : 'FAIL',
+    `exit=${gateFaults.code}`);
+  const baselineFaults = runNode(BASELINE_LOOP, ['--self-test', 'baseline_faults'],
+    'baseline fault matrix');
+  record('baseline_faults_rejected',
+    baselineFaults.code === 1 ? 'PASS' : 'FAIL',
+    `exit=${baselineFaults.code}`);
 
   rmSync(workspace, { recursive: true, force: true });
   const failed = checks.some((item) => item.verdict === 'FAIL');
