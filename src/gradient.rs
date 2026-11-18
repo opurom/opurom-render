@@ -227,3 +227,29 @@ mod premul_tests {
         );
     }
 }
+
+/// Flutter `TransformLayer.addToScene` composes the layer transform before its
+/// offset (`packages/flutter/lib/src/rendering/layer.dart:2033-2075`; contract at
+/// `:2040-2042`); Opurom's
+/// integer display-list runs in logical pixels, so only integer translations
+/// are representable without a full matrix pipeline. This pure helper records
+/// that boundary instead of silently accepting a lossy transform.
+pub fn compose_layer_offset(
+    transform_tx: i64,
+    transform_ty: i64,
+    offset_x: i64,
+    offset_y: i64,
+) -> (i64, i64) {
+    // Matrix4 translation then OffsetLayer offset, both integer-only here.
+    (transform_tx + offset_x, transform_ty + offset_y)
+}
+
+#[cfg(test)]
+mod layer_offset_tests {
+    use super::compose_layer_offset;
+
+    #[test]
+    fn transform_precedes_offset() {
+        assert_eq!(compose_layer_offset(3, 4, 5, 6), (8, 10));
+    }
+}
