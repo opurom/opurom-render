@@ -16,6 +16,7 @@ native ABI, or renderer sources.
 | `gesture-fairness-perf-gate.mjs` | joint fairness + performance + bounce + semantics + nested + parallel + advanced verdict | `JOINT_GATE.md` |
 | `gesture-evidence-archive.mjs` | SHA-256 evidence archive | `EVIDENCE_ARCHIVE.md` |
 | `gesture-e2e-regression.mjs` | end-to-end regression over the stack | `E2E_REGRESSION.md` |
+| `gesture-schema-consistency.mjs` | archive schema/source parity | `SCHEMA_CONSISTENCY.md` |
 
 ## Why these metrics
 
