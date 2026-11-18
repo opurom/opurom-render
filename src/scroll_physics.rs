@@ -12,7 +12,9 @@
 //!   `284-295`, `302-392`, `257-280`.
 //! - TOL tolerance.dart `ab4a7a5036283824d7cf9d87d96f58fbc78a529b:14-23`.
 //! - GC constants.dart `ae23eac1178aff50cbb5b0f29566a0e45589dd99:65,90,95`.
-//! - VT velocity_tracker.dart `322dde6ce31bee32f933d44f41cd08767f6e6866:142-145`.
+//! - VT velocity_tracker.dart `322dde6ce31bee32f933d44f41cd08767f6e6866:87-128,142-220,295-390`.
+//! - LSQ lsq_solver.dart `9e7d438a39cd45c012cb9192591cd559fd42e82d:88-205`.
+//! - ACT scroll_activity.dart `051158be15443297fd5c7d59b0a58a63499af238:418-440`.
 //!
 //! Appendix A of SCROLL_PHYSICS_PROPOSAL.md lists older hashes for SP/SS/GS/
 //! TOL/GC/VT; the commit actually checked out here has the hashes above. The
@@ -56,6 +58,308 @@ impl ScrollTolerance {
 
 fn near_zero(value: f64, epsilon: f64) -> bool {
     value == 0.0 || (value > -epsilon && value < epsilon)
+}
+
+/// One injected pointer sample for velocity estimation. Time is in the host's
+/// monotonic millisecond clock; position is in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VelocitySample {
+    pub time_ms: i64,
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Flutter's `VelocityEstimate` (`VT:87-128`): pixels/second and the window
+/// that produced the estimate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VelocityEstimate {
+    pub pixels_per_second: (f64, f64),
+    pub confidence: f64,
+    pub duration_ms: i64,
+    pub offset: (f64, f64),
+}
+
+/// `VelocityTracker` history size, horizon, minimum sample count and stopped
+/// timeout (`VT:142-145`). The generic tracker is the Android/default one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VelocityTracker {
+    samples: [Option<VelocitySample>; 20],
+    index: usize,
+    last_sample_ms: i64,
+}
+
+impl Default for VelocityTracker {
+    fn default() -> Self {
+        Self {
+            samples: [None; 20],
+            index: 0,
+            last_sample_ms: 0,
+        }
+    }
+}
+
+impl VelocityTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pointer cancel (`ACT:443-445`) discards the sample history.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// `VT:163-171`: ring-buffer one sample; non-monotonic input is ignored so
+    /// the caller cannot make the estimator read backwards.
+    pub fn add_position(&mut self, time_ms: i64, x: f64, y: f64) {
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        if self.samples[self.index].is_some_and(|s| s.time_ms > time_ms) {
+            return;
+        }
+        self.index = (self.index + 1) % 20;
+        self.samples[self.index] = Some(VelocitySample { time_ms, x, y });
+        self.last_sample_ms = time_ms;
+    }
+
+    /// `VT:179-250`: quadratic least squares over the newest contiguous
+    /// 100 ms window; the slope coefficient is pixels/ms, scaled to px/s.
+    /// `now_ms` replaces Flutter's sampling Stopwatch so no wall clock is read.
+    pub fn estimate(&self, now_ms: i64) -> Option<VelocityEstimate> {
+        let newest = self.samples[self.index]?;
+        if now_ms.saturating_sub(self.last_sample_ms) > 40 {
+            return Some(VelocityEstimate {
+                pixels_per_second: (0.0, 0.0),
+                confidence: 1.0,
+                duration_ms: 0,
+                offset: (0.0, 0.0),
+            });
+        }
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        let mut previous = newest;
+        let mut index = self.index;
+        while xs.len() < 20 {
+            let Some(s) = self.samples[index] else { break };
+            let age = (newest.time_ms - s.time_ms) as f64;
+            let delta = (s.time_ms - previous.time_ms).unsigned_abs() as f64;
+            previous = s;
+            if age > 100.0 || delta > 40.0 {
+                break;
+            }
+            xs.push(-age);
+            ys.push((s.x, s.y));
+            index = if index == 0 { 19 } else { index - 1 };
+        }
+        let oldest = previous;
+        let duration_ms = newest.time_ms - oldest.time_ms;
+        let offset = (newest.x - oldest.x, newest.y - oldest.y);
+        if xs.len() < 3 {
+            return Some(VelocityEstimate {
+                pixels_per_second: (0.0, 0.0),
+                confidence: 1.0,
+                duration_ms,
+                offset,
+            });
+        }
+        let fit_x = quadratic_fit(&xs, &ys.iter().map(|p| p.0).collect::<Vec<_>>());
+        let fit_y = quadratic_fit(&xs, &ys.iter().map(|p| p.1).collect::<Vec<_>>());
+        match (fit_x, fit_y) {
+            (Some(fx), Some(fy)) => Some(VelocityEstimate {
+                pixels_per_second: (fx.slope * 1000.0, fy.slope * 1000.0),
+                confidence: fx.confidence * fy.confidence,
+                duration_ms,
+                offset,
+            }),
+            _ => Some(VelocityEstimate {
+                pixels_per_second: (0.0, 0.0),
+                confidence: 1.0,
+                duration_ms,
+                offset,
+            }),
+        }
+    }
+}
+
+/// Flutter's iOS fling tracker (`VT:295-390`): weighted mean of the last three
+/// sample intervals, with the same 20-sample ring and 40 ms stop rule.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IosFlingVelocityTracker {
+    samples: [Option<VelocitySample>; 20],
+    index: usize,
+    last_sample_ms: i64,
+}
+
+impl Default for IosFlingVelocityTracker {
+    fn default() -> Self {
+        Self {
+            samples: [None; 20],
+            index: 0,
+            last_sample_ms: 0,
+        }
+    }
+}
+
+impl IosFlingVelocityTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pointer cancel discards the fling sample history (`ACT:443-445`).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// `VT:308-318`: monotonic samples only; non-finite positions are ignored.
+    pub fn add_position(&mut self, time_ms: i64, x: f64, y: f64) {
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        if self.samples[self.index].is_some_and(|s| s.time_ms > time_ms) {
+            return;
+        }
+        self.index = (self.index + 1) % 20;
+        self.samples[self.index] = Some(VelocitySample { time_ms, x, y });
+        self.last_sample_ms = time_ms;
+    }
+
+    fn previous_velocity(&self, back: usize) -> (f64, f64) {
+        let end = (self.index + 20 - back) % 20;
+        let start = (end + 19) % 20;
+        let (Some(a), Some(b)) = (self.samples[start], self.samples[end]) else {
+            return (0.0, 0.0);
+        };
+        let dt = b.time_ms - a.time_ms;
+        if dt <= 0 {
+            return (0.0, 0.0);
+        }
+        let dt = dt as f64;
+        ((b.x - a.x) * 1000.0 / dt, (b.y - a.y) * 1000.0 / dt)
+    }
+
+    /// `VT:348-390`: 0.6/0.35/0.05 weights over intervals -2, -1, 0.
+    pub fn estimate(&self, now_ms: i64) -> Option<VelocityEstimate> {
+        let newest = self.samples[self.index]?;
+        if now_ms.saturating_sub(self.last_sample_ms) > 40 {
+            return Some(VelocityEstimate {
+                pixels_per_second: (0.0, 0.0),
+                confidence: 1.0,
+                duration_ms: 0,
+                offset: (0.0, 0.0),
+            });
+        }
+        let mut oldest = newest;
+        for step in 1..=20 {
+            if let Some(s) = self.samples[(self.index + step) % 20] {
+                oldest = s;
+                break;
+            }
+        }
+        let a = self.previous_velocity(2);
+        let b = self.previous_velocity(1);
+        let c = self.previous_velocity(0);
+        Some(VelocityEstimate {
+            pixels_per_second: (
+                0.6 * a.0 + 0.35 * b.0 + 0.05 * c.0,
+                0.6 * a.1 + 0.35 * b.1 + 0.05 * c.1,
+            ),
+            confidence: 1.0,
+            duration_ms: newest.time_ms - oldest.time_ms,
+            offset: (newest.x - oldest.x, newest.y - oldest.y),
+        })
+    }
+}
+
+/// Converts a drag-end primary velocity to the scroll velocity passed to
+/// `goBallistic` (`ACT:418-440`): vertical scroll negates pointer velocity;
+/// a reversed axis negates it again.
+pub fn drag_end_scroll_velocity(primary_velocity: f64, reversed: bool) -> f64 {
+    let v = -primary_velocity;
+    if reversed {
+        -v
+    } else {
+        v
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PolynomialFit {
+    slope: f64,
+    confidence: f64,
+}
+
+/// `LSQ:88-205`: degree-2 QR/Gram-Schmidt fit with unit weights, specialized
+/// to the `w[h] = 1` case used by `VT:216-218`.
+fn quadratic_fit(x: &[f64], y: &[f64]) -> Option<PolynomialFit> {
+    let m = x.len();
+    if m < 3 {
+        return None;
+    }
+    let n = 3usize;
+    let mut a = vec![vec![0.0; m]; n];
+    for h in 0..m {
+        a[0][h] = 1.0;
+        for i in 1..n {
+            a[i][h] = a[i - 1][h] * x[h];
+        }
+    }
+    let mut q = vec![vec![0.0; m]; n];
+    let mut r = vec![vec![0.0; n]; n];
+    for j in 0..n {
+        q[j].copy_from_slice(&a[j]);
+        for i in 0..j {
+            let dot: f64 = (0..m).map(|h| q[j][h] * q[i][h]).sum();
+            for h in 0..m {
+                q[j][h] -= dot * q[i][h];
+            }
+        }
+        let norm = q[j].iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm < 1e-10 {
+            return None;
+        }
+        let inverse = 1.0 / norm;
+        for v in &mut q[j] {
+            *v *= inverse;
+        }
+        for i in 0..n {
+            r[j][i] = if i < j {
+                0.0
+            } else {
+                (0..m).map(|h| q[j][h] * a[i][h]).sum()
+            };
+        }
+    }
+    let mut coefficients = [0.0; 3];
+    for i in (0..n).rev() {
+        let mut value: f64 = (0..m).map(|h| q[i][h] * y[h]).sum();
+        for j in (i + 1..n).rev() {
+            value -= r[i][j] * coefficients[j];
+        }
+        coefficients[i] = value / r[i][i];
+    }
+    let y_mean = y.iter().sum::<f64>() / m as f64;
+    let mut error = 0.0;
+    let mut total = 0.0;
+    for h in 0..m {
+        let mut term = 1.0;
+        let mut residual = y[h] - coefficients[0];
+        for coefficient in coefficients.iter().skip(1) {
+            term *= x[h];
+            residual -= term * coefficient;
+        }
+        error += residual * residual;
+        let v = y[h] - y_mean;
+        total += v * v;
+    }
+    let confidence = if total <= 1e-10 {
+        1.0
+    } else {
+        1.0 - error / total
+    };
+    Some(PolynomialFit {
+        slope: coefficients[1],
+        confidence,
+    })
 }
 
 /// `ClampingScrollSimulation` (SS:164-265) evaluated at absolute time.
@@ -284,6 +588,16 @@ impl ScrollDriver {
         dpr: f64,
     ) -> Option<Self> {
         let tolerance = ScrollTolerance::for_dpr(dpr);
+        if !x0.is_finite()
+            || !v0.is_finite()
+            || !dpr.is_finite()
+            || dpr <= 0.0
+            || !tolerance.distance.is_finite()
+            || !tolerance.velocity.is_finite()
+            || min > max
+        {
+            return None;
+        }
         if x0 > max as f64 || x0 < min as f64 {
             let end = if x0 > max as f64 { max } else { min };
             return Some(Self {
@@ -353,7 +667,14 @@ impl ScrollDriver {
     }
 
     /// R2: round once, at the integer pixel boundary, before layout uses it.
+    /// `SP:1000-1014`: a clamping fling is bounded by the scroll extent;
+    /// the simulation velocity keeps decaying, so no hard velocity cut.
     pub fn offset_px(&self, now_ms: i64) -> i64 {
-        self.x(now_ms).round() as i64
+        let x = self.x(now_ms);
+        let x = match self.motion {
+            ScrollMotion::Clamping(_) => x.clamp(self.min as f64, self.max as f64),
+            ScrollMotion::SpringBack(_) => x,
+        };
+        x.round() as i64
     }
 }
