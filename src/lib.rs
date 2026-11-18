@@ -289,7 +289,7 @@ fn node_has_tap(node: &crate::ir::Node, id: u32) -> bool {
 /// Nearest button-semantic node at or above `target`, following the IR tree.
 /// The hit test can land on a Button's Text child; Flutter paints the splash
 /// on the Material box, so the ripple host is the Button ancestor.
-fn ink_host(node: &crate::ir::Node, target: u32, ancestor: Option<u32>) -> Option<u32> {
+pub fn ink_host(node: &crate::ir::Node, target: u32, ancestor: Option<u32>) -> Option<u32> {
     let here = if is_ink_node(node) {
         Some(node.id)
     } else {
