@@ -41,6 +41,7 @@ pub mod effects;
 pub mod font;
 pub mod geometry;
 pub mod gestures;
+pub mod gradient;
 pub mod icons;
 pub mod image;
 pub mod incremental;
