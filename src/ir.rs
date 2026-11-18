@@ -523,6 +523,10 @@ pub struct Props {
     pub font_px: Option<i64>,
     /// Line-height multiplier, fixed 1024==1.0; 0 = kTextHeightNone.
     pub line_height: Option<i64>,
+    /// Flutter `TextLeadingDistribution` (`ui/text.dart:1445-1467`):
+    /// 0 = proportional (default), 1 = even/half-leading. Opt-in; absent keeps
+    /// the historical proportional baseline byte-identical.
+    pub leading_distribution: Option<u8>,
     /// Baseline selector; absent = alphabetic.
     pub baseline_kind: Option<BaselineKind>,
     /// Grid: distribute surplus box height across rows (deterministic i128).
@@ -1592,6 +1596,16 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         color: color_prop(o, "color", what)?,
         text_color: color_prop(o, "textColor", what)?,
         line_height: line_height_prop(o, what)?,
+        leading_distribution: match opt_string(o, "leadingDistribution", what)?.as_deref() {
+            None => None,
+            Some("proportional") => Some(0),
+            Some("even") => Some(1),
+            Some(other) => {
+                return Err(bad(format!(
+                    "{what}.leadingDistribution has unknown value {other:?}: expected proportional or even"
+                )))
+            }
+        },
         baseline_kind: match opt_string(o, "baselineKind", what)?.as_deref() {
             None => None,
             Some(s) => Some(BaselineKind::parse(s).ok_or_else(|| {

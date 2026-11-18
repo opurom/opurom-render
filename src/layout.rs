@@ -298,6 +298,8 @@ pub struct LaidOut {
     pub text_baseline: Option<i64>,
     /// Node line-height multiplier (fixed 1024==1.0), carried for the baseline pass.
     pub text_line_height: Option<i64>,
+    /// Flutter `TextLeadingDistribution`: 0 proportional, 1 even.
+    pub text_leading_distribution: Option<u8>,
     /// Animation clock phase in milliseconds (drives the spinner).
     pub phase: i64,
     pub accent: Rgba,
@@ -878,7 +880,14 @@ fn apply_text_baselines(out: &mut [LaidOut], theme: &Theme) {
                 let denom = (m.ascent + m.descent) as i128;
                 let line_units = line_box as i128 * 1024;
                 let natural_units = denom * px as i128;
-                let leading_units = (line_units - natural_units) * m.ascent as i128 / denom;
+                // Flutter `TextLeadingDistribution` (ui/text.dart:1445-1467):
+                // proportional splits leading by ascent/descent, even splits
+                // it half above and half below. Default stays proportional.
+                let leading_units = if n.text_leading_distribution == Some(1) {
+                    (line_units - natural_units) / 2
+                } else {
+                    (line_units - natural_units) * m.ascent as i128 / denom
+                };
                 let scaled = m.ascent as i128 * px as i128 + leading_units;
                 let rounded = if scaled >= 0 {
                     (scaled + 512) / 1024
@@ -1456,6 +1465,7 @@ fn place(
             text_font_px: None,
             text_baseline: None,
             text_line_height: None,
+            text_leading_distribution: None,
             phase: elapsed_ms,
             accent: pal.accent,
             on_accent: pal.on_accent,
@@ -1547,6 +1557,7 @@ fn place(
         text_font_px: n.props.font_px,
         text_baseline: None,
         text_line_height: n.props.line_height,
+        text_leading_distribution: n.props.leading_distribution,
         phase: elapsed_ms,
         accent: pal.accent,
         on_accent: pal.on_accent,

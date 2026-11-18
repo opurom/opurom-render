@@ -152,3 +152,31 @@ fn default_path_keeps_all_pinned_goldens() {
         "default span has no baseline key: {plain}"
     );
 }
+
+#[test]
+fn leading_distribution_even_matches_half_leading() {
+    let mut props = json!({"value":"Hi","fontPx":24,"lineHeight":2.0});
+    let proportional = span(props.clone(), true);
+    props["leadingDistribution"] = json!("even");
+    let even = span(props, true);
+    // Roboto metrics 928/244 per em at px 24: ascent 22, descent 6.
+    // lineHeight 2.0 -> 48 px box, natural ascent+descent = 28, leading = 20.
+    // proportional baseline = 22 + round(20 * 928/1172) = 38.
+    // even baseline = 22 + 20/2 = 32 (Flutter TextLeadingDistribution.even,
+    // engine 371f772, lib/ui/text.dart:1445-1467).
+    assert!(proportional.contains("\"baseline\":38"), "{proportional}");
+    assert!(even.contains("\"baseline\":32"), "{even}");
+    assert_ne!(proportional, even);
+}
+
+#[test]
+fn leading_distribution_is_opt_in_and_validated() {
+    let bad = doc(
+        json!({"value":"Hi","fontPx":24,"leadingDistribution":"center"}),
+        true,
+    );
+    assert!(
+        parse_ir(&bad).is_err(),
+        "unknown leading distribution must fail"
+    );
+}
