@@ -17,7 +17,10 @@
 //!
 //! This file is additive: it never changes the renderer, ABI or IR.
 
-use opurom_render::{Gesture, GestureEngine, GestureKind, PointerEvent, PointerKind, Rect};
+use opurom_render::{
+    Gesture, GestureEngine, GestureKind, Phase, PointerEvent, PointerKind, Rect,
+    DOUBLE_TAP_INTERVAL_MS, LONG_PRESS_MS,
+};
 
 const TOUCH_SLOP: i64 = 18;
 
@@ -46,11 +49,20 @@ fn a_silent_up_releases_the_cached_hit_path() {
     let mut engine = engine_with_touch_node();
     // No explicit gesture prop: tap and double-tap recognizers both join, so
     // the first up waits for the 300 ms window and emits nothing.
-    assert_eq!(engine.dispatch(&event(PointerKind::Down, 5, 20, 20, 0)), None);
-    assert_eq!(engine.dispatch(&event(PointerKind::Up, 5, 20, 20, 10)), None);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 5, 20, 20, 0)),
+        None
+    );
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Up, 5, 20, 20, 10)),
+        None
+    );
     // A stray move from the released pointer must not reach node 1's pending
     // arena. Flutter removes the down-time hit test on up (`binding.dart:428-431`).
-    assert_eq!(engine.dispatch(&event(PointerKind::Move, 5, 20, 20, 11)), None);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Move, 5, 20, 20, 11)),
+        None
+    );
     assert_eq!(engine.arena_winner(), None);
     assert_eq!(engine.on_tick(300), Some(Gesture::Tap));
 }
@@ -58,15 +70,24 @@ fn a_silent_up_releases_the_cached_hit_path() {
 #[test]
 fn double_tap_survives_first_touch_travel_below_touch_slop() {
     let mut engine = engine_with_touch_node();
-    assert_eq!(engine.dispatch(&event(PointerKind::Down, 1, 40, 40, 0)), None);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 1, 40, 40, 0)),
+        None
+    );
     // 17 px is inside kDoubleTapTouchSlop; the series remains valid
     // (`multitap.dart:266`, `constants.dart:41-44`).
     assert_eq!(
         engine.dispatch(&event(PointerKind::Move, 1, 40 + TOUCH_SLOP - 1, 40, 5)),
         None
     );
-    assert_eq!(engine.dispatch(&event(PointerKind::Up, 1, 57, 40, 10)), None);
-    assert_eq!(engine.dispatch(&event(PointerKind::Down, 1, 57, 40, 60)), None);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Up, 1, 57, 40, 10)),
+        None
+    );
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 1, 57, 40, 60)),
+        None
+    );
     assert_eq!(
         engine.dispatch(&event(PointerKind::Up, 1, 57, 40, 70)),
         Some((1, Gesture::DoubleTap))
@@ -76,7 +97,10 @@ fn double_tap_survives_first_touch_travel_below_touch_slop() {
 #[test]
 fn double_tap_resets_when_first_touch_exceeds_slop() {
     let mut engine = engine_with_touch_node();
-    assert_eq!(engine.dispatch(&event(PointerKind::Down, 1, 40, 40, 0)), None);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 1, 40, 40, 0)),
+        None
+    );
     // 19 px is past kDoubleTapTouchSlop; Flutter resets the series
     // (`multitap.dart:943-946`). Past kTouchSlop the drag recognizer accepts
     // first (`monodrag.dart:688-710`), rejecting tap and double tap.
@@ -91,8 +115,14 @@ fn double_tap_resets_when_first_touch_exceeds_slop() {
 #[test]
 fn second_touch_still_uses_the_larger_double_tap_slop() {
     let mut engine = engine_with_touch_node();
-    assert_eq!(engine.dispatch(&event(PointerKind::Down, 1, 40, 40, 0)), None);
-    assert_eq!(engine.dispatch(&event(PointerKind::Up, 1, 40, 40, 10)), None);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 1, 40, 40, 0)),
+        None
+    );
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Up, 1, 40, 40, 10)),
+        None
+    );
     // 100 px is the larger second-touch tolerance (`constants.dart:46-49`).
     let second_x = 40 + 100;
     assert_eq!(
@@ -102,5 +132,43 @@ fn second_touch_still_uses_the_larger_double_tap_slop() {
     assert_eq!(
         engine.dispatch(&event(PointerKind::Up, 1, second_x, 40, 70)),
         Some((1, Gesture::DoubleTap))
+    );
+}
+
+#[test]
+fn a_slow_press_still_wins_a_tap_after_the_double_tap_window() {
+    let mut engine = engine_with_touch_node();
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 9, 60, 60, 0)),
+        None
+    );
+    assert_eq!(engine.phase(), Phase::Pending);
+    // kHoverTapTimeout (150 ms) is explicitly not a tap limit; Flutter only
+    // has a 100 ms onTapDown deadline (`constants.dart:12-26`, `tap.dart:212`).
+    assert_eq!(engine.on_tick(200), None);
+    assert_eq!(engine.phase(), Phase::Pending);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Up, 9, 60, 60, 5000)),
+        None
+    );
+    assert_eq!(
+        engine.on_tick(5000 + DOUBLE_TAP_INTERVAL_MS),
+        Some(Gesture::Tap)
+    );
+}
+
+#[test]
+fn a_long_press_fires_at_its_deadline_and_blocks_later_tap() {
+    let mut engine = engine_with_touch_node();
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Down, 10, 70, 70, 0)),
+        None
+    );
+    assert_eq!(engine.on_tick(LONG_PRESS_MS - 1), None);
+    assert_eq!(engine.on_tick(LONG_PRESS_MS), Some(Gesture::LongPress));
+    assert_eq!(engine.phase(), Phase::Triggered);
+    assert_eq!(
+        engine.dispatch(&event(PointerKind::Up, 10, 70, 70, LONG_PRESS_MS + 1)),
+        None
     );
 }
