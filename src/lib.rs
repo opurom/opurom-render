@@ -340,6 +340,10 @@ fn apply_node_states(laid: &mut [LaidOut], states: &NodeStateMap) {
         }
         node.state = resolved;
         if node.state_paint.as_ref().is_some() {
+            // Host state changes are discrete M3 states. Capture the resolved
+            // paint directly instead of replaying an inherited transition:
+            // clearing a hover/focus override must restore the authored paint
+            // on the very next frame, not after a 4s spring schedule.
             let styled = crate::interaction::style_node(node);
             node.state_paint = crate::interaction::StatePaintSlot(Some(
                 crate::interaction::StatePaint::capture(&styled),
@@ -1100,7 +1104,11 @@ fn changed_region(
             let mut b = (*p).clone();
             a.phase = 0;
             b.phase = 0;
-            a == b
+            // State-paint slots carry presentation-only paint. Their PartialEq
+            // deliberately ignores the payload, so compare it explicitly: a
+            // focus/hover transition that ends changes paint without geometry,
+            // and the incremental path must redraw that node's region.
+            a.state_paint.0 == b.state_paint.0 && a == b
         });
         if !unchanged {
             grow(n.rect);
@@ -1359,6 +1367,39 @@ fn diff_strided(
         return None;
     }
     Some(rects)
+}
+
+/// ABI helper: borrow the renderer's animation table for a caller-owned layout
+/// pass. The native host lays out once, applies its node-state table, then
+/// rasters through `render_laid_press_for_abi`.
+pub fn anim_for_abi_impl(renderer: &mut Renderer) -> std::cell::RefMut<'_, AnimTable> {
+    renderer.anim.borrow_mut()
+}
+
+/// ABI helper: apply a host-owned node-state table to an already laid-out
+/// frame. Kept here so the C ABI can combine it with a press ripple without
+/// laying the tree out twice. Not part of the public render API contract.
+pub fn apply_node_states_for_abi_impl(laid: &mut [LaidOut], ir: &Ir, entries: &[(u32, NodeState)]) {
+    let states = resolve_node_state_entries(ir, entries);
+    if !states.is_empty() {
+        apply_node_states(laid, &states);
+    }
+    // A host state table is the authoritative caller state for this frame.
+    // Any inherited animated paint track from the authored node must not keep
+    // painting after the override is cleared; clear the presentation-only
+    // slot on every node so raster uses the discrete state transform.
+    for node in laid.iter_mut() {
+        node.state_paint = crate::interaction::StatePaintSlot(None);
+    }
+}
+
+/// ABI helper: raster a full non-press frame from caller-supplied layout. The
+/// native host uses it after applying its node-state table when the previous
+/// frame was a different state; incremental reuse keys off layout identity and
+/// deliberately ignores state-paint slots, so a state change needs a full pass.
+pub fn render_laid_for_abi_impl(renderer: &mut Renderer, laid: &[LaidOut], ir: &Ir) -> Frame {
+    let pixels = renderer.raster_laid(laid, ir);
+    renderer.finish_frame(laid.to_vec(), pixels)
 }
 
 #[cfg(test)]

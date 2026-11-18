@@ -60,7 +60,6 @@ fn nested_text_pointer_colors_the_ink_host_not_the_text() {
     let laid = layout(&ir, &state, 240, 200);
     let host_id = ink_host(&ir.tree, 2, None).expect("nested Text must map to Button");
     assert_eq!(host_id, 1);
-    let host = laid.iter().find(|n| n.id == 1).unwrap().clone();
     let text = laid.iter().find(|n| n.id == 2).unwrap().clone();
 
     let base = base_frame();
