@@ -32,7 +32,7 @@ const PERF_SCHEMA = 'opurom.gesture.gate/1';
 const JOINT_SOURCE = 'flutter-3.50.0:ab2912035e160d9cad6306df307576da6128ebdb';
 
 function parseArgs(argv) {
-  const args = { perf: null, fairness: null, baseline: null, writeBaseline: null, selfTest: null };
+  const args = { perf: null, fairness: null, baseline: null, writeBaseline: null, selfTest: null, raw: false };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--perf') args.perf = argv[++i];
@@ -40,6 +40,7 @@ function parseArgs(argv) {
     else if (arg === '--baseline') args.baseline = argv[++i];
     else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
     else if (arg === '--self-test') args.selfTest = argv[++i];
+    else if (arg === '--raw') args.raw = true;
     else throw new Error(`unknown argument: ${arg}`);
   }
   return args;
@@ -155,15 +156,20 @@ function evaluate(joint, baseline) {
   return results;
 }
 
-function emit(status, joint, baseline, results, note) {
-  console.log(JSON.stringify({
+function emit(status, joint, baseline, results, note, raw = false) {
+  const payload = {
     schema: JOINT_SCHEMA,
     status,
     note,
     source: joint.source,
     baseline: baseline?.source ?? null,
     results,
-  }, null, 2));
+  };
+  if (raw) {
+    payload.perf = joint.perf;
+    payload.fairness = joint.fairness;
+  }
+  console.log(JSON.stringify(payload, null, 2));
 }
 
 function main() {
@@ -175,11 +181,11 @@ function main() {
     if (args.selfTest === 'pass') {
       const results = evaluate(joint, null);
       const ok = results.every((r) => r.verdict === 'PASS');
-      emit(ok ? 'PASS' : 'FAIL', joint, null, results, 'self-test pass: fresh joint evidence');
+      emit(ok ? 'PASS' : 'FAIL', joint, null, results, 'self-test pass: fresh joint evidence', args.raw);
       return ok ? 0 : 1;
     }
     if (args.selfTest === 'na') {
-      emit('N/A', joint, null, [], 'self-test N/A: no baseline supplied');
+      emit('N/A', joint, null, [], 'self-test N/A: no baseline supplied', args.raw);
       return 0;
     }
     if (args.selfTest === 'fail') {
@@ -187,7 +193,7 @@ function main() {
       bad.fairness.cases = bad.fairness.cases.filter((name) => name !== 'hold_delays_sweep_until_release');
       const results = evaluate(bad, null);
       const failed = results.some((r) => r.verdict === 'FAIL');
-      emit(failed ? 'FAIL' : 'PASS', bad, null, results, 'self-test fail: fairness case set drift');
+      emit(failed ? 'FAIL' : 'PASS', bad, null, results, 'self-test fail: fairness case set drift', args.raw);
       return failed ? 1 : 0;
     }
     throw new Error(`unknown self-test state: ${args.selfTest}`);
@@ -206,12 +212,12 @@ function main() {
     const results = evaluate(joint, null);
     const failed = results.some((r) => r.verdict === 'FAIL');
     emit(failed ? 'FAIL' : 'N/A', joint, null, results,
-      failed ? 'absolute joint checks failed' : 'no baseline supplied: absolute checks only');
+      failed ? 'absolute joint checks failed' : 'no baseline supplied: absolute checks only', args.raw);
     return failed ? 1 : 0;
   }
   const results = evaluate(joint, baseline);
   const failed = results.some((r) => r.verdict === 'FAIL');
-  emit(failed ? 'FAIL' : 'PASS', joint, baseline, results, 'joint baseline comparison');
+  emit(failed ? 'FAIL' : 'PASS', joint, baseline, results, 'joint baseline comparison', args.raw);
   return failed ? 1 : 0;
 }
 
