@@ -47,6 +47,7 @@ pub mod image;
 pub mod incremental;
 pub mod interaction;
 pub mod ir;
+pub mod layer;
 pub mod layout;
 pub mod nav;
 pub mod particles;
