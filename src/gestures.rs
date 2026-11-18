@@ -408,16 +408,32 @@ impl ScaleTrack {
         (self.span(true) as i128 * SCALE_UNIT as i128 / initial as i128) as i64
     }
 
-    /// `scale.dart:744-748`: span slop or focal slop accepts the recognizer.
+    /// `scale.dart:744-748`: span slop, focal slop, or a span ratio beyond
+    /// 1.05 accepts the recognizer. The ratio is expressed in fixed point so
+    /// the engine stays integer-only.
     fn exceeded(&self) -> bool {
-        (self.span(true) - self.span(false)).abs() > SCALE_SLOP || {
-            let (fx, fy) = self.focal();
-            let (ix, iy) = (
-                self.init_x1.saturating_add(self.init_x2) / 2,
-                self.init_y1.saturating_add(self.init_y2) / 2,
-            );
-            distance_sq(fx, fy, ix, iy) > (PAN_SLOP as i128) * (PAN_SLOP as i128)
-        }
+        (self.span(true) - self.span(false)).abs() > SCALE_SLOP
+            || {
+                let (fx, fy) = self.focal();
+                let (ix, iy) = (
+                    self.init_x1.saturating_add(self.init_x2) / 2,
+                    self.init_y1.saturating_add(self.init_y2) / 2,
+                );
+                distance_sq(fx, fy, ix, iy) > (PAN_SLOP as i128) * (PAN_SLOP as i128)
+            }
+            || self.scale_ratio_exceeded()
+    }
+
+    /// Flutter accepts when `max(current/initial, initial/current) > 1.05`
+    /// (`scale.dart:748`). Compare with integers: `20 * span > 21 * span`
+    /// is the fixed-point form of `current / initial > 21 / 20`.
+    fn scale_ratio_exceeded(&self) -> bool {
+        let initial = self.span(false);
+        let current = self.span(true);
+        initial > 0
+            && current > 0
+            && (current as i128 * 20 > initial as i128 * 21
+                || initial as i128 * 20 > current as i128 * 21)
     }
 }
 
