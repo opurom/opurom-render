@@ -179,7 +179,13 @@ fn simultaneous_multi_pointer_deadlines_emit_one_ordered_result() {
         b.on_tick(LONG_PRESS_MS),
         Some(opurom_render::Gesture::LongPress)
     );
-    assert_eq!(a.on_tick(DOUBLE_TAP_INTERVAL_MS + LONG_PRESS_MS), None);
+    // Every pointer owns its own arena (`gestures/arena.dart:117-129`), so
+    // the remaining pointer reaches its own long-press deadline and emits
+    // its own result, in pointer order.
+    assert_eq!(
+        a.on_tick(DOUBLE_TAP_INTERVAL_MS + LONG_PRESS_MS),
+        Some(opurom_render::Gesture::LongPress)
+    );
     assert_eq!(a.next_deadline_ms(), None);
 }
 

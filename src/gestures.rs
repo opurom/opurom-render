@@ -221,14 +221,6 @@ struct Arena {
 }
 
 impl Arena {
-    fn open(&mut self, members: Vec<Member>) {
-        *self = Arena {
-            rejected: vec![false; members.len()],
-            members,
-            ..Arena::default()
-        };
-    }
-
     fn is_rejected(&self, kind: GestureKind) -> bool {
         self.members
             .iter()
@@ -326,6 +318,14 @@ struct Down {
     t: i64,
     /// Restarted when the pointer leaves and re-enters the hit region.
     origin_t: i64,
+}
+
+/// The state of one active pointer: its down sample and the recognizer
+/// phase that belongs to it.
+#[derive(Clone, Copy, Debug)]
+struct PointerState {
+    down: Down,
+    phase: Phase,
 }
 
 /// Two-finger span tracker for the active sequence. All coordinates are the
@@ -465,7 +465,13 @@ struct NodeEntry {
 #[derive(Clone, Debug, Default)]
 pub struct GestureEngine {
     nodes: Vec<NodeEntry>,
-    down: Option<Down>,
+    /// The active pointers in down order. The first entry is the primary
+    /// sequence; every entry owns its own arena, as Flutter opens one arena
+    /// per pointer id (`gestures/arena.dart:117-129`).
+    pointers: Vec<(u32, PointerState)>,
+    /// Arenas keyed by pointer id. An arena outlives its pointer while the
+    /// double-tap window holds it (`gestures/arena.dart:140,193-221`).
+    arenas: Vec<(u32, Arena)>,
     /// Hit path captured at down, keyed by pointer id. Flutter reuses the
     /// down-time path for every move/up/cancel of that pointer instead of
     /// re-running hit testing (`gestures/binding.dart:407-448`).
@@ -475,8 +481,9 @@ pub struct GestureEngine {
     /// silent, so existing arena fingerprints stay byte-identical.
     long_press_move_update: bool,
     phase: Phase,
-    last_tap: Option<TapMark>,
-    arena: Arena,
+    /// The pending tap series, one entry per pointer that lifted into the
+    /// double-tap window (`gestures/multitap.dart:328-337`).
+    tap_series: Vec<(u32, TapMark)>,
 }
 
 impl GestureEngine {
@@ -488,6 +495,55 @@ impl GestureEngine {
     /// after `LongPress` so existing consumers see no new gesture stream.
     pub fn enable_long_press_move_update(&mut self) {
         self.long_press_move_update = true;
+    }
+
+    /// The arena of one pointer id (`gestures/arena.dart:117-129`).
+    fn arena_ref(&self, pointer: u32) -> Option<&Arena> {
+        self.arenas
+            .iter()
+            .find(|(id, _)| *id == pointer)
+            .map(|(_, arena)| arena)
+    }
+
+    fn arena_mut(&mut self, pointer: u32) -> Option<&mut Arena> {
+        self.arenas
+            .iter_mut()
+            .find(|(id, _)| *id == pointer)
+            .map(|(_, arena)| arena)
+    }
+
+    /// Opens the arena of one pointer (`gestures/arena.dart:131-142`).
+    fn open_arena(&mut self, pointer: u32, members: Vec<Member>) {
+        let arena = Arena {
+            rejected: vec![false; members.len()],
+            members,
+            ..Arena::default()
+        };
+        match self.arenas.iter_mut().find(|(id, _)| *id == pointer) {
+            Some((_, slot)) => *slot = arena,
+            None => self.arenas.push((pointer, arena)),
+        }
+    }
+
+    fn pointer_index(&self, pointer: u32) -> Option<usize> {
+        self.pointers.iter().position(|(id, _)| *id == pointer)
+    }
+
+    /// The primary pointer is the first one that is still down.
+    fn primary_pointer(&self) -> Option<u32> {
+        self.pointers.first().map(|(id, _)| *id)
+    }
+
+    /// The reported phase follows the primary pointer.
+    fn sync_phase(&mut self) {
+        if let Some((_, state)) = self.pointers.first() {
+            self.phase = state.phase;
+        }
+    }
+
+    /// Whether a pending tap series exists for one node.
+    fn has_tap_series(&self, node: u32) -> bool {
+        self.tap_series.iter().any(|(_, mark)| mark.node == node)
     }
 
     /// Registers a node in draw order (the order returned by `layout`).
@@ -565,8 +621,8 @@ impl GestureEngine {
             // Flutter's cancelPointer is keyed by pointer id only; a cancelled
             // pointer may no longer hit any node (`binding.dart:336-346`).
             let node = self
-                .down
-                .map(|d| d.node)
+                .pointer_index(event.pointer_id)
+                .map(|index| self.pointers[index].1.down.node)
                 .or_else(|| self.scale.map(|t| t.node))?;
             self.forget_path(event.pointer_id);
             return self.on_cancel(node, event).map(|g| (node, g));
@@ -623,64 +679,103 @@ impl GestureEngine {
 
     /// The next host tick the engine needs: the long-press deadline or the
     /// double-tap window end, whichever comes first. `None` when idle.
+    /// The next host tick the engine needs: the long-press deadline or the
+    /// double-tap window end, whichever comes first. `None` when idle.
     pub fn next_deadline_ms(&self) -> Option<i64> {
-        let mut deadline = None;
-        if let Some(down) = self.down {
-            if self.phase == Phase::Pending
-                && self.arena.has(down.node, GestureKind::LongPress)
-                && !self.arena.is_rejected(GestureKind::LongPress)
-            {
-                deadline = Some(down.origin_t.saturating_add(LONG_PRESS_MS));
+        let mut deadline: Option<i64> = None;
+        for (pointer, state) in &self.pointers {
+            if state.phase != Phase::Pending {
+                continue;
+            }
+            let long_press_ready = self.arena_ref(*pointer).is_some_and(|arena| {
+                arena.has(state.down.node, GestureKind::LongPress)
+                    && !arena.is_rejected(GestureKind::LongPress)
+            });
+            if long_press_ready {
+                let candidate = state.down.origin_t.saturating_add(LONG_PRESS_MS);
+                deadline = Some(deadline.map_or(candidate, |value| value.min(candidate)));
             }
         }
-        if let Some(mark) = self.last_tap {
-            let tap_deadline = mark.t.saturating_add(DOUBLE_TAP_INTERVAL_MS);
-            deadline = Some(deadline.map_or(tap_deadline, |d| d.min(tap_deadline)));
+        for (_, mark) in &self.tap_series {
+            let candidate = mark.t.saturating_add(DOUBLE_TAP_INTERVAL_MS);
+            deadline = Some(deadline.map_or(candidate, |value| value.min(candidate)));
         }
         deadline
     }
-
     /// Starts a sequence. The pointer id and both coordinate frames are kept
     /// verbatim; only events from this pointer can continue the sequence.
+    /// Starts a sequence. The pointer id and both coordinate frames are kept
+    /// verbatim; only events from this pointer can continue the sequence.
+    ///
+    /// Every pointer opens its own arena (`gestures/arena.dart:117-129`), so
+    /// two fingers on two nodes are recognized in parallel. A second finger
+    /// on the same node joins the scale recognizer instead
+    /// (`gestures/scale.dart:586-592`).
     pub fn on_down(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         if event.kind != PointerKind::Down {
             return None;
         }
-        if let Some(first) = self.down {
+        if self.pointer_index(event.pointer_id).is_some() {
+            // A repeated down for a live pointer is ignored
+            // (`gestures/binding.dart:407-448`).
+            return None;
+        }
+        if let Some((first_pointer, first)) = self.pointers.first().copied() {
             // A second finger on the same node opens a two-pointer scale
             // track; Flutter records every down in the pointer queue
             // (`scale.dart:586-592`) while the arena stays open.
-            if first.pointer_id != event.pointer_id
-                && first.node == node_id
+            if first.down.node == node_id
                 && self.scale.is_none()
-                && self.arena.winner().is_none()
-                && self.arena.has(node_id, GestureKind::Scale)
+                && self.arena_ref(first_pointer).is_some_and(|arena| {
+                    arena.winner().is_none() && arena.has(node_id, GestureKind::Scale)
+                })
             {
-                self.scale = Some(ScaleTrack::new(node_id, &first, event));
+                self.scale = Some(ScaleTrack::new(node_id, &first.down, event));
+                return None;
             }
-            return None;
         }
         let entry = self.nodes.iter().find(|n| n.id == node_id)?;
         if !hit(&entry.hit_rect, event.local_x, event.local_y) {
             return None;
         }
-        if let Some(mark) = self.last_tap {
-            let gap = event.time_ms.saturating_sub(mark.t);
-            if !mark.valid
-                || mark.node != node_id
-                || gap > DOUBLE_TAP_INTERVAL_MS
-                || gap < DOUBLE_TAP_MIN_MS
-                || !within(
+        // A node whose recognizers already resolved for another pointer cannot
+        // start a second sequence: the recognizer instances are shared by the
+        // node (`gestures/arena.dart:254-292`). Only the scale recognizer
+        // still joins the new pointer (`gestures/scale.dart:586-592`).
+        let resolved_owner = self.pointers.iter().copied().find(|(_, state)| {
+            self.arena_ref(state.down.pointer_id)
+                .is_some_and(|arena| arena.winner().is_some_and(|member| member.node == node_id))
+        });
+        if let Some((_, owner)) = resolved_owner {
+            let scale_supported = self
+                .arena_ref(owner.down.pointer_id)
+                .is_some_and(|arena| arena.has(node_id, GestureKind::Scale));
+            if self.scale.is_none() && scale_supported {
+                self.scale = Some(ScaleTrack::new(node_id, &owner.down, event));
+            }
+            return None;
+        }
+        // The pending tap series of another node is dropped, and a series of
+        // this node only survives when it is still inside the double-tap
+        // window and slop (`multitap.dart:266,328-337`).
+        let gap = self
+            .tap_series
+            .first()
+            .map(|(_, mark)| event.time_ms.saturating_sub(mark.t))
+            .unwrap_or(0);
+        self.tap_series.retain(|(_, mark)| {
+            mark.node == node_id
+                && mark.valid
+                && gap <= DOUBLE_TAP_INTERVAL_MS
+                && gap >= DOUBLE_TAP_MIN_MS
+                && within(
                     event.local_x,
                     event.local_y,
                     mark.x,
                     mark.y,
                     DOUBLE_TAP_SLOP,
                 )
-            {
-                self.last_tap = None;
-            }
-        }
+        });
         let path = self.hit_test_path(event.global_x, event.global_y);
         let mut members = Vec::new();
         for id in path {
@@ -694,25 +789,35 @@ impl GestureEngine {
                 }
             }
         }
-        self.arena.open(members);
-        self.down = Some(Down {
-            node: node_id,
-            pointer_id: event.pointer_id,
-            local_x: event.local_x,
-            local_y: event.local_y,
-            global_x: event.global_x,
-            global_y: event.global_y,
-            t: event.time_ms,
-            origin_t: event.time_ms,
-        });
-        self.phase = Phase::Down;
-        self.phase = Phase::Pending;
+        self.open_arena(event.pointer_id, members);
+        self.pointers.push((
+            event.pointer_id,
+            PointerState {
+                down: Down {
+                    node: node_id,
+                    pointer_id: event.pointer_id,
+                    local_x: event.local_x,
+                    local_y: event.local_y,
+                    global_x: event.global_x,
+                    global_y: event.global_y,
+                    t: event.time_ms,
+                    origin_t: event.time_ms,
+                },
+                phase: Phase::Pending,
+            },
+        ));
+        self.sync_phase();
         None
     }
-
     /// Moves the active pointer. Leaving the node rect cancels the long-press
     /// timer; re-entering restarts it at the re-entry time. Crossing the drag
     /// slop accepts drag and rejects the other members.
+    /// Moves the active pointer. Leaving the node rect cancels the long-press
+    /// timer; re-entering restarts it at the re-entry time. Crossing the drag
+    /// slop accepts drag and rejects the other members.
+    ///
+    /// Every pointer drives its own arena, so a move of one finger never
+    /// touches the contest of another (`gestures/arena.dart:117-129`).
     pub fn on_move(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         if event.kind != PointerKind::Move {
             return None;
@@ -720,14 +825,17 @@ impl GestureEngine {
         if let Some(mut track) = self.scale {
             if track.update(event) {
                 self.scale = Some(track);
-                if self
-                    .arena
-                    .winner()
-                    .is_some_and(|w| w.kind == GestureKind::Scale)
-                    || (self.arena.winner().is_none()
-                        && track.exceeded()
-                        && self.arena.accept(track.node, GestureKind::Scale))
-                {
+                let scale_pointer = track.first_id;
+                let accepted = match self.arena_mut(scale_pointer) {
+                    Some(arena) => {
+                        arena.winner().is_some_and(|w| w.kind == GestureKind::Scale)
+                            || (arena.winner().is_none()
+                                && track.exceeded()
+                                && arena.accept(track.node, GestureKind::Scale))
+                    }
+                    None => false,
+                };
+                if accepted {
                     let (focal_x, focal_y) = track.focal();
                     return Some(Gesture::Scale {
                         scale: track.scale(),
@@ -740,14 +848,17 @@ impl GestureEngine {
                 return None;
             }
         }
-        let Some(down) = self.down else { return None };
-        if down.node != node_id || down.pointer_id != event.pointer_id {
+        let Some(index) = self.pointer_index(event.pointer_id) else {
+            return None;
+        };
+        let down = self.pointers[index].1.down;
+        if down.node != node_id {
             return None;
         }
         // Flutter resets the pending double-tap series as soon as the first
         // touch leaves its 18 px global tolerance (`multitap.dart:266,943-946`,
         // `constants.dart:41-44`). This is independent of drag acceptance.
-        if let Some(mark) = self.last_tap.as_mut() {
+        for (_, mark) in self.tap_series.iter_mut() {
             if !within(
                 event.global_x,
                 event.global_y,
@@ -758,12 +869,14 @@ impl GestureEngine {
                 mark.valid = false;
             }
         }
+        let phase = self.pointers[index].1.phase;
         if self.long_press_move_update
-            && self.phase == Phase::Triggered
-            && self
-                .arena
-                .winner()
-                .is_some_and(|w| w.kind == GestureKind::LongPress)
+            && phase == Phase::Triggered
+            && self.arena_ref(event.pointer_id).is_some_and(|arena| {
+                arena
+                    .winner()
+                    .is_some_and(|w| w.kind == GestureKind::LongPress)
+            })
         {
             // long_press.dart:783-800: every accepted move reports the current
             // position and its offset from the down origin, in both frames.
@@ -778,7 +891,7 @@ impl GestureEngine {
                 ldy: event.local_y.saturating_sub(down.local_y),
             });
         }
-        if let Some(winner) = self.arena.winner() {
+        if let Some(winner) = self.arena_ref(event.pointer_id).and_then(|a| a.winner()) {
             if winner.kind == GestureKind::Drag {
                 return Some(Gesture::Drag {
                     dx: event.global_x.saturating_sub(down.global_x),
@@ -790,20 +903,24 @@ impl GestureEngine {
         let rect = self.nodes.iter().find(|n| n.id == node_id)?.hit_rect;
         let inside = hit(&rect, event.local_x, event.local_y);
         if inside {
-            if self.phase == Phase::Cancelled {
-                self.phase = Phase::Pending;
-                if let Some(d) = self.down.as_mut() {
-                    d.origin_t = event.time_ms;
+            if phase == Phase::Cancelled {
+                self.pointers[index].1.phase = Phase::Pending;
+                self.pointers[index].1.down.origin_t = event.time_ms;
+                if let Some(arena) = self.arena_mut(event.pointer_id) {
+                    for kind in GestureKind::all() {
+                        arena.unreject(node_id, kind);
+                    }
                 }
-                for kind in GestureKind::all() {
-                    self.arena.unreject(node_id, kind);
-                }
+                self.sync_phase();
             }
         } else {
-            self.phase = Phase::Cancelled;
-            for kind in GestureKind::all() {
-                self.arena.reject(node_id, kind);
+            self.pointers[index].1.phase = Phase::Cancelled;
+            if let Some(arena) = self.arena_mut(event.pointer_id) {
+                for kind in GestureKind::all() {
+                    arena.reject(node_id, kind);
+                }
             }
+            self.sync_phase();
             return None;
         }
         let displaced = !within(
@@ -814,9 +931,15 @@ impl GestureEngine {
             DRAG_THRESHOLD,
         );
         if displaced {
-            self.arena.reject(node_id, GestureKind::Tap);
-            self.arena.reject(node_id, GestureKind::DoubleTap);
-            if self.arena.accept(node_id, GestureKind::Drag) {
+            let accepted = match self.arena_mut(event.pointer_id) {
+                Some(arena) => {
+                    arena.reject(node_id, GestureKind::Tap);
+                    arena.reject(node_id, GestureKind::DoubleTap);
+                    arena.accept(node_id, GestureKind::Drag)
+                }
+                None => false,
+            };
+            if accepted {
                 return Some(Gesture::Drag {
                     dx: event.global_x.saturating_sub(down.global_x),
                     dy: event.global_y.saturating_sub(down.global_y),
@@ -825,10 +948,15 @@ impl GestureEngine {
         }
         None
     }
-
     /// Lifts the active pointer. A first tap holds the arena for the
     /// double-tap window; a second qualifying tap accepts double tap;
     /// otherwise the sweep accepts the first surviving member.
+    /// Lifts the active pointer. A first tap holds the arena for the
+    /// double-tap window; a second qualifying tap accepts double tap;
+    /// otherwise the sweep accepts the first surviving member.
+    ///
+    /// The lifted pointer leaves the active list, but its arena stays until
+    /// the double-tap window releases it (`gestures/arena.dart:193-221`).
     pub fn on_up(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         if event.kind != PointerKind::Up {
             return None;
@@ -838,20 +966,29 @@ impl GestureEngine {
             // (`scale.dart:600-604`); the remaining pointer keeps its own
             // single-pointer sequence.
             self.scale = None;
-            if self.down.is_some_and(|d| d.pointer_id != event.pointer_id) {
+            if self.pointer_index(event.pointer_id).is_none() {
                 return None;
             }
         }
-        let Some(down) = self.down else { return None };
-        if down.node != node_id || down.pointer_id != event.pointer_id {
+        let Some(index) = self.pointer_index(event.pointer_id) else {
+            return None;
+        };
+        let down = self.pointers[index].1.down;
+        if down.node != node_id {
             return None;
         }
-        if self.arena.winner().is_some() {
-            self.down = None;
+        let pointer = event.pointer_id;
+        if self
+            .arena_ref(pointer)
+            .is_some_and(|arena| arena.winner().is_some())
+        {
+            self.pointers.remove(index);
             self.phase = Phase::Up;
+            self.sync_phase();
             return None;
         }
-        let tap_ok = self.phase != Phase::Cancelled
+        let phase = self.pointers[index].1.phase;
+        let tap_ok = phase != Phase::Cancelled
             && within(
                 event.local_x,
                 event.local_y,
@@ -860,7 +997,7 @@ impl GestureEngine {
                 DRAG_THRESHOLD,
             );
         let double_ok = tap_ok
-            && self.last_tap.is_some_and(|mark| {
+            && self.tap_series.iter().any(|(_, mark)| {
                 let gap = down.t.saturating_sub(mark.t);
                 mark.valid
                     && gap >= DOUBLE_TAP_MIN_MS
@@ -874,60 +1011,75 @@ impl GestureEngine {
                         DOUBLE_TAP_SLOP,
                     )
             });
-        self.down = None;
+        self.pointers.remove(index);
         self.phase = Phase::Up;
         if double_ok {
-            self.arena.accept(node_id, GestureKind::DoubleTap);
-            self.last_tap = None;
-            let _ = self.arena.release();
+            self.tap_series.retain(|(_, mark)| !mark.node.eq(&node_id));
+            if let Some(arena) = self.arena_mut(pointer) {
+                arena.accept(node_id, GestureKind::DoubleTap);
+                let _ = arena.release();
+            }
+            self.sync_phase();
             return Some(Gesture::DoubleTap);
         }
-        if tap_ok
-            && self.last_tap.is_none()
-            && self.arena.has(node_id, GestureKind::DoubleTap)
-            && !self.arena.is_rejected(GestureKind::DoubleTap)
-        {
+        let double_tap_member = self.arena_ref(pointer).is_some_and(|arena| {
+            arena.has(node_id, GestureKind::DoubleTap) && !arena.is_rejected(GestureKind::DoubleTap)
+        });
+        if tap_ok && !self.has_tap_series(node_id) && double_tap_member {
             // Wait for the 300ms window; a tick awards the tap by sweep.
-            self.last_tap = Some(TapMark {
-                node: node_id,
-                x: event.global_x,
-                y: event.global_y,
-                t: down.t,
-                valid: true,
-            });
-            self.arena.hold();
+            self.tap_series.push((
+                pointer,
+                TapMark {
+                    node: node_id,
+                    x: event.global_x,
+                    y: event.global_y,
+                    t: down.t,
+                    valid: true,
+                },
+            ));
+            if let Some(arena) = self.arena_mut(pointer) {
+                arena.hold();
+            }
+            self.sync_phase();
             return None;
         }
-        self.arena.sweep().and_then(|m| gesture_of(m.kind))
+        self.sync_phase();
+        self.arena_mut(pointer)
+            .and_then(|arena| arena.sweep())
+            .and_then(|member| gesture_of(member.kind))
     }
-
     /// Cancels the sequence without emitting a gesture (`long_press.dart:668`).
+    /// Cancels the sequence without emitting a gesture (`long_press.dart:668`).
+    ///
+    /// Only the cancelled pointer is rolled back; the arenas of the other
+    /// pointers keep their state (`gestures/arena.dart:226-292`).
     pub fn on_cancel(&mut self, _node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         if event.kind != PointerKind::Cancel {
             return None;
         }
         if let Some(track) = self.scale {
             if track.has(event.pointer_id) {
-                let primary = self.down.is_some_and(|d| d.pointer_id == event.pointer_id);
+                let primary = self.primary_pointer() == Some(event.pointer_id);
                 self.scale = None;
                 if !primary {
                     return None;
                 }
             }
         }
-        let Some(down) = self.down else { return None };
-        if down.pointer_id != event.pointer_id {
+        let Some(index) = self.pointer_index(event.pointer_id) else {
             return None;
+        };
+        let node = self.pointers[index].1.down.node;
+        if let Some(arena) = self.arena_mut(event.pointer_id) {
+            for kind in GestureKind::all() {
+                arena.reject(node, kind);
+            }
         }
-        let node = down.node;
-        for kind in GestureKind::all() {
-            self.arena.reject(node, kind);
-        }
-        self.down = None;
+        self.pointers.remove(index);
         self.phase = Phase::Cancelled;
+        self.sync_phase();
         None
     }
-
     /// Routes an event by its `kind`, using the caller's node id.
     pub fn on_event(&mut self, node_id: u32, event: &PointerEvent) -> Option<Gesture> {
         match event.kind {
@@ -941,44 +1093,96 @@ impl GestureEngine {
     /// Host-injected timer. At the long-press deadline the recognizer accepts
     /// (`long_press.dart:641`); at the double-tap deadline the held arena is
     /// released and the sweep awards the plain tap (`multitap.dart:355`).
+    /// Host-injected timer. At the long-press deadline the recognizer accepts
+    /// (`long_press.dart:641`); at the double-tap deadline the held arena is
+    /// released and the sweep awards the plain tap (`multitap.dart:355`).
     pub fn on_tick(&mut self, t: i64) -> Option<Gesture> {
-        if let Some(down) = self.down {
-            if self.phase == Phase::Pending
-                && t.saturating_sub(down.origin_t) >= LONG_PRESS_MS
-                && self.arena.has(down.node, GestureKind::LongPress)
-                && !self.arena.is_rejected(GestureKind::LongPress)
-            {
-                let node = down.node;
-                if self.arena.accept(node, GestureKind::LongPress) {
-                    self.phase = Phase::Triggered;
-                    return Some(Gesture::LongPress);
+        let mut long_press: Option<(u32, u32)> = None;
+        for (pointer, state) in &self.pointers {
+            if state.phase != Phase::Pending {
+                continue;
+            }
+            if t.saturating_sub(state.down.origin_t) < LONG_PRESS_MS {
+                continue;
+            }
+            let ready = self.arena_ref(*pointer).is_some_and(|arena| {
+                arena.has(state.down.node, GestureKind::LongPress)
+                    && !arena.is_rejected(GestureKind::LongPress)
+            });
+            if ready {
+                long_press = Some((*pointer, state.down.node));
+                break;
+            }
+        }
+        if let Some((pointer, node)) = long_press {
+            let accepted = match self.arena_mut(pointer) {
+                Some(arena) => arena.accept(node, GestureKind::LongPress),
+                None => false,
+            };
+            if accepted {
+                if let Some(index) = self.pointer_index(pointer) {
+                    self.pointers[index].1.phase = Phase::Triggered;
                 }
+                self.sync_phase();
+                return Some(Gesture::LongPress);
             }
             return None;
         }
-        if let Some(mark) = self.last_tap {
-            if t.saturating_sub(mark.t) >= DOUBLE_TAP_INTERVAL_MS {
-                self.last_tap = None;
-                self.phase = Phase::Up;
-                return self.arena.release().and_then(|m| gesture_of(m.kind));
-            }
+        // The expired tap series of one pointer is awarded first; the others
+        // wait for the next tick (`multitap.dart:355`).
+        let expired = self
+            .tap_series
+            .iter()
+            .position(|(_, mark)| t.saturating_sub(mark.t) >= DOUBLE_TAP_INTERVAL_MS);
+        if let Some(index) = expired {
+            let (pointer, _) = self.tap_series.remove(index);
+            self.phase = Phase::Up;
+            let released = self.arena_mut(pointer).and_then(|arena| arena.release());
+            // A still active primary pointer keeps the reported phase.
+            self.sync_phase();
+            return released.and_then(|member| gesture_of(member.kind));
         }
         None
     }
-
     /// Current gesture phase.
     pub fn phase(&self) -> Phase {
         self.phase
     }
 
-    /// Winner of the current (or just-ended) sequence.
+    /// Winner of the primary sequence, or of the last arena that was used.
     pub fn arena_winner(&self) -> Option<GestureKind> {
-        self.arena.winner().map(|m| m.kind)
+        let pointer = self
+            .primary_pointer()
+            .or_else(|| self.arenas.last().map(|(id, _)| *id))?;
+        self.arena_ref(pointer)
+            .and_then(|arena| arena.winner().map(|member| member.kind))
     }
 
-    /// Whether a recognizer was ruled out in the current arena.
+    /// The winner of one pointer's arena (`gestures/arena.dart:117-129`).
+    pub fn arena_winner_for(&self, pointer: u32) -> Option<GestureKind> {
+        self.arena_ref(pointer)
+            .and_then(|arena| arena.winner().map(|member| member.kind))
+    }
+
+    /// Whether a recognizer was ruled out in one pointer's arena
+    /// (`gestures/arena.dart:117-129`).
+    pub fn arena_rejected_for(&self, pointer: u32, kind: GestureKind) -> bool {
+        self.arena_ref(pointer)
+            .is_some_and(|arena| arena.is_rejected(kind))
+    }
+
+    /// Whether a recognizer was ruled out in the primary arena, or in the
+    /// last arena that was used.
     pub fn arena_rejected(&self, kind: GestureKind) -> bool {
-        self.arena.is_rejected(kind)
+        let pointer = self
+            .primary_pointer()
+            .or_else(|| self.arenas.last().map(|(id, _)| *id));
+        match pointer {
+            Some(pointer) => self
+                .arena_ref(pointer)
+                .is_some_and(|arena| arena.is_rejected(kind)),
+            None => false,
+        }
     }
 }
 

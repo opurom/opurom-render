@@ -56,10 +56,10 @@ fn parallel_pointers_keep_independent_hit_paths() {
         e.dispatch(&event(PointerKind::Up, 11, 240, 240, 10)),
         Some((1, Gesture::Tap))
     );
-    // Opurom's renderer still serializes one primary sequence: after the
-    // first up clears `down`, the second pointer's up has no live sequence
-    // and deterministically emits nothing. Flutter would keep a second
-    // arena; this pin records the gap so the host never double-dispatches.
+    // The second pointer lands on the same node, so it joins the scale
+    // recognizer instead of opening a second contest
+    // (`gestures/scale.dart:586-592`); its lift ends the scale phase and
+    // emits nothing on its own.
     assert_eq!(e.dispatch(&event(PointerKind::Up, 12, 40, 40, 11)), None);
 }
 
@@ -72,8 +72,12 @@ fn cancel_is_keyed_only_by_pointer_id() {
     // (node 0, zero coordinates) that must still cancel pointer 7 only.
     let cancel = event(PointerKind::Cancel, 7, 0, 0, 2);
     assert_eq!(e.on_event(0, &cancel), None);
+    // Only pointer 7's arena is rolled back (`arena.dart:226-292`).
+    assert!(e.arena_rejected_for(7, GestureKind::Tap));
+    assert!(!e.arena_rejected_for(8, GestureKind::Tap));
+    // The cancelled pointer was the only active one, so the reported phase
+    // stays cancelled.
     assert_eq!(e.phase(), opurom_render::Phase::Cancelled);
-    assert!(e.arena_rejected(GestureKind::Tap));
     // Pointer 8's later up still reaches its own sequence and resolves.
     assert_eq!(e.dispatch(&event(PointerKind::Up, 8, 140, 60, 3)), None);
 }
