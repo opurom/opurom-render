@@ -313,6 +313,23 @@ function runRegression(archiveDir) {
     trace.code === 0 && trace.json?.status === 'PASS' ? 'PASS' : 'FAIL',
     trace.json?.detail ?? describeFailure(trace));
 
+  // The coverage report must agree with the trace gate's own count.
+  const coveragePath = join(workspace, 'trace-coverage.json');
+  const coverage = runNode(TRACE, ['--coverage', coveragePath], 'source coverage');
+  let coverageOk = coverage.code === 0 && existsSync(coveragePath);
+  if (coverageOk) {
+    const report = JSON.parse(readFileSync(coveragePath, 'utf8'));
+    coverageOk = report.schema === 'opurom.gesture.trace.coverage/1'
+      && report.status === trace.json?.status
+      && report.stats?.anchors === trace.json?.stats?.anchors
+      && report.stats?.out_of_range === 0
+      && report.stats?.missing_files === 0
+      && Array.isArray(report.sources)
+      && report.sources.length === trace.json?.stats?.files;
+  }
+  record('trace_coverage_valid', coverageOk ? 'PASS' : 'FAIL',
+    coverageOk ? `anchors=${trace.json?.stats?.anchors}` : describeFailure(coverage));
+
   // The gates themselves must be falsifiable: an injected absolute-limit
   // fault and an injected baseline regression both have to be rejected.
   const gateFaults = runNode(BASELINE_LOOP, ['--self-test', 'gate_faults'], 'gate fault matrix');
