@@ -69,6 +69,9 @@ pub mod typography;
 pub mod visual_gate;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
+pub use abi_helpers::{
+    anim_for_abi, apply_node_states_for_abi, render_laid_for_abi, render_laid_press_for_abi,
+};
 pub use anim::{
     animate_progress, choose_quality, default_duration_ms, lerp, lerp_rgba, AnimSpec, AnimTable,
     AnimValue, Animator, Curve, FrameRate, GestureAnim, Particle, ParticleSystem, Quality,
@@ -393,6 +396,18 @@ fn press_host<'a>(
 /// ABI helpers for the native host event loop. They are public so the C
 /// ABI can lay out once, apply its node-state table and raster the press
 /// ripple over the M3 state colors without a second layout pass.
+
+/// ABI helpers for the native host event loop. They are public so the C ABI
+/// can lay out once, apply its node-state table and raster the press ripple
+/// over the M3 state colors without a second layout pass.
+pub mod abi_helpers {
+    pub use crate::{
+        anim_for_abi_impl as anim_for_abi,
+        apply_node_states_for_abi_impl as apply_node_states_for_abi,
+        render_laid_for_abi_impl as render_laid_for_abi,
+        render_laid_press_for_abi_impl as render_laid_press_for_abi,
+    };
+}
 
 impl Renderer {
     pub fn try_new(width: u32, height: u32) -> Result<Renderer, IrError> {
@@ -1399,6 +1414,23 @@ pub fn apply_node_states_for_abi_impl(laid: &mut [LaidOut], ir: &Ir, entries: &[
 /// deliberately ignores state-paint slots, so a state change needs a full pass.
 pub fn render_laid_for_abi_impl(renderer: &mut Renderer, laid: &[LaidOut], ir: &Ir) -> Frame {
     let pixels = renderer.raster_laid(laid, ir);
+    renderer.finish_frame(laid.to_vec(), pixels)
+}
+
+/// ABI helper: raster one press frame from caller-supplied layout. The native
+/// host uses it after applying its node-state table, so the ripple still
+/// paints last over the M3 state colors.
+pub fn render_laid_press_for_abi_impl(
+    renderer: &mut Renderer,
+    laid: &[LaidOut],
+    ir: &Ir,
+    press: Option<&PressPhase>,
+    elapsed_ms: i64,
+) -> Frame {
+    let pixels = renderer.raster_laid_press(laid, ir, press, elapsed_ms);
+    renderer.prev_press_disc = press
+        .and_then(|p| press_host(laid, ir, p))
+        .map(|(host, hp)| ripple_disc(host, hp.touch, renderer.width, renderer.height));
     renderer.finish_frame(laid.to_vec(), pixels)
 }
 
