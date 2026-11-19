@@ -15,9 +15,8 @@
 //! shared sources or CI files.
 
 use opurom_render::scroll_physics::{
-    BouncingScrollSimulation, ScrollTolerance, SpringDescription, SpringSolution,
-    BOUNCE_FRICTION, MAX_SPRING_TRANSFER_VELOCITY, RUBBER_BAND_HALF_LIFE_SECONDS,
-    RUBBER_BAND_LAMBDA,
+    BouncingScrollSimulation, ScrollTolerance, SpringDescription, SpringSolution, BOUNCE_FRICTION,
+    MAX_SPRING_TRANSFER_VELOCITY, RUBBER_BAND_HALF_LIFE_SECONDS, RUBBER_BAND_LAMBDA,
 };
 use std::{env, fs, path::PathBuf};
 

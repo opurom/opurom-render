@@ -363,6 +363,7 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
         .arg("../opurom-examples/golden/counter.opuir.json")
         .args(["320", "240"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .args(["--commands", commands.to_str().unwrap()])
         .output()
         .unwrap();
@@ -393,6 +394,7 @@ fn cli_commands_accepts_gaussian_and_clamps_radius() {
         .arg(&ir_path)
         .args(["96", "64"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .args(["--commands", commands.to_str().unwrap()])
         .output()
         .unwrap();
@@ -428,6 +430,7 @@ fn cli_commands_accepts_visual_effects() {
         .arg(&ir_path)
         .args(["96", "64"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .args(["--commands", commands.to_str().unwrap()])
         .output()
         .unwrap();

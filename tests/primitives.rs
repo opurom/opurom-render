@@ -315,6 +315,7 @@ fn capability_v0_1_golden_digests_are_unchanged() {
             .arg(ir)
             .args([w, h])
             .arg(dir.join(out))
+            .args(["--quality", "compat"])
             .args(extra)
             .output()
             .unwrap();

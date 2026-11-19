@@ -217,6 +217,7 @@ fn golden_counter_digests_are_unchanged_by_the_particles_layer() {
         .arg("../opurom-examples/golden/counter.opuir.json")
         .args(["800", "600"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .args(["--state", "count=7"])
         .output()
         .unwrap();

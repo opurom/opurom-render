@@ -154,6 +154,7 @@ fn cli_writes_byte_identical_svg_and_leaves_stdout_unchanged() {
             .arg(&ir_path)
             .args(["320", "240"])
             .arg(&ppm)
+            .args(["--quality", "compat"])
             .arg("--svg")
             .arg(out)
             .output()
@@ -556,6 +557,7 @@ fn v0_1_golden_digests_are_unchanged_by_pipeline() {
             .arg(ir)
             .args([w, h])
             .arg(dir.join(out))
+            .args(["--quality", "compat"])
             .args(extra)
             .output()
             .unwrap();

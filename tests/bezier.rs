@@ -97,6 +97,7 @@ fn default_path_bytes_and_command_stream_stay_identical() {
         .arg("tests/fixtures/effects.opuir.json")
         .args(["96", "160"])
         .arg(&effects_ppm)
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(

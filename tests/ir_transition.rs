@@ -27,6 +27,7 @@ fn run(ir: &PathBuf, ppm: &PathBuf, args: &[&str]) -> std::process::Output {
         .arg(ir)
         .args(["320", "240"])
         .arg(ppm)
+        .args(["--quality", "compat"])
         .args(args)
         .output()
         .unwrap()

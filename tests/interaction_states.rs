@@ -492,7 +492,7 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
         "160",
         "96",
         &first_ppm,
-        &["--interactive-state", "hover"],
+        &["--quality", "compat", "--interactive-state", "hover"],
     ));
     let second = stdout(cli(
         exe,
@@ -500,7 +500,7 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
         "160",
         "96",
         &second_ppm,
-        &["--interactive-state", "hover"],
+        &["--quality", "compat", "--interactive-state", "hover"],
     ));
     assert_eq!(first, second);
     assert_eq!(first, format!("digest={expected}\ndirty=1\n"));
@@ -521,7 +521,7 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
         "160",
         "96",
         &dir.join("interaction-disabled.ppm"),
-        &["--interactive-state", "hover"],
+        &["--quality", "compat", "--interactive-state", "hover"],
     ));
     assert_eq!(disabled, format!("digest={disabled_expected}\ndirty=1\n"));
 
@@ -560,7 +560,7 @@ fn cli_flag_overrides_every_interactive_node_and_is_stable_across_runs() {
             "160",
             "96",
             &dir.join(format!("interaction-{state}.ppm")),
-            &["--interactive-state", state],
+            &["--quality", "compat", "--interactive-state", state],
         ));
         assert_eq!(out, expected, "CLI business state {state}");
     }
@@ -578,7 +578,7 @@ fn cli_state_variables_and_interactive_state_do_not_collide() {
         "800",
         "600",
         &dir.join("interaction-counter-base.ppm"),
-        &[],
+        &["--quality", "compat"],
     ));
     assert_eq!(no_flag, "digest=318beb1dd337bc4e\ndirty=1\n");
     let state_only = stdout(cli(
@@ -587,7 +587,7 @@ fn cli_state_variables_and_interactive_state_do_not_collide() {
         "800",
         "600",
         &dir.join("interaction-counter-state.ppm"),
-        &["--state", "count=7"],
+        &["--quality", "compat", "--state", "count=7"],
     ));
     assert_eq!(state_only, "digest=40073cb95c912d80\ndirty=1\n");
     let combined = stdout(cli(
