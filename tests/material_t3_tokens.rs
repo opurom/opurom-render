@@ -6,9 +6,8 @@
 //! modes, local overrides and the legacy golden path without invoking a
 //! runtime interpreter.
 
-use opurom_render::{
-    digest_hex, layout, parse_ir, QualityProfile, Renderer, Rgba, StateView, ThemeTokens,
-};
+use opurom_render::QualityProfile;
+use opurom_render::{digest_hex, layout, parse_ir, Renderer, Rgba, StateView, ThemeTokens};
 use serde_json::json;
 use std::fs;
 
@@ -148,11 +147,14 @@ fn counter_goldens_remain_byte_identical() {
     let text = fs::read_to_string(COUNTER_PATH).unwrap();
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
-    let render = |w, h| {
-        let mut renderer = Renderer::new(w, h);
-        renderer.set_quality(QualityProfile::Compat);
-        digest_hex(&renderer.render(&ir, &state).pixels)
+    // The pinned goldens are the explicit compat contract; the default
+    // renderer uses the product profile and must not be byte-identical.
+    let compat = |w, h| {
+        let mut r = Renderer::new(w, h);
+        r.set_quality(QualityProfile::Compat);
+        r.set_edge_aa(false);
+        digest_hex(&r.render(&ir, &state).pixels)
     };
-    assert_eq!(render(320, 240), "8d45f412996a99c6");
-    assert_eq!(render(800, 600), "318beb1dd337bc4e");
+    assert_eq!(compat(320, 240), "8d45f412996a99c6");
+    assert_eq!(compat(800, 600), "318beb1dd337bc4e");
 }

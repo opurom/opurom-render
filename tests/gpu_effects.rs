@@ -28,12 +28,9 @@ fn dump(ir_path: &PathBuf, width: &str, height: &str, label: &str) -> (String, P
         .arg(ir_path)
         .args([width, height])
         .arg(&ppm)
-        .args([
-            "--commands",
-            commands.to_str().unwrap(),
-            "--quality",
-            "compat",
-        ])
+        .args(["--quality", "compat"])
+        .args(["--commands"])
+        .arg(&commands)
         .output()
         .unwrap();
     assert!(
@@ -186,12 +183,9 @@ fn commands_do_not_change_the_effect_ppm_or_stdout() {
         .arg(&ir_path)
         .args(["96", "64"])
         .arg(&command_ppm)
-        .args([
-            "--commands",
-            commands.to_str().unwrap(),
-            "--quality",
-            "compat",
-        ])
+        .args(["--quality", "compat"])
+        .args(["--commands"])
+        .arg(&commands)
         .output()
         .unwrap();
     assert!(plain.status.success() && with.status.success());

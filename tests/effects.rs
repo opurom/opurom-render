@@ -369,12 +369,8 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
         .arg("../opurom-examples/golden/counter.opuir.json")
         .args(["320", "240"])
         .arg(&ppm)
-        .args([
-            "--commands",
-            commands.to_str().unwrap(),
-            "--quality",
-            "compat",
-        ])
+        .args(["--quality", "compat"])
+        .args(["--commands", commands.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(
@@ -440,9 +436,12 @@ fn cli_commands_accepts_visual_effects() {
         .arg(&ir_path)
         .args(["96", "64"])
         .arg(&ppm)
-        .args(["--quality", "compat"])
-        .args(["--commands", commands.to_str().unwrap()])
-        .args(["--quality", "compat"])
+        .args([
+            "--quality",
+            "compat",
+            "--commands",
+            commands.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(

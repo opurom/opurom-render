@@ -122,7 +122,7 @@ pub use perf::{
     TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
 };
 pub use profile::{
-    disable_motion, MotionSpec as CliMotionSpec, RenderPolicy, RenderProfile, DEFAULT_DPR,
+    disable_motion, MotionSpec as RenderMotionSpec, RenderPolicy, RenderProfile, DEFAULT_DPR,
     DPI_UNIT, MAX_DPR,
 };
 pub use quality::{DprScale, QualityProfile};
@@ -412,8 +412,8 @@ impl Renderer {
             redrawn_nodes: 0,
             redraw_pixels: 0,
             anim: RefCell::new(AnimTable::new()),
-            edge_aa: QualityProfile::default().edge_coverage(),
-            suppress_text: QualityProfile::default().system_font_overlay(),
+            edge_aa: true,
+            suppress_text: false,
             dpr: crate::profile::DEFAULT_DPR,
             quality: QualityProfile::default(),
         })
