@@ -141,6 +141,7 @@ fn cli_commands_dump_keeps_golden_stdout_and_ppm() {
             .arg("../opurom-examples/golden/counter.opuir.json")
             .args(["320", "240"])
             .arg(ppm)
+            .args(["--quality", "compat"])
             .args(extra)
             .output()
             .unwrap()

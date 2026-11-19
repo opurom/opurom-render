@@ -60,6 +60,7 @@ fn default_path_keeps_all_pinned_goldens() {
         .arg("tests/fixtures/effects.opuir.json")
         .args(["96", "160"])
         .arg(&ppm)
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(

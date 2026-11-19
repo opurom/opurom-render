@@ -468,7 +468,10 @@ pub struct Props {
     pub color_role: Option<String>,
     pub color: Option<Rgba>,
     /// Explicit text colour, independent of the fill (Button foreground).
+    pub text_color_role: Option<String>,
     pub text_color: Option<Rgba>,
+    /// Border colour role, resolved with the same M3 palette as `color_role`.
+    pub border_role: Option<String>,
     pub value: Option<String>,
     /// Integer form of `value` (`Progress` percentage).
     pub value_num: Option<i64>,
@@ -531,6 +534,10 @@ pub struct Props {
     pub baseline_kind: Option<BaselineKind>,
     /// Grid: distribute surplus box height across rows (deterministic i128).
     pub fill_height: bool,
+    /// Stack child: share of the parent's leftover main-axis space. A child
+    /// with a positive weight is sized to its weighted share of the space the
+    /// fixed children leave behind; `None` keeps the natural size.
+    pub flex: Option<i64>,
     pub labels: Vec<String>,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -1014,34 +1021,137 @@ fn color_role_prop(
     let Some(s) = opt_string(o, key, what)? else {
         return Ok(None);
     };
-    let Some(role) = s.strip_prefix("@md-sys-color-") else {
+    let Some(_role) = s.strip_prefix("@md-sys-color-") else {
         return Ok(None);
     };
-    if role != "primary" {
-        return Err(bad(format!(
-            "{what}.{key} has unsupported design token role 'md-sys-color-{role}'"
-        )));
-    }
     Ok(Some(s))
 }
 
-/// Minimal M3 palette closure: one role, both modes. `System` uses the light
-/// baseline so every mode resolves deterministically. Flutter authority:
-/// `color_scheme.dart:449` (light `0xff6200ee`) and `:542` (dark `0xffbb86fc`).
-fn m3_color(role: &str, mode: ThemeMode) -> Option<Rgba> {
-    match (role, mode) {
-        ("@md-sys-color-primary", ThemeMode::Dark) => Some(Rgba::rgb(0xbb, 0x86, 0xfc)),
-        ("@md-sys-color-primary", _) => Some(Rgba::rgb(0x62, 0x00, 0xee)),
-        _ => None,
+/// Resolve an M3 colour role against the imported token overlay first, then
+/// the audited Flutter 3.50 baseline. Missing roles keep the authored colour
+/// unchanged; no renderer-local palette invents a value.
+fn m3_color(role: &str, theme: &Theme) -> Option<Rgba> {
+    let bare = role.strip_prefix("@md-sys-color-")?;
+    if let Some(color) = theme.tokens.m3.get(bare) {
+        return Some(*color);
     }
+    let dark = matches!(theme.mode, ThemeMode::Dark);
+    let hex = match (bare, dark) {
+        ("primary", true) => "BB86FC",
+        ("primary", false) => "6200EE",
+        ("on-primary", true) => "000000",
+        ("on-primary", false) => "FFFFFF",
+        ("primary-container", true) => "BB86FC",
+        ("primary-container", false) => "6200EE",
+        ("on-primary-container", true) => "000000",
+        ("on-primary-container", false) => "FFFFFF",
+        ("secondary", true) => "03DAC6",
+        ("secondary", false) => "03DAC6",
+        ("on-secondary", true) => "000000",
+        ("on-secondary", false) => "000000",
+        ("secondary-container", true) => "03DAC6",
+        ("secondary-container", false) => "03DAC6",
+        ("on-secondary-container", true) => "000000",
+        ("on-secondary-container", false) => "000000",
+        ("error", true) => "CF6679",
+        ("error", false) => "B00020",
+        ("on-error", true) => "000000",
+        ("on-error", false) => "FFFFFF",
+        ("error-container", true) => "CF6679",
+        ("error-container", false) => "B00020",
+        ("on-error-container", true) => "000000",
+        ("on-error-container", false) => "FFFFFF",
+        ("surface", true) => "121212",
+        ("surface", false) => "FFFFFF",
+        ("on-surface", true) => "FFFFFF",
+        ("on-surface", false) => "000000",
+        ("surface-dim", true) => "121212",
+        ("surface-dim", false) => "FFFFFF",
+        ("surface-bright", true) => "121212",
+        ("surface-bright", false) => "FFFFFF",
+        ("surface-container-lowest", true) => "121212",
+        ("surface-container-lowest", false) => "FFFFFF",
+        ("surface-container-low", true) => "121212",
+        ("surface-container-low", false) => "FFFFFF",
+        ("surface-container", true) => "121212",
+        ("surface-container", false) => "FFFFFF",
+        ("surface-container-high", true) => "121212",
+        ("surface-container-high", false) => "FFFFFF",
+        ("surface-container-highest", true) => "121212",
+        ("surface-container-highest", false) => "FFFFFF",
+        ("on-surface-variant", true) => "FFFFFF",
+        ("on-surface-variant", false) => "000000",
+        ("outline", true) => "FFFFFF",
+        ("outline", false) => "000000",
+        ("outline-variant", true) => "FFFFFF",
+        ("outline-variant", false) => "000000",
+        ("shadow", true) => "000000",
+        ("shadow", false) => "000000",
+        ("scrim", true) => "000000",
+        ("scrim", false) => "000000",
+        ("inverse-surface", true) => "FFFFFF",
+        ("inverse-surface", false) => "000000",
+        ("on-inverse-surface", true) => "121212",
+        ("on-inverse-surface", false) => "FFFFFF",
+        ("inverse-primary", true) => "000000",
+        ("inverse-primary", false) => "FFFFFF",
+        ("surface-tint", true) => "BB86FC",
+        ("surface-tint", false) => "6200EE",
+        ("tertiary", true) => "03DAC6",
+        ("tertiary", false) => "03DAC6",
+        ("on-tertiary", true) => "000000",
+        ("on-tertiary", false) => "000000",
+        ("tertiary-container", true) => "03DAC6",
+        ("tertiary-container", false) => "03DAC6",
+        ("on-tertiary-container", true) => "000000",
+        ("on-tertiary-container", false) => "000000",
+        ("tertiary-fixed", true) => "03DAC6",
+        ("tertiary-fixed", false) => "03DAC6",
+        ("tertiary-fixed-dim", true) => "03DAC6",
+        ("tertiary-fixed-dim", false) => "03DAC6",
+        ("on-tertiary-fixed", true) => "000000",
+        ("on-tertiary-fixed", false) => "000000",
+        ("on-tertiary-fixed-variant", true) => "000000",
+        ("on-tertiary-fixed-variant", false) => "000000",
+        ("primary-fixed", true) => "BB86FC",
+        ("primary-fixed", false) => "6200EE",
+        ("primary-fixed-dim", true) => "BB86FC",
+        ("primary-fixed-dim", false) => "6200EE",
+        ("on-primary-fixed", true) => "000000",
+        ("on-primary-fixed", false) => "FFFFFF",
+        ("on-primary-fixed-variant", true) => "000000",
+        ("on-primary-fixed-variant", false) => "FFFFFF",
+        ("secondary-fixed", true) => "03DAC6",
+        ("secondary-fixed", false) => "03DAC6",
+        ("secondary-fixed-dim", true) => "03DAC6",
+        ("secondary-fixed-dim", false) => "03DAC6",
+        ("on-secondary-fixed", true) => "000000",
+        ("on-secondary-fixed", false) => "000000",
+        ("on-secondary-fixed-variant", true) => "000000",
+        ("on-secondary-fixed-variant", false) => "000000",
+        ("background", true) => "121212",
+        ("background", false) => "FFFFFF",
+        ("on-background", true) => "FFFFFF",
+        ("on-background", false) => "000000",
+        ("surface-variant", true) => "121212",
+        ("surface-variant", false) => "FFFFFF",
+        _ => return None,
+    };
+    Rgba::from_hex(&format!("#{hex}"))
 }
 
-fn resolve_color_roles(n: &mut Node, mode: ThemeMode) {
+fn resolve_color_roles(n: &mut Node, theme: &Theme) {
     if let Some(role) = &n.props.color_role {
-        n.props.color = m3_color(role, mode);
+        n.props.color = m3_color(role, theme);
+    }
+    if let Some(role) = &n.props.text_color_role {
+        n.props.text_color = m3_color(role, theme);
+    }
+    if let Some(role) = &n.props.border_role {
+        n.props.border = m3_color(role, theme);
     }
     for child in &mut n.children {
-        resolve_color_roles(child, mode);
+        resolve_color_roles(child, theme);
     }
 }
 
@@ -1594,7 +1704,10 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         corner_radii: corner_radii_prop(o, what)?,
         color_role: color_role_prop(o, "color", what)?,
         color: color_prop(o, "color", what)?,
+        text_color_role: color_role_prop(o, "textColor", what)?,
         text_color: color_prop(o, "textColor", what)?,
+        border_role: color_role_prop(o, "border", what)?,
+        border: color_prop(o, "border", what)?,
         line_height: line_height_prop(o, what)?,
         leading_distribution: match opt_string(o, "leadingDistribution", what)?.as_deref() {
             None => None,
@@ -1641,7 +1754,6 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
         },
         glass: opt_bool(o, "glass", what)?,
         opacity: unit_prop(o, "opacity", what)?,
-        border: color_prop(o, "border", what)?,
         animate,
         duration: anim_duration_prop(o, "duration", what)?,
         delay: anim_duration_prop(o, "delay", what)?,
@@ -1657,6 +1769,7 @@ fn props(o: &Map<String, Value>) -> Result<Props, IrError> {
             other => other,
         },
         fill_height: opt_bool(o, "fillHeight", what)?,
+        flex: opt_integer(o, "flex", what)?,
         labels: labels_prop(o, "labels", what)?,
         min: opt_signed_integer(o, "min", what)?,
         max: opt_signed_integer(o, "max", what)?,
@@ -2078,11 +2191,23 @@ fn tokens(v: &Value) -> Result<ThemeTokens, IrError> {
     };
     let mut m3 = BTreeMap::new();
     for (key, value) in o {
-        if let Some(role) = key.strip_prefix("md-sys-color-") {
-            if let Some(text) = value.as_str() {
-                if let Some(color) = Rgba::from_hex(text) {
-                    m3.insert(role.to_string(), color);
-                }
+        let role = key
+            .strip_prefix("md-sys-color-")
+            .or_else(|| key.strip_prefix("md-sys-color-"));
+        let Some(role) = role else { continue };
+        if let Some(text) = value.as_str() {
+            if let Some(color) = Rgba::from_hex(text) {
+                m3.insert(role.to_string(), color);
+            }
+        }
+    }
+    for (bare, value) in [
+        ("primary", &o.get("primary")),
+        ("secondary", &o.get("secondary")),
+    ] {
+        if let Some(serde_json::Value::String(text)) = value {
+            if let Some(color) = Rgba::from_hex(text) {
+                m3.entry(bare.to_string()).or_insert(color);
             }
         }
     }
@@ -2231,9 +2356,9 @@ pub fn parse_ir(text: &str) -> Result<Ir, IrError> {
     // after the mode is known. Existing hex colours are untouched, so committed
     // frames keep their bytes.
     for route in routes.values_mut() {
-        resolve_color_roles(&mut route.tree, theme.mode);
+        resolve_color_roles(&mut route.tree, &theme);
     }
-    resolve_color_roles(&mut tree, theme.mode);
+    resolve_color_roles(&mut tree, &theme);
     // Optional page-transition key; unparsable values are rejected by name.
     let transition = match o.get("transition") {
         Some(v) => {

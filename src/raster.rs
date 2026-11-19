@@ -95,6 +95,10 @@ pub struct Canvas {
     /// Opt-in display-layer split: skip bitmap text so the host can overlay
     /// system-font spans. Off by default so every golden stays byte-identical.
     suppress_text: bool,
+    /// Device pixel ratio in fixed point (`1024 == 1x`). At 1x every path is
+    /// byte-identical; above 1x edge coverage is refined without changing the
+    /// logical layout or the framebuffer size.
+    dpr: i64,
     capture: bool,
     capture_unsupported: Option<String>,
     commands: Vec<Command>,
@@ -133,6 +137,7 @@ impl Canvas {
             edge_aa: false,
             gradient_bits: 10,
             suppress_text: false,
+            dpr: crate::profile::DEFAULT_DPR,
             capture: false,
             capture_unsupported: None,
             commands: Vec::new(),
@@ -157,6 +162,23 @@ impl Canvas {
     /// font spans instead. Every other primitive is unaffected. Default false.
     pub fn set_suppress_text(&mut self, on: bool) {
         self.suppress_text = on;
+    }
+
+    /// Set the device pixel ratio in fixed point (`1024 == 1x`). At 1x there is
+    /// no pixel change; above 1x finer edge coverage is enabled for geometric
+    /// primitives and the 16-bit dithered gradient path is selected, while the
+    /// logical layout and framebuffer size stay fixed.
+    pub fn set_dpr(&mut self, dpr: i64) {
+        self.dpr = dpr;
+        if dpr > crate::profile::DPI_UNIT {
+            self.edge_aa = true;
+            self.set_gradient_bits(16);
+        }
+    }
+
+    /// Effective device pixel ratio in fixed point.
+    pub fn dpr(&self) -> i64 {
+        self.dpr
     }
 
     /// Apply the root `renderQuality` opt-in signals. Capture ignores every
@@ -323,6 +345,7 @@ impl Canvas {
             edge_aa: false,
             gradient_bits: 10,
             suppress_text: false,
+            dpr: crate::profile::DEFAULT_DPR,
             capture: false,
             capture_unsupported: None,
             commands: Vec::new(),

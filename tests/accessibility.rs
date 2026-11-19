@@ -284,6 +284,8 @@ fn cli_writes_byte_identical_a11y_json() {
             .arg(&ir_path)
             .args(["320", "240"])
             .arg(&ppm)
+            .arg("--quality")
+            .arg("compat")
             .arg("--a11y")
             .arg(json)
             .output()
@@ -375,6 +377,7 @@ fn v0_1_golden_digests_are_unchanged_by_pipeline() {
             .arg(ir)
             .args([w, h])
             .arg(out)
+            .args(["--quality", "compat"])
             .args(extra)
             .output()
             .unwrap();

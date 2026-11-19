@@ -675,7 +675,10 @@ fn natural_w(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
     let m = node_metrics(n);
     match n.kind {
         Kind::Text => text_width(&node_text(n, state), scale, m),
-        Kind::Button => text_width(&node_text(n, state), scale, m).saturating_add(24),
+        Kind::Button => {
+            let text_scale = font_scale_from_px(&n.props).unwrap_or(scale);
+            text_width(&node_text(n, state), text_scale, m).saturating_add(24)
+        }
         Kind::Input => 120,
         Kind::Image => 64,
         Kind::Spacer => 8,
@@ -729,9 +732,52 @@ fn natural_h(n: &Node, bp: Breakpoint, state: &StateView) -> i64 {
             .font_px
             .map(font_height_from_px)
             .unwrap_or_else(|| font::GLYPH_H.saturating_mul(scale)),
-        Kind::Button => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
+        Kind::Button => n
+            .props
+            .font_px
+            .map(font_height_from_px)
+            .unwrap_or_else(|| font::GLYPH_H.saturating_mul(scale).saturating_add(20)),
         Kind::Input => font::GLYPH_H.saturating_mul(scale).saturating_add(20),
         Kind::Image => 64,
+        Kind::Grid => {
+            // A Grid packs children into rows, so its natural height is the
+            // sum of the tallest cell in each row plus gutters. Summing every
+            // child as one vertical stack (the generic container_extent path)
+            // overstates the natural height by about the column count and
+            // poisons proportional distribution in an enclosing Column.
+            let cols = if bp == Breakpoint::Compact {
+                n.props
+                    .compact_columns
+                    .unwrap_or(1)
+                    .clamp(1, MAX_GRID_COLUMNS as i64)
+            } else {
+                n.props.columns.unwrap_or(2).max(1)
+            }
+            .max(1);
+            let visible_kids: Vec<&Node> =
+                n.children.iter().filter(|c| visible(c, state)).collect();
+            if visible_kids.is_empty() {
+                return 0;
+            }
+            let gutter = n.props.gap.max(0);
+            // Mirror place_grid's spanned packing: a cell wider than the
+            // remaining columns gets its own row, so 19 keys with a double
+            // wide zero occupy six rows, not five.
+            let mut row_h: Vec<i64> = Vec::new();
+            let mut cursor = 0i64;
+            for c in &visible_kids {
+                let span = c.props.column_span.unwrap_or(1).clamp(1, cols);
+                if row_h.is_empty() || cursor + span > cols {
+                    row_h.push(0);
+                    cursor = 0;
+                }
+                let r = row_h.len() - 1;
+                row_h[r] = row_h[r].max(natural_h(c, bp, state));
+                cursor += span;
+            }
+            let body: i64 = row_h.iter().sum();
+            body.saturating_add(gutter.saturating_mul((row_h.len() as i64).saturating_sub(1)))
+        }
         Kind::Spacer => 8,
         Kind::Divider => 1,
         Kind::Icon => 16,
@@ -1293,11 +1339,17 @@ fn place(
         AnimValue::scalar(n.props.opacity.unwrap_or(UNIT)),
     ];
     let (interp, entry_p) = anim_interpolate(n, anim, elapsed_ms, target_props);
-    // The entry box grows only on the first layout; a later prop change keeps
-    // the full target rect and animates the prop values in place.
-    let rect = match entry_p {
-        Some(p) => entry_transform(target_rect, p),
-        None => target_rect,
+    // An entry curve may grow a decorative surface, but interactive controls
+    // keep their full layout rect from the first frame. A zero-sized Button
+    // loses hit testing, text spans and accessibility bounds while a colour
+    // block still paints, which made product buttons look textless.
+    let rect = if crate::is_interactive(n.kind) {
+        target_rect
+    } else {
+        match entry_p {
+            Some(p) => entry_transform(target_rect, p),
+            None => target_rect,
+        }
     };
     let radius = interp[ANIMATED_RADIUS]
         .as_scalar()
@@ -1529,7 +1581,11 @@ fn place(
         icon_name,
         icon_shape,
         text_color,
-        text_scale: scale,
+        text_scale: if n.kind == Kind::Button {
+            font_scale_from_px(&n.props).unwrap_or(scale)
+        } else {
+            scale
+        },
         text_align,
         font_metrics: node_metrics(n),
         max_lines: if n.kind == Kind::Text {
@@ -1855,9 +1911,71 @@ fn place_children(
     // the box the column keeps natural heights and grows past it, and the
     // surface/window clip trims the overflow so children never overprint a
     // neighbour. A horizontal row still shares width purely proportionally.
+    // Flex children opt into a share of the leftover main-axis space. A
+    // child with `flex: N` is sized to its weighted share of what the fixed
+    // children leave behind, so a bottom pane reaches the end of the stack on
+    // every viewport. Children without a weight keep their natural size, and
+    // a stack with no weighted child keeps the historical proportional fill.
+    let flex_weights: Vec<i64> = kids
+        .iter()
+        .map(|c| c.props.flex.unwrap_or(0).max(0))
+        .collect();
+    let has_flex = flex_weights.iter().any(|&w| w > 0);
     let total: i128 = sizes.iter().map(|&s| s as i128).sum();
     let natural_h_floor: Vec<i64> = sizes.clone();
-    if vertical {
+    if vertical && has_flex {
+        // Fixed children keep their natural (or explicitly pinned) height; the
+        // weighted children split what remains, in whole pixels.
+        let mut fixed_total = 0i64;
+        let mut flex_total = 0i64;
+        let mut flex_natural_total = 0i64;
+        for (i, c) in kids.iter().enumerate() {
+            if flex_weights[i] == 0 || c.props.height.is_some() {
+                fixed_total += c.props.height.unwrap_or(sizes[i]);
+            } else {
+                flex_total += flex_weights[i];
+                flex_natural_total += sizes[i];
+            }
+        }
+        let leftover = (avail - fixed_total).max(0);
+        // Panes keep their natural height first; the weights decide only the
+        // surplus (leftover minus every natural height), so no pane is ever
+        // squeezed below its own content while the stack still ends exactly at
+        // the bottom. When even the natural heights do not fit (an absurdly
+        // short window), shrink each pane proportionally to its natural size.
+        let surplus = leftover - flex_natural_total;
+        let mut assigned = 0i64;
+        for (i, c) in kids.iter().enumerate() {
+            if flex_weights[i] == 0 || c.props.height.is_some() {
+                continue;
+            }
+            let share = if flex_total > 0 {
+                if surplus >= 0 {
+                    sizes[i]
+                        + ((surplus as i128 * flex_weights[i] as i128) / flex_total as i128) as i64
+                } else if flex_natural_total > 0 {
+                    ((leftover as i128 * sizes[i] as i128) / flex_natural_total as i128) as i64
+                } else {
+                    sizes[i]
+                }
+            } else {
+                sizes[i]
+            };
+            sizes[i] = share;
+            assigned = assigned.saturating_add(share);
+        }
+        // The rounding remainder goes to the earliest weighted child.
+        let mut rem = (leftover - assigned).max(0);
+        for (i, c) in kids.iter().enumerate() {
+            if rem == 0 {
+                break;
+            }
+            if flex_weights[i] > 0 && c.props.height.is_none() {
+                sizes[i] += 1;
+                rem -= 1;
+            }
+        }
+    } else if vertical {
         if avail > 0 && count > 0 && total > 0 {
             let mut assigned = 0i64;
             for (s, floor) in sizes.iter_mut().zip(&natural_h_floor) {
@@ -2086,7 +2204,9 @@ fn place_grid(
     } else {
         authored
     };
-    let gutter = fluid.map_or(0, |g| g.gutter);
+    // Authored grids use the audited spacing token carried by `gap`; fluid grids
+    // keep the breakpoint-derived gutter so responsive layouts stay unchanged.
+    let gutter = fluid.map_or_else(|| n.props.gap.max(0), |g| g.gutter);
     let content = match fluid {
         Some(g) => inset(base, g.margin),
         None => base,
@@ -2117,6 +2237,28 @@ fn place_grid(
         for &(r, i, _, _) in &cells {
             heights[r] = heights[r].max(natural_h(kids[i], bp, state));
         }
+        // The span path is a separate packing strategy, so fillHeight must be
+        // applied here as well; otherwise the standard calculator's 0 key
+        // silently disables the opt-in expansion.
+        if n.props.fill_height && rcount > 0 {
+            let natural_total: i128 = heights.iter().map(|&h| h as i128).sum();
+            // The row pitch includes gutters between rows, so subtract them
+            // before distributing the surplus. Otherwise every fillHeight grid
+            // with a spanned cell overflows its box by (rows-1)*gutter.
+            let gutters = gutter as i128 * (rcount as i128 - 1);
+            let surplus = content.h as i128 - natural_total - gutters;
+            if surplus > 0 {
+                let rows_i = rcount as i128;
+                let each = surplus / rows_i;
+                let mut rem = surplus % rows_i;
+                for h in heights.iter_mut() {
+                    *h = (*h as i128 + each + if rem > 0 { 1 } else { 0 }) as i64;
+                    if rem > 0 {
+                        rem -= 1;
+                    }
+                }
+            }
+        }
         let mut y = content.y;
         for r in 0..rcount {
             let h = heights[r];
@@ -2134,6 +2276,9 @@ fn place_grid(
                     w += width_of(p);
                 }
                 let c = kids[i];
+                // A Grid cell fills its slot unless the author pins a size.
+                // Without this, a Button with no explicit height collapses to
+                // 0x0 while its press/spans still resolve to the slot.
                 let cw = c.props.width.unwrap_or(w).min(w).max(0);
                 let ch = c.props.height.unwrap_or(h).min(h).max(0);
                 let child_rect = Rect {
@@ -2160,7 +2305,7 @@ fn place_grid(
                     cache.as_deref_mut(),
                 );
             }
-            y += h;
+            y += h + gutter;
         }
         return;
     }
@@ -2193,6 +2338,9 @@ fn place_grid(
 
     let mut y = content.y;
     for row in 0..rows as usize {
+        if row > 0 {
+            y += gutter;
+        }
         // Content-driven: every row keeps its natural height even past the
         // grid box; the enclosing surface clip trims the overflow. Clamping a
         // row to the leftover height squeezes its fixed-height cells (badge,
@@ -2209,6 +2357,9 @@ fn place_grid(
             }
             let c = kids[idx];
             let w = col_w + if (col as i64) < col_rem { 1 } else { 0 };
+            // A Grid cell fills its slot unless the author pins a size.
+            // Without this, a Button with no explicit height collapses to
+            // 0x0 while its press/spans still resolve to the slot.
             let cw = c.props.width.unwrap_or(w).min(w).max(0);
             let ch = c.props.height.unwrap_or(h).min(h).max(0);
             let child_rect = Rect {
