@@ -27,6 +27,12 @@ pub enum Curve {
     Medium,
     Large,
     Color,
+    /// Flutter `motion.dart:28` (`Durations.short1`, 50ms) with the standard
+    /// easing at `motion.dart:192` (`M3Ease.transform`, 0.2/0/0/1).
+    M3Short1,
+    /// Flutter `motion.dart:60` (`Durations.medium1`, 250ms) with the same
+    /// standard easing. Both are opt-in and leave every legacy curve pinned.
+    M3Medium1,
 }
 
 impl Curve {
@@ -41,6 +47,8 @@ impl Curve {
             "medium" => Curve::Medium,
             "large" => Curve::Large,
             "color" => Curve::Color,
+            "m3-short1" => Curve::M3Short1,
+            "m3-medium1" => Curve::M3Medium1,
             _ => return None,
         })
     }
@@ -56,6 +64,8 @@ impl Curve {
             Curve::Medium => "medium",
             Curve::Large => "large",
             Curve::Color => "color",
+            Curve::M3Short1 => "m3-short1",
+            Curve::M3Medium1 => "m3-medium1",
         }
     }
 }
@@ -144,6 +154,8 @@ pub fn default_duration_ms(curve: Curve) -> i64 {
         Curve::Medium => MOTION_MEDIUM_MS,
         Curve::Large => MOTION_LARGE_MS,
         Curve::Color => MOTION_COLOR_MS,
+        Curve::M3Short1 => M3_SHORT1_MS,
+        Curve::M3Medium1 => M3_MEDIUM1_MS,
     }
 }
 
@@ -153,6 +165,10 @@ pub const MOTION_FAST_MS: i64 = 120;
 pub const MOTION_MEDIUM_MS: i64 = 220;
 pub const MOTION_LARGE_MS: i64 = 280;
 pub const MOTION_COLOR_MS: i64 = 180;
+/// Flutter `packages/flutter/lib/src/material/motion.dart:28` (50ms) and
+/// `:60` (250ms), framework 3.50.0 / `ab2912035e`.
+pub const M3_SHORT1_MS: i64 = 50;
+pub const M3_MEDIUM1_MS: i64 = 250;
 
 /// The measured settle time of the spring solver: the first elapsed time at
 /// which `progress(Curve::Spring, ..)` returns `ONE`.
@@ -456,7 +472,18 @@ pub fn progress(curve: Curve, elapsed_ms: i64) -> i64 {
         Curve::Medium => cubic_bezier(elapsed_ms, MOTION_MEDIUM_MS, 340, 1560, 640, 1000),
         Curve::Large => cubic_bezier(elapsed_ms, MOTION_LARGE_MS, 220, 1000, 360, 1000),
         Curve::Color => ease_over(elapsed_ms, MOTION_COLOR_MS),
+        Curve::M3Short1 => m3_standard(elapsed_ms, M3_SHORT1_MS),
+        Curve::M3Medium1 => m3_standard(elapsed_ms, M3_MEDIUM1_MS),
     }
+}
+
+/// Material 3 standard easing: `Cubic(0.2, 0, 0, 1)` from Flutter
+/// `packages/flutter/lib/src/material/motion.dart:192` (framework 3.50.0,
+/// `ab2912035e`). Inputs are fixed-point thousandths; the x axis is solved
+/// by the same 11-step integer bisection as the existing curves, so output is
+/// deterministic and floating-point free.
+fn m3_standard(elapsed_ms: i64, duration_ms: i64) -> i64 {
+    cubic_bezier(elapsed_ms, duration_ms, 200, 0, 0, 1000)
 }
 
 /// Ease-out cubic over an explicit duration, sharing the exact integer form of

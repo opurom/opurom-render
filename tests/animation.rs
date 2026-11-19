@@ -430,6 +430,7 @@ fn cli_output(ir_path: &PathBuf, ppm: &PathBuf, args: &[&str]) -> std::process::
         .arg(ir_path)
         .args(["320", "240"])
         .arg(ppm)
+        .args(["--quality", "compat"])
         .args(args)
         .output()
         .unwrap()
