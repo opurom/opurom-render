@@ -2,11 +2,17 @@
 //! the data-only accessibility tree (pre-order roles, labels, bounds, hidden).
 
 use opurom_render::{
-    a11y_json, a11y_tree, digest_hex, layout, parse_ir, Contrast, Ir, LaidOut, Renderer, Rgba,
-    Role, StateValue, StateView,
+    a11y_json, a11y_tree, digest_hex, layout, parse_ir, Contrast, Ir, LaidOut, Rgba, Role,
+    StateValue, StateView,
 };
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 fn ir_of(text: &str) -> Ir {
     parse_ir(text).expect("fixture IR must parse")
@@ -17,7 +23,7 @@ fn node<'a>(laid: &'a [LaidOut], id: u32) -> &'a LaidOut {
 }
 
 fn digest_of(ir: &Ir, state: &StateView) -> String {
-    digest_hex(&Renderer::new(320, 240).pixels(ir, state))
+    digest_hex(&compat_renderer(320, 240).pixels(ir, state))
 }
 
 const SCALE_IR: &str = r##"{
@@ -388,19 +394,25 @@ fn v0_1_golden_digests_are_unchanged_by_pipeline() {
         );
         String::from_utf8_lossy(&output.stdout).to_string()
     };
-    assert!(
-        run("320", "240", &dir.join("capability-golden-320.ppm"), &[])
-            .contains("digest=8d45f412996a99c6")
-    );
-    assert!(
-        run("800", "600", &dir.join("capability-golden-800.ppm"), &[])
-            .contains("digest=318beb1dd337bc4e")
-    );
+    assert!(run(
+        "320",
+        "240",
+        &dir.join("capability-golden-320.ppm"),
+        &["--quality", "compat"]
+    )
+    .contains("digest=8d45f412996a99c6"));
+    assert!(run(
+        "800",
+        "600",
+        &dir.join("capability-golden-800.ppm"),
+        &["--quality", "compat"]
+    )
+    .contains("digest=318beb1dd337bc4e"));
     assert!(run(
         "800",
         "600",
         &dir.join("capability-golden-7.ppm"),
-        &["--state", "count=7"]
+        &["--state", "count=7", "--quality", "compat"]
     )
     .contains("digest=40073cb95c912d80"));
 }

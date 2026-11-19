@@ -2,10 +2,16 @@
 //! default-palette fallback. All assertions are integer-only and deterministic.
 
 use opurom_render::{
-    digest_hex, layout, parse_ir, Contrast, Palette, Renderer, Rgba, StateView, ThemeTokens, Tone,
-    ERROR, INFO, SUCCESS, WARNING,
+    digest_hex, layout, parse_ir, Contrast, Palette, Rgba, StateView, ThemeTokens, Tone, ERROR,
+    INFO, SUCCESS, WARNING,
 };
 use serde_json::json;
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 const W: u32 = 160;
 const H: u32 = 96;
@@ -34,7 +40,7 @@ fn ir_with_tokens(tokens: serde_json::Value) -> String {
 
 fn render(ir: &str) -> Vec<u8> {
     let ir = parse_ir(ir).unwrap();
-    Renderer::new(W, H).pixels(&ir, &StateView::from_ir(&ir))
+    compat_renderer(W, H).pixels(&ir, &StateView::from_ir(&ir))
 }
 
 fn pixel(pixels: &[u8], x: i64, y: i64) -> [u8; 4] {
@@ -180,16 +186,16 @@ fn three_canonical_goldens_unchanged_by_new_tokens() {
     let ir = parse_ir(GOLDEN_IR).unwrap();
     let mut state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(320, 240).pixels(&ir, &state)),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "318beb1dd337bc4e"
     );
     state.set("count", opurom_render::StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "40073cb95c912d80"
     );
 }

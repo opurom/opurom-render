@@ -6,7 +6,9 @@
 //! modes, local overrides and the legacy golden path without invoking a
 //! runtime interpreter.
 
-use opurom_render::{digest_hex, layout, parse_ir, Renderer, Rgba, StateView, ThemeTokens};
+use opurom_render::{
+    digest_hex, layout, parse_ir, QualityProfile, Renderer, Rgba, StateView, ThemeTokens,
+};
 use serde_json::json;
 use std::fs;
 
@@ -104,7 +106,9 @@ fn local_override_changes_the_rendered_frame_deterministically() {
     let digest = |text: &str| {
         let ir = parse_ir(text).unwrap();
         let state = StateView::from_ir(&ir);
-        digest_hex(&Renderer::new(160, 96).render(&ir, &state).pixels)
+        let mut renderer = Renderer::new(160, 96);
+        renderer.set_quality(QualityProfile::Compat);
+        digest_hex(&renderer.render(&ir, &state).pixels)
     };
     assert_ne!(digest(&plain), digest(&overridden));
     assert_eq!(digest(&overridden), digest(&overridden));
@@ -144,12 +148,11 @@ fn counter_goldens_remain_byte_identical() {
     let text = fs::read_to_string(COUNTER_PATH).unwrap();
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
-    assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
-        "8d45f412996a99c6"
-    );
-    assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
-        "318beb1dd337bc4e"
-    );
+    let render = |w, h| {
+        let mut renderer = Renderer::new(w, h);
+        renderer.set_quality(QualityProfile::Compat);
+        digest_hex(&renderer.render(&ir, &state).pixels)
+    };
+    assert_eq!(render(320, 240), "8d45f412996a99c6");
+    assert_eq!(render(800, 600), "318beb1dd337bc4e");
 }

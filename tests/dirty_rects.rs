@@ -1,12 +1,18 @@
 use opurom_render::{parse_ir, Renderer, StateValue, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const WHEN_IR: &str = include_str!("fixtures/when.opuir.json");
 
 #[test]
 fn identical_state_changes_emit_identical_ordered_dirty_lists() {
     let ir = parse_ir(WHEN_IR).unwrap();
     let mut state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(320, 240);
+    let mut renderer = compat_renderer(320, 240);
     renderer.render(&ir, &state);
     state.set("dark", StateValue::Bool(true));
     let first = renderer.render(&ir, &state);

@@ -2,6 +2,12 @@
 
 use opurom_render::{digest_hex, parse_ir, NodeState, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const W: u32 = 160;
 const H: u32 = 96;
 const START_MS: i64 = 400;
@@ -65,7 +71,7 @@ fn three_frame_transitions_are_pinned_and_mid_differs_from_both_ends() {
         ),
     ] {
         let mut render_ir = parse_ir(&ir(from, true)).unwrap();
-        let mut renderer = Renderer::new(W, H);
+        let mut renderer = compat_renderer(W, H);
         let base = frame(&mut renderer, &render_ir, START_MS);
         assert_eq!(base, start, "{from} start pin");
         render_ir.tree.children[0].props.state = NodeState::parse(to).unwrap();
@@ -79,7 +85,7 @@ fn three_frame_transitions_are_pinned_and_mid_differs_from_both_ends() {
         assert_ne!(middle, first, "{from}->{to} mid equals start");
         assert_ne!(middle, settled, "{from}->{to} mid equals end");
 
-        let mut again = Renderer::new(W, H);
+        let mut again = compat_renderer(W, H);
         let mut repeat_ir = parse_ir(&ir(from, true)).unwrap();
         assert_eq!(frame(&mut again, &repeat_ir, START_MS), start);
         repeat_ir.tree.children[0].props.state = NodeState::parse(to).unwrap();
@@ -92,7 +98,7 @@ fn three_frame_transitions_are_pinned_and_mid_differs_from_both_ends() {
 #[test]
 fn sixty_and_one_twenty_hz_gradients_agree_at_shared_timestamps() {
     let mut coarse_ir = parse_ir(&ir("default", true)).unwrap();
-    let mut coarse = Renderer::new(W, H);
+    let mut coarse = compat_renderer(W, H);
     let base = frame(&mut coarse, &coarse_ir, START_MS);
     coarse_ir.tree.children[0].props.state = NodeState::Loading;
     let coarse_frames = [
@@ -102,7 +108,7 @@ fn sixty_and_one_twenty_hz_gradients_agree_at_shared_timestamps() {
     ];
 
     let mut fine_ir = parse_ir(&ir("default", true)).unwrap();
-    let mut fine = Renderer::new(W, H);
+    let mut fine = compat_renderer(W, H);
     assert_eq!(frame(&mut fine, &fine_ir, START_MS), base);
     fine_ir.tree.children[0].props.state = NodeState::Loading;
     let at_400 = frame(&mut fine, &fine_ir, START_MS);
@@ -123,7 +129,7 @@ fn sixty_and_one_twenty_hz_gradients_agree_at_shared_timestamps() {
 #[test]
 fn mid_flight_state_change_continues_from_current_blend() {
     let mut render_ir = parse_ir(&ir("default", true)).unwrap();
-    let mut renderer = Renderer::new(W, H);
+    let mut renderer = compat_renderer(W, H);
     frame(&mut renderer, &render_ir, START_MS);
 
     render_ir.tree.children[0].props.state = NodeState::Loading;
@@ -143,7 +149,7 @@ fn mid_flight_state_change_continues_from_current_blend() {
 #[test]
 fn no_animate_keeps_state_paint_discrete() {
     let mut render_ir = parse_ir(&ir("default", false)).unwrap();
-    let mut renderer = Renderer::new(W, H);
+    let mut renderer = compat_renderer(W, H);
     let base = frame(&mut renderer, &render_ir, START_MS);
     assert_eq!(base, "609464e4b1333421");
     render_ir.tree.children[0].props.state = NodeState::Loading;
@@ -157,7 +163,7 @@ fn no_animate_keeps_state_paint_discrete() {
 #[test]
 fn focus_ring_geometry_is_instant_during_a_state_transition() {
     let mut render_ir = parse_ir(&ir("focus", true)).unwrap();
-    let mut renderer = Renderer::new(W, H);
+    let mut renderer = compat_renderer(W, H);
     let focus = frame(&mut renderer, &render_ir, START_MS);
 
     // The outer ring is driven by the resolved state, not the blended paint.

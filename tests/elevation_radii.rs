@@ -7,6 +7,12 @@
 
 use opurom_render::{digest_hex, parse_ir, Command, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 fn ir(radius: i64, corners: &str) -> String {
     let corner = if corners.is_empty() {
         String::new()
@@ -27,13 +33,13 @@ fn ir(radius: i64, corners: &str) -> String {
 fn pixels(ir_text: &str) -> Vec<u8> {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    Renderer::new(160, 140).render_at(&ir, &state, 0).pixels
+    compat_renderer(160, 140).render_at(&ir, &state, 0).pixels
 }
 
 fn command(ir_text: &str) -> Command {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    Renderer::new(160, 140)
+    compat_renderer(160, 140)
         .display_list(&ir, &state)
         .commands
         .into_iter()
@@ -52,7 +58,7 @@ fn uniform_radius_omits_radii_and_keeps_scalar_bytes() {
         }
         _ => unreachable!(),
     }
-    let json = Renderer::new(160, 140)
+    let json = compat_renderer(160, 140)
         .display_list(
             &parse_ir(&scalar).unwrap(),
             &StateView::from_ir(&parse_ir(&scalar).unwrap()),
@@ -77,7 +83,7 @@ fn per_corner_radii_are_carried_in_gpu_wire_order() {
     }
     let txt = ir(0, c);
     let parsed = parse_ir(&txt).unwrap();
-    let json = Renderer::new(160, 140)
+    let json = compat_renderer(160, 140)
         .display_list(&parsed, &StateView::from_ir(&parsed))
         .to_json()
         .unwrap();

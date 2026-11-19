@@ -33,9 +33,9 @@
 
 use opurom_render::{
     a11y_json_at, apply_policy, choose_quality, digest_hex, disable_motion, is_interactive,
-    parse_ir, svg_at, Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityTier,
-    RenderConfig, RenderPolicy, RenderProfile, Renderer, StateValue, StateView, Transition,
-    TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
+    parse_ir, svg_at, Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityProfile,
+    QualityTier, RenderConfig, RenderPolicy, RenderProfile, Renderer, StateValue, StateView,
+    Transition, TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
 };
 use std::{env, fs, process};
 
@@ -337,8 +337,6 @@ fn run() -> Result<(), String> {
     // flags override one field each. Compat is entered only by name and keeps
     // the historical golden bytes.
     let mut policy = RenderPolicy::product();
-    // `true` when any explicit quality/compat flag was supplied. This gates
-    // the extra report line so the default stdout stays digest then dirty.
     // Opt-in measured-frame budget: inject explicit samples (the CLI has no
     // live render loop) and apply the resulting tier caps to the render config.
     let mut auto_rate: Option<FrameRate> = None;
@@ -475,7 +473,7 @@ fn run() -> Result<(), String> {
                 i += 1;
             }
             "--no-motion" => {
-                policy.motion = opurom_render::MotionSpec::disabled();
+                policy.motion = opurom_render::CliMotionSpec::disabled();
                 i += 1;
             }
             "--low-power" => {
@@ -636,6 +634,11 @@ fn run() -> Result<(), String> {
         tier_line = Some(auto_degrade_tier_line(rate, &frame_ms, n));
     }
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
+    let quality = match policy.profile {
+        RenderProfile::Compat => QualityProfile::Compat,
+        RenderProfile::Product => QualityProfile::Product,
+    };
+    renderer.set_quality(quality);
     renderer.set_edge_aa(policy.edge_aa);
     renderer.set_dpr(policy.dpr).map_err(|e| e.to_string())?;
     renderer.set_suppress_text(policy.system_font);

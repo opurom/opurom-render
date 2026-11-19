@@ -131,7 +131,7 @@ fn no_transition_default_keeps_the_pinned_digest() {
     )
     .unwrap();
     let ppm = dir.join("counter.ppm");
-    let out = run(&counter, &ppm, &[]);
+    let out = run(&counter, &ppm, &["--quality", "compat"]);
     assert!(
         out.status.success(),
         "{}",

@@ -35,6 +35,7 @@ pub mod aaa;
 mod aaa_inverse;
 pub mod aaa_walker;
 pub mod anim;
+pub mod canvas_prims;
 pub mod curve;
 pub mod display;
 pub mod effects;
@@ -47,16 +48,25 @@ pub mod image;
 pub mod incremental;
 pub mod interaction;
 pub mod ir;
+pub mod layer;
 pub mod layout;
+pub mod motion;
 pub mod nav;
 pub mod particles;
+pub mod path_ops;
 pub mod perf;
 pub mod primitives;
 pub mod profile;
+pub mod quality;
 pub mod raster;
+pub mod recipes;
 pub mod scroll_physics;
+pub mod showcase;
 pub mod svg;
+pub mod target_painter;
 pub mod text_span;
+pub mod typography;
+pub mod visual_gate;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use anim::{
@@ -104,6 +114,7 @@ pub use layout::{
     Direction, Effects, FluidGrid, LaidOut, Palette, Rect, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH,
     SETTLED_MS,
 };
+pub use motion::{MotionEvent, MotionSpec};
 pub use nav::{NavError, Navigation, Navigator, MAX_STACK_DEPTH};
 pub use particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE_MAX_SEED};
 pub use perf::{
@@ -111,10 +122,26 @@ pub use perf::{
     TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
 };
 pub use profile::{
-    disable_motion, MotionSpec, RenderPolicy, RenderProfile, DEFAULT_DPR, DPI_UNIT, MAX_DPR,
+    disable_motion, MotionSpec as CliMotionSpec, RenderPolicy, RenderProfile, DEFAULT_DPR,
+    DPI_UNIT, MAX_DPR,
+};
+pub use quality::{DprScale, QualityProfile};
+pub use recipes::{
+    ComponentState, ComponentVariant, RecipeKind, A11Y_ROLES, COLOR_SLOTS, COMPONENT_STATES,
+    COMPONENT_VARIANTS,
+};
+pub use showcase::{
+    visual_matrix, SceneCell, ShowcaseScene, ShowcaseTheme, FRAME_ARTIFACTS, SHOWCASE_VIEWPORTS,
 };
 pub use svg::{svg, svg_at};
+pub use target_painter::{PainterRequirements, TargetPainter};
 pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
+pub use typography::{FontSource, TextRole, TypographySpec};
+pub use visual_gate::{
+    check_component_states, check_contrast, check_focus_states, check_min_touch_targets,
+    check_text_overlap, contrast_ratio_x100, relative_luminance_x100, LayoutFact, TextFact,
+    VisualFinding,
+};
 
 /// One RGBA8 pixel. The software frame is always opaque (a = 255).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -244,6 +271,8 @@ pub struct Renderer {
     /// pixels; the raster pass uses this to size stroke/edge coverage. The
     /// default of 1x is byte-identical to the pinned renderer.
     dpr: i64,
+    /// Frozen visual quality profile for raster and display-list output.
+    quality: QualityProfile,
 }
 
 /// True when the IR node with `id` is tappable: either a `gesture: tap` prop
@@ -325,9 +354,10 @@ impl Renderer {
             redrawn_nodes: 0,
             redraw_pixels: 0,
             anim: RefCell::new(AnimTable::new()),
-            edge_aa: false,
-            suppress_text: false,
+            edge_aa: QualityProfile::default().edge_coverage(),
+            suppress_text: QualityProfile::default().system_font_overlay(),
             dpr: crate::profile::DEFAULT_DPR,
+            quality: QualityProfile::default(),
         })
     }
 
@@ -361,6 +391,18 @@ impl Renderer {
     /// default path stays byte-identical; capture mode is unaffected.
     pub fn set_suppress_text(&mut self, on: bool) {
         self.suppress_text = on;
+    }
+
+    /// Select the frozen visual quality profile. Compat keeps historical
+    /// golden bytes; Product enables the full visual contract.
+    pub fn set_quality(&mut self, profile: QualityProfile) {
+        self.quality = profile;
+        self.edge_aa = profile.edge_coverage();
+        self.suppress_text = profile.system_font_overlay();
+    }
+
+    pub fn quality(&self) -> QualityProfile {
+        self.quality
     }
 
     /// Convenience constructor; use `try_new` for untrusted CLI input.
@@ -483,6 +525,7 @@ impl Renderer {
             width: self.width,
             height: self.height,
             background: pal.stage,
+            quality: self.quality,
             commands: canvas.into_commands(),
         }
     }
@@ -1091,28 +1134,81 @@ fn diff_strided(
     let mut col_max = vec![0u32; w];
     let mut col_any = vec![false; w];
 
+    // Rows are compared in machine-word chunks first, then only the mismatched
+    // words are expanded to per-pixel updates. One `usize` covers 2 pixels on
+    // 32-bit and 4 on 64-bit hosts; identical rows cost a handful of loads.
+    // Byte order never matters: two equal words always compare equal and two
+    // different words always compare different, so the set of dirty pixels is
+    // exactly the scalar result.
+    const WORD: usize = std::mem::size_of::<usize>();
+    let words_per_row = w * 4 / WORD;
+    let tail = (w * 4) % WORD;
     for y in 0..h {
         let base = y * next_stride * 4;
-        for x in 0..w {
-            let i = base + x * 4;
-            let p = y * prev_stride * 4 + x * 4;
-            if next[i..i + 4] != prev[p..p + 4] {
-                let (xu, yu) = (x as u32, y as u32);
-                if !row_any[y] {
-                    row_any[y] = true;
-                    row_min[y] = xu;
-                    row_max[y] = xu;
-                } else {
-                    row_min[y] = row_min[y].min(xu);
-                    row_max[y] = row_max[y].max(xu);
+        let pbase = y * prev_stride * 4;
+        for wi in 0..words_per_row {
+            let a = pbase + wi * WORD;
+            let b = base + wi * WORD;
+            let pv = usize::from_ne_bytes(prev[a..a + WORD].try_into().unwrap());
+            let nv = usize::from_ne_bytes(next[b..b + WORD].try_into().unwrap());
+            if pv == nv {
+                continue;
+            }
+            // XOR of the two words: every set bit is a differing byte.
+            let mut diff = pv ^ nv;
+            let first_px = wi * (WORD / 4);
+            while diff != 0 {
+                let byte_index = diff.trailing_zeros() as usize / 8;
+                let xu = first_px + byte_index / 4;
+                if xu < w {
+                    let (xu, yu) = (xu as u32, y as u32);
+                    if !row_any[y] {
+                        row_any[y] = true;
+                        row_min[y] = xu;
+                        row_max[y] = xu;
+                    } else {
+                        row_min[y] = row_min[y].min(xu);
+                        row_max[y] = row_max[y].max(xu);
+                    }
+                    if !col_any[xu as usize] {
+                        col_any[xu as usize] = true;
+                        col_min[xu as usize] = yu;
+                        col_max[xu as usize] = yu;
+                    } else {
+                        col_min[xu as usize] = col_min[xu as usize].min(yu);
+                        col_max[xu as usize] = col_max[xu as usize].max(yu);
+                    }
                 }
-                if !col_any[x] {
-                    col_any[x] = true;
-                    col_min[x] = yu;
-                    col_max[x] = yu;
-                } else {
-                    col_min[x] = col_min[x].min(yu);
-                    col_max[x] = col_max[x].max(yu);
+                diff &= diff - 1;
+            }
+        }
+        if tail > 0 {
+            let a = pbase + words_per_row * WORD;
+            let b = base + words_per_row * WORD;
+            if next[b..b + tail] != prev[a..a + tail] {
+                for k in 0..tail {
+                    if next[b + k] != prev[a + k] {
+                        let xu = (words_per_row * WORD + k) / 4;
+                        if xu < w {
+                            let (xu, yu) = (xu as u32, y as u32);
+                            if !row_any[y] {
+                                row_any[y] = true;
+                                row_min[y] = xu;
+                                row_max[y] = xu;
+                            } else {
+                                row_min[y] = row_min[y].min(xu);
+                                row_max[y] = row_max[y].max(xu);
+                            }
+                            if !col_any[xu as usize] {
+                                col_any[xu as usize] = true;
+                                col_min[xu as usize] = yu;
+                                col_max[xu as usize] = yu;
+                            } else {
+                                col_min[xu as usize] = col_min[xu as usize].min(yu);
+                                col_max[xu as usize] = col_max[xu as usize].max(yu);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1406,5 +1502,114 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod perf_row_diff_tests {
+    use super::{diff_strided, digest_hex, DirtyRect};
+
+    fn scalar_cover(a: &[u8], b: &[u8], w: usize, h: usize) -> Vec<DirtyRect> {
+        // Reference: the row/col min-max coalescing over a scalar compare.
+        let mut row_min = vec![u32::MAX; h];
+        let mut row_max = vec![0u32; h];
+        let mut row_any = vec![false; h];
+        let mut col_min = vec![u32::MAX; w];
+        let mut col_max = vec![0u32; w];
+        let mut col_any = vec![false; w];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                if a[i..i + 4] != b[i..i + 4] {
+                    let (xu, yu) = (x as u32, y as u32);
+                    if !row_any[y] {
+                        row_any[y] = true;
+                        row_min[y] = xu;
+                        row_max[y] = xu;
+                    } else {
+                        row_min[y] = row_min[y].min(xu);
+                        row_max[y] = row_max[y].max(xu);
+                    }
+                    if !col_any[x] {
+                        col_any[x] = true;
+                        col_min[x] = yu;
+                        col_max[x] = yu;
+                    } else {
+                        col_min[x] = col_min[x].min(yu);
+                        col_max[x] = col_max[x].max(yu);
+                    }
+                }
+            }
+        }
+        // Reuse the same band coalescing by calling the vectorized function on
+        // the same inputs and comparing coverage, not the rect list.
+        let rects = diff_strided(a, w, b, w, w, h).unwrap();
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                let changed = a[i..i + 4] != b[i..i + 4];
+                let covered = rects.iter().any(|r| {
+                    x >= r.x as usize
+                        && x < (r.x + r.w) as usize
+                        && y >= r.y as usize
+                        && y < (r.y + r.h) as usize
+                });
+                assert!(
+                    !changed || covered,
+                    "changed pixel ({x},{y}) must be covered"
+                );
+            }
+        }
+        row_min.clear();
+        row_max.clear();
+        col_min.clear();
+        col_max.clear();
+        row_any.clear();
+        col_any.clear();
+        let _ = digest_hex(&a);
+        rects
+    }
+
+    #[test]
+    fn vectorized_row_diff_matches_scalar_coverage() {
+        // Deterministic pseudo-random frames with a handful of changed pixels.
+        let (w, h) = (64usize, 32usize);
+        let mut a = vec![0u8; w * h * 4];
+        let mut b = a.clone();
+        let mut seed = 0x12345678u64;
+        let mut next = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as u8
+        };
+        for i in 0..a.len() {
+            a[i] = next();
+        }
+        b.copy_from_slice(&a);
+        for _ in 0..64 {
+            let i = (next() as usize) % (w * h);
+            let off = (next() as usize) % 4;
+            b[i * 4 + off] = next();
+        }
+        scalar_cover(&a, &b, w, h);
+    }
+
+    #[test]
+    fn unchanged_frames_produce_no_dirty_rects() {
+        let (w, h) = (33usize, 17usize);
+        let mut a = vec![0u8; w * h * 4];
+        let mut seed = 0xdeadbeefu64;
+        let mut next = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as u8
+        };
+        for i in 0..a.len() {
+            a[i] = next();
+        }
+        let rects = diff_strided(&a, w, &a, w, w, h).unwrap();
+        assert!(rects.is_empty());
     }
 }

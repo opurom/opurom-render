@@ -5,6 +5,12 @@ use opurom_render::{digest_hex, parse_ir, Directionality, Renderer, StateView};
 use serde_json::json;
 use std::{fs, path::PathBuf, process::Command};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 fn ir_with(value: Option<serde_json::Value>) -> String {
     let mut doc = json!({
         "ir": "0.1.0", "app": "Rtl", "state": [],
@@ -68,11 +74,11 @@ fn absent_directionality_keeps_all_pinned_goldens() {
     assert_eq!(ir.directionality, Directionality::Ltr);
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 

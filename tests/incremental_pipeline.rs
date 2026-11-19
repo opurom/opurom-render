@@ -8,6 +8,12 @@ use opurom_render::{
 };
 use std::collections::BTreeSet;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const MANY: &str = include_str!("fixture_many_leaves.json");
 const SLIVER: &str = include_str!("fixture_sliver.json");
 
@@ -51,17 +57,11 @@ fn golden_digests_are_byte_identical_with_incremental_pipeline_present() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     // The real render digest path is unchanged by the additive fields.
-    let a = opurom_render::Renderer::new(320, 240)
-        .render(&ir, &state)
-        .pixels;
-    let b = opurom_render::Renderer::new(320, 240)
-        .render(&ir, &state)
-        .pixels;
+    let a = compat_renderer(320, 240).render(&ir, &state).pixels;
+    let b = compat_renderer(320, 240).render(&ir, &state).pixels;
     assert_eq!(format!("{:016x}", digest(&a)), "8d45f412996a99c6");
     assert_eq!(a, b);
-    let c = opurom_render::Renderer::new(800, 600)
-        .render(&ir, &state)
-        .pixels;
+    let c = compat_renderer(800, 600).render(&ir, &state).pixels;
     assert_eq!(format!("{:016x}", digest(&c)), "318beb1dd337bc4e");
 }
 

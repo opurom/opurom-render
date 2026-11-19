@@ -8,6 +8,12 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const BODY: &str = r##"{"ir":"0.1.0","app":"Particles","state":[],"tree":{"id":0,"kind":"Column","props":{"padding":4},"children":[{"id":1,"kind":"Container","props":{"width":48,"height":32,"color":"#223344","radius":4{EXTRA}},"children":[],"events":{}}],"events":{}},"theme":{"mode":"dark","accent":"#097FEB","radius":4}}"##;
 
 fn ir_with_extra(extra: &str) -> String {
@@ -23,14 +29,14 @@ fn ir_with(particles: Option<&str>) -> String {
 
 fn render(ir_text: &str) -> Vec<u8> {
     let ir = parse_ir(ir_text).unwrap();
-    Renderer::new(64, 48).pixels(&ir, &StateView::from_ir(&ir))
+    compat_renderer(64, 48).pixels(&ir, &StateView::from_ir(&ir))
 }
 
 fn commands_json(ir_text: &str) -> Value {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
     serde_json::from_str(
-        &Renderer::new(64, 48)
+        &compat_renderer(64, 48)
             .display_list(&ir, &state)
             .to_json()
             .unwrap(),
@@ -53,15 +59,15 @@ fn particle_frames_and_commands_are_byte_identical_across_renders() {
     let ir_text = ir_with(Some(DEFAULT_PARTICLES));
     let ir = parse_ir(&ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    let first = Renderer::new(64, 48).pixels(&ir, &state);
-    let second = Renderer::new(64, 48).pixels(&ir, &state);
+    let first = compat_renderer(64, 48).pixels(&ir, &state);
+    let second = compat_renderer(64, 48).pixels(&ir, &state);
     assert_eq!(first, second, "identical IR must render identical bytes");
 
-    let first_json = Renderer::new(64, 48)
+    let first_json = compat_renderer(64, 48)
         .display_list(&ir, &state)
         .to_json()
         .unwrap();
-    let second_json = Renderer::new(64, 48)
+    let second_json = compat_renderer(64, 48)
         .display_list(&ir, &state)
         .to_json()
         .unwrap();
@@ -196,17 +202,17 @@ fn golden_counter_digests_are_unchanged_by_the_particles_layer() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
     let mut count_7 = state.clone();
     count_7.set("count", StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &count_7).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &count_7).pixels),
         "40073cb95c912d80"
     );
 
@@ -219,6 +225,7 @@ fn golden_counter_digests_are_unchanged_by_the_particles_layer() {
         .arg(&ppm)
         .args(["--quality", "compat"])
         .args(["--state", "count=7"])
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(

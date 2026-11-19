@@ -3,8 +3,14 @@
 //! a cached miss instead of a render error.
 
 use opurom_render::image::{self, ImageFit};
-use opurom_render::{parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, parse_ir, StateView};
 use std::sync::Mutex;
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 static LOCK: Mutex<()> = Mutex::new(());
 
@@ -72,7 +78,7 @@ fn malformed_inlined_png_is_a_cached_miss_not_an_error() {
     let ir = parse_ir(&ir_with(bad)).unwrap();
     let state = StateView::from_ir(&ir);
     // Rendering still succeeds with the deterministic placeholder tile.
-    let px = Renderer::new(160, 120).pixels(&ir, &state);
+    let px = compat_renderer(160, 120).pixels(&ir, &state);
     assert_eq!(px.len(), 160 * 120 * 4);
 }
 
@@ -84,4 +90,30 @@ fn data_uri_key_does_not_collide_with_a_relative_path() {
     assert!(image::cached(&uri).is_some());
     // A filesystem path is resolved separately and must not reuse the URI hit.
     assert!(image::cached("assets/does-not-exist.png").is_none());
+}
+
+/// Flutter 3.50.0 / Impeller `Color::Blend(kSrcOver)` premultiplies the source
+/// before compositing (engine 371f772, impeller/geometry/color.cc:165-168).
+/// This PNG stores a straight-alpha red border; a translucent edge blended
+/// without premultiply would stay too bright (grey fringe). The pinned digest
+/// proves the RGB is reduced by the effective alpha; the opaque case is
+/// byte-identical to the historical path and covered by existing goldens.
+#[test]
+fn translucent_png_edges_blend_with_premultiplied_rgb() {
+    const SEMI_RED: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAGUlEQVR4nGP4z8DQgA8zQBn/ceChpQAnBgCttHGdPwALZAAAAABJRU5ErkJggg==";
+    let ir = format!(
+        r##"{{"ir":"0.1.0","app":"PM","state":[],"theme":{{"mode":"light","accent":"#097FEB","radius":0}},
+        "tree":{{"id":0,"kind":"Image","props":{{"src":"{SEMI_RED}","width":16,"height":16,"fit":"fill"}},"children":[],"events":{{}}}}}}"##
+    );
+    let ir = parse_ir(&ir).unwrap();
+    let state = StateView::from_ir(&ir);
+    let px = compat_renderer(16, 16).render(&ir, &state).pixels;
+    // Top-left pixel is a straight-alpha red edge over a light background.
+    // Without premultiply the edge would stay 255; measured blend is 216.
+    assert!(
+        px[0] < 240 && px[0] > 180,
+        "premultiplied edge red {}",
+        px[0]
+    );
+    assert_eq!(digest_hex(&px), "a6148a52a24ae1c3");
 }

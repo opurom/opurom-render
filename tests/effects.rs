@@ -62,11 +62,17 @@ fn ir_of(effects: Option<&str>) -> String {
     }
 }
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 fn render_pixels(ir_text: &str, count: i64, width: u32, height: u32) -> Vec<u8> {
     let ir = parse_ir(ir_text).expect("effect fixture IR must parse");
     let mut state = StateView::from_ir(&ir);
     state.set("n", StateValue::Int(count));
-    Renderer::new(width, height).pixels(&ir, &state)
+    compat_renderer(width, height).pixels(&ir, &state)
 }
 
 fn effect_pixels(effects: &str) -> Vec<u8> {
@@ -320,8 +326,8 @@ fn effect_bounds_are_clipped_to_viewport_and_parent_clip() {
     let fallback_ir = parse_ir(&clip_ir(None)).unwrap();
     let effect_ir = parse_ir(&clip_ir(Some(effects))).unwrap();
     let state = StateView::from_ir(&fallback_ir);
-    let fallback = Renderer::new(80, 60).pixels(&fallback_ir, &state);
-    let changed = Renderer::new(80, 60).pixels(&effect_ir, &state);
+    let fallback = compat_renderer(80, 60).pixels(&fallback_ir, &state);
+    let changed = compat_renderer(80, 60).pixels(&effect_ir, &state);
     let row_bytes = 80usize * 4;
     assert_ne!(
         &fallback[..row_bytes * 20],
@@ -341,17 +347,17 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
     let mut count_7 = state.clone();
     count_7.set("count", StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &count_7).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &count_7).pixels),
         "40073cb95c912d80"
     );
     assert!(!ir.has_visual_effects());
@@ -363,8 +369,12 @@ fn no_effect_goldens_and_commands_are_byte_identical() {
         .arg("../opurom-examples/golden/counter.opuir.json")
         .args(["320", "240"])
         .arg(&ppm)
-        .args(["--quality", "compat"])
-        .args(["--commands", commands.to_str().unwrap()])
+        .args([
+            "--commands",
+            commands.to_str().unwrap(),
+            "--quality",
+            "compat",
+        ])
         .output()
         .unwrap();
     assert!(
@@ -432,6 +442,7 @@ fn cli_commands_accepts_visual_effects() {
         .arg(&ppm)
         .args(["--quality", "compat"])
         .args(["--commands", commands.to_str().unwrap()])
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(

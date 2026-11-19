@@ -7,6 +7,12 @@ use opurom_render::{
 };
 use std::process::Command;
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 fn ir_of(text: &str) -> Ir {
     parse_ir(text).expect("fixture IR must parse")
 }
@@ -229,7 +235,7 @@ fn when_hides_the_node_and_its_subtree() {
 fn when_changes_the_digest_and_keeps_dirty_rects_bounded() {
     let ir = ir_of(WHEN_IR);
     let mut state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(200, 120);
+    let mut renderer = compat_renderer(200, 120);
     let before = renderer.render(&ir, &state);
     state.set("dark", StateValue::Bool(true));
     let after = renderer.render(&ir, &state);
@@ -317,7 +323,7 @@ fn every_new_kind_renders_without_error() {
     let state = StateView::from_ir(&ir);
     let laid = layout(&ir, &state, 400, 800);
     assert_eq!(laid.len(), 26);
-    let pixels = Renderer::new(400, 800).pixels(&ir, &state);
+    let pixels = compat_renderer(400, 800).pixels(&ir, &state);
     assert_eq!(pixels.len(), 400 * 800 * 4);
 }
 
@@ -421,7 +427,7 @@ fn animation_tick_sequences_are_deterministic() {
     let state = StateView::from_ir(&ir);
     let sequence = |count: usize| -> Vec<String> {
         let mut animator = Animator::new();
-        let mut renderer = Renderer::new(200, 120);
+        let mut renderer = compat_renderer(200, 120);
         let mut out = Vec::new();
         for _ in 0..count {
             animator.tick(16);
@@ -674,7 +680,7 @@ fn the_hand_written_when_fixture_renders_two_different_digests() {
         .expect("the when fixture must be readable");
     let ir = ir_of(&text);
     let mut state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(320, 240);
+    let mut renderer = compat_renderer(320, 240);
 
     let hidden = renderer.render(&ir, &state);
     state.set("dark", StateValue::Bool(true));
@@ -743,12 +749,12 @@ fn v0_1_golden_digest_is_unchanged_by_r2_features() {
         .expect("the golden IR fixture must be readable");
     let ir = ir_of(&counter);
     let state = StateView::from_ir(&ir);
-    let mut renderer = Renderer::new(800, 600);
+    let mut renderer = compat_renderer(800, 600);
     assert_eq!(
         digest_hex(&renderer.render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
-    let mut renderer = Renderer::new(320, 240);
+    let mut renderer = compat_renderer(320, 240);
     assert_eq!(
         digest_hex(&renderer.render(&ir, &state).pixels),
         "8d45f412996a99c6"

@@ -3,11 +3,16 @@
 //! integer-only and deterministic. Default path keeps all pinned goldens.
 
 use opurom_render::{
-    animate_progress, default_duration_ms, digest_hex, layout, parse_ir, Curve, Renderer,
-    StateView, ONE,
+    animate_progress, default_duration_ms, digest_hex, layout, parse_ir, Curve, StateView, ONE,
 };
 use serde_json::json;
 use std::fs;
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
 
@@ -122,11 +127,11 @@ fn default_path_keeps_the_two_counter_goldens() {
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 }

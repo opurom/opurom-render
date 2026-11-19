@@ -3,7 +3,13 @@
 //! so short rects make adjacent siblings overprint. Wider tiers use height as
 //! the cross axis and stay untouched.
 
-use opurom_render::{digest_hex, parse_ir, Kind, Renderer, StateView};
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
+use opurom_render::{digest_hex, parse_ir, Kind, StateView};
 
 const IR: &str = r##"{
   "ir": "0.1.0", "app": "CompactText",
@@ -59,12 +65,12 @@ fn a_wide_row_is_unchanged_by_the_compact_floor() {
     let compact = {
         let ir = parse_ir(IR).unwrap();
         let state = StateView::from_ir(&ir);
-        digest_hex(&Renderer::new(320, 200).pixels(&ir, &state))
+        digest_hex(&compat_renderer(320, 200).pixels(&ir, &state))
     };
     let wide = {
         let ir = parse_ir(IR).unwrap();
         let state = StateView::from_ir(&ir);
-        digest_hex(&Renderer::new(800, 200).pixels(&ir, &state))
+        digest_hex(&compat_renderer(800, 200).pixels(&ir, &state))
     };
     assert_ne!(compact, wide, "compact and wide render differently");
     for (_, _, h) in text_rects(800, 200) {
