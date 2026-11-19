@@ -105,7 +105,9 @@ fn local_override_changes_the_rendered_frame_deterministically() {
     let digest = |text: &str| {
         let ir = parse_ir(text).unwrap();
         let state = StateView::from_ir(&ir);
-        digest_hex(&Renderer::new(160, 96).render(&ir, &state).pixels)
+        let mut renderer = Renderer::new(160, 96);
+        renderer.set_quality(QualityProfile::Compat);
+        digest_hex(&renderer.render(&ir, &state).pixels)
     };
     assert_ne!(digest(&plain), digest(&overridden));
     assert_eq!(digest(&overridden), digest(&overridden));
