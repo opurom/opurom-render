@@ -6,12 +6,18 @@
 //! `digest=...` then `dirty=...` for every invocation, including the default.
 
 use opurom_render::{
-    apply_policy, digest_hex, parse_ir, FrameBudget, FrameRate, RenderConfig, Renderer, StateView,
-    WINDOW_FRAMES,
+    apply_policy, digest_hex, parse_ir, FrameBudget, FrameRate, QualityProfile, RenderConfig,
+    StateView, WINDOW_FRAMES,
 };
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fs, path::Path, path::PathBuf};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 /// An IR whose particle field and effect passes visibly shrink per tier.
 const PERF_IR: &str = r##"{
@@ -84,9 +90,17 @@ fn no_flags_keep_stdout_shape_and_the_three_canonical_goldens() {
     let golden = Path::new(GOLDEN_IR);
     let ppm = dir.join(format!("auto-degrade-golden-{}.ppm", std::process::id()));
     for (wh, state, expected) in [
-        (["320", "240"], &[] as &[&str], "8d45f412996a99c6"),
-        (["800", "600"], &[], "318beb1dd337bc4e"),
-        (["800", "600"], &["--state", "count=7"], "40073cb95c912d80"),
+        (
+            ["320", "240"],
+            &["--quality", "compat"] as &[&str],
+            "8d45f412996a99c6",
+        ),
+        (["800", "600"], &["--quality", "compat"], "318beb1dd337bc4e"),
+        (
+            ["800", "600"],
+            &["--state", "count=7", "--quality", "compat"],
+            "40073cb95c912d80",
+        ),
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_opurom-render"))
             .arg(golden)
@@ -290,7 +304,9 @@ fn the_cli_applies_exactly_the_library_tier_caps() {
         }
         let mut config = RenderConfig::new(doc.clone());
         apply_policy(budget.tier(), &mut config);
-        digest_hex(&Renderer::new(120, 90).render(config.ir(), &state).pixels)
+        let mut renderer = compat_renderer(120, 90);
+        renderer.set_quality(QualityProfile::Compat);
+        digest_hex(&renderer.render(config.ir(), &state).pixels)
     };
     for (args, frames, ms, rate) in [
         (

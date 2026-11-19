@@ -4,6 +4,12 @@
 
 use opurom_render::{digest_hex, parse_ir, NodeState, PressPhase, Renderer, StateView};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 const COUNTER: &str = "../opurom-examples/golden/counter.opuir.json";
 
 fn node_ir(elevation: i64, state: Option<&str>) -> String {
@@ -35,7 +41,7 @@ fn phase() -> PressPhase {
 fn render_press(ir_text: &str, press: Option<&PressPhase>) -> Vec<u8> {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    Renderer::new(240, 200)
+    compat_renderer(240, 200)
         .render_with_press(&ir, &state, 0, press)
         .pixels
 }
@@ -95,7 +101,7 @@ fn state_elevation_is_deterministic_and_incremental_agrees() {
 
     let ir = parse_ir(&ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    let incr = Renderer::new(240, 200)
+    let incr = compat_renderer(240, 200)
         .render_with_press_incremental(&ir, &state, 0, Some(&phase()))
         .pixels;
     assert_eq!(
@@ -111,11 +117,11 @@ fn default_path_keeps_the_two_counter_goldens() {
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 }

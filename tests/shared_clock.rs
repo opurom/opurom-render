@@ -3,9 +3,15 @@
 //! Default paths keep every pinned golden byte-for-byte.
 
 use opurom_render::{
-    digest_hex, layout_animated_at, parse_ir, AnimSpec, AnimTable, Curve, Renderer, StateView, ONE,
+    digest_hex, layout_animated_at, parse_ir, AnimSpec, AnimTable, Curve, StateView, ONE,
 };
 use serde_json::json;
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 const COUNTER_PATH: &str = "../opurom-examples/golden/counter.opuir.json";
 const TICKS: [i64; 10] = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900];
@@ -140,11 +146,11 @@ fn default_path_keeps_all_pinned_goldens() {
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 }

@@ -1,0 +1,52 @@
+{
+  "schema": "opurom.render.skia_recheck/1",
+  "generated_at_utc": "2026-11-18",
+  "status": "blocked_on_source",
+  "flutter": {
+    "version": "3.50.0",
+    "framework_revision": "ab2912035e160d9cad6306df307576da6128ebdb",
+    "engine_revision": "371f77202a73e8dff57a8b3bff75bca55c090aee",
+    "skia_revision": "0e5d8d1be81b22f5529a41cf4810dd89b63527ba",
+    "skia_pin_source": "flutter-golden/DEPS:18,505",
+    "skia_checkout_present": false
+  },
+  "items": [
+    {
+      "id": "SKIA-RECHECK-JOIN",
+      "caveat_from": "reports/render-self-audit.json P2-STROKE-JOIN (8fe45be)",
+      "files_to_checkout": [
+        "third_party/skia/src/gpu/ganesh/ops/StrokeRectOp.cpp",
+        "third_party/skia/src/core/SkStroke.cpp",
+        "third_party/skia/src/core/SkPaint.cpp"
+      ],
+      "questions": [
+        "miter limit: confirm the exact strokeWidth / miter-length comparison at the pinned revision matches painting.dart:1142-1146 and src/canvas_prims.rs::MITER_LIMIT_RATIO",
+        "round join: confirm Skia's arc segmentation and coverage rule at subpixel angles; compare against src/canvas_prims.rs::JoinShape::Round deferred to the disc primitive",
+        "bevel fallback: confirm Skia's outer-corner geometry for acute turns matches src/canvas_prims.rs::bevel_corners"
+      ],
+      "acceptance": "add source-file:line comments for each confirmed rule and a pixel regression against the pinned Skia build; update src/canvas_prims.rs only if a mismatch is found"
+    },
+    {
+      "id": "SKIA-RECHECK-COALESCE",
+      "caveat_from": "reports/render-self-audit.json PERF-002 (10a6fb3)",
+      "files_to_checkout": [
+        "third_party/skia/src/core/SkRecorder.cpp",
+        "third_party/skia/src/core/SkPicture.cpp",
+        "third_party/skia/src/core/SkDraw.cpp"
+      ],
+      "questions": [
+        "does Skia/Impeller record adjacent same-colour rect draws as distinct ops, and is the recorded order the only observable semantic at this revision",
+        "does coalescing abutting rects of identical paint change anti-aliased edge coverage on any backend",
+        "are there paint flags (blend modes, filters, path effects) under which the merge would no longer be pixel-equivalent"
+      ],
+      "acceptance": "cite exact file:line for the recorder/draw semantics; extend src/display.rs::coalesce_solids guards if needed; keep default opt-in off and goldens unchanged"
+    }
+  ],
+  "reproduce": [
+    "git -C ../flutter-golden submodule update --init third_party/skia",
+    "git -C ../flutter-golden/third_party/skia rev-parse HEAD",
+    "compare every question above against the pinned revision",
+    "update reports/render-self-audit.json caveats to pass when both items are closed"
+  ],
+  "no_pixel_path_changed": true
+}

@@ -6,7 +6,7 @@
 //! path (auto-degrade still appends its own `tier=` line when requested), and
 //! the three canonical golden digests are byte-identical under compat.
 
-use opurom_render::{FontMetrics, MotionSpec, RenderPolicy, RenderProfile};
+use opurom_render::{FontMetrics, RenderMotionSpec, RenderPolicy, RenderProfile};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -202,7 +202,7 @@ fn policy_data_defaults_match_the_cli_contract() {
     assert!(p.edge_aa);
     assert_eq!(p.font_metrics, FontMetrics::Proportional);
     assert!(p.motion.enabled);
-    assert_eq!(p.motion, MotionSpec::product());
+    assert_eq!(p.motion, RenderMotionSpec::product());
     assert!(!p.low_power);
     let c = RenderPolicy::compat();
     assert_eq!(c.profile, RenderProfile::Compat);

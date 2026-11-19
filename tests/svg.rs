@@ -3,10 +3,16 @@
 //! a11y roles, 32 primitives, and unchanged 0.1.0 golden digests).
 
 use opurom_render::{
-    a11y::role_of, a11y_tree, digest_hex, layout, parse_ir, svg, svg_at, Control, Kind, Renderer,
-    Role, StateValue, StateView, SETTLED_MS,
+    a11y::role_of, a11y_tree, digest_hex, layout, parse_ir, svg, svg_at, Control, Kind, Role,
+    StateValue, StateView, SETTLED_MS,
 };
 use std::{fs, path::PathBuf, process::Command};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 // ------------------------------------------------------------- SVG fixture
 
@@ -157,6 +163,7 @@ fn cli_writes_byte_identical_svg_and_leaves_stdout_unchanged() {
             .args(["--quality", "compat"])
             .arg("--svg")
             .arg(out)
+            .args(["--quality", "compat"])
             .output()
             .unwrap();
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
@@ -353,7 +360,7 @@ fn prim_ir(kind: &str, extra: &str) -> String {
 fn digest_of_text(text: &str) -> String {
     let ir = parse_ir(text).unwrap();
     let state = StateView::from_ir(&ir);
-    digest_hex(&Renderer::new(200, 140).pixels(&ir, &state))
+    digest_hex(&compat_renderer(200, 140).pixels(&ir, &state))
 }
 
 /// kind -> (props exercising its documented prop schema).
@@ -564,13 +571,25 @@ fn v0_1_golden_digests_are_unchanged_by_pipeline() {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).to_string()
     };
-    assert!(run("320", "240", "capability-golden-320.ppm", &[]).contains("digest=8d45f412996a99c6"));
-    assert!(run("800", "600", "capability-golden-800.ppm", &[]).contains("digest=318beb1dd337bc4e"));
+    assert!(run(
+        "320",
+        "240",
+        "capability-golden-320.ppm",
+        &["--quality", "compat"]
+    )
+    .contains("digest=8d45f412996a99c6"));
+    assert!(run(
+        "800",
+        "600",
+        "capability-golden-800.ppm",
+        &["--quality", "compat"]
+    )
+    .contains("digest=318beb1dd337bc4e"));
     assert!(run(
         "800",
         "600",
         "capability-golden-7.ppm",
-        &["--state", "count=7"]
+        &["--state", "count=7", "--quality", "compat"]
     )
     .contains("digest=40073cb95c912d80"));
 }

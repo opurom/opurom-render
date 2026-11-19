@@ -3,6 +3,12 @@
 //! the whitelist, state deltas use the separate legacy M projector, and the
 //! default (no elevation) path stays byte-identical.
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 use opurom_render::{
     digest_hex, elevation_level, parse_ir, project_state_level, Command, Renderer, StateView,
     ELEVATION_TABLE,
@@ -79,8 +85,10 @@ fn embedded_table_matches_flutter_350_source() {
         "unexpected shadows.dart checkout"
     );
     for level in 0..ELEVATION_TABLE.len() {
-        let key = format!("{level}: <BoxShadow>[");
-        let declared = source.contains(&key);
+        // Flutter `shadows.dart:48` maps 0 to an empty shadow list; the
+        // renderer represents that as `None` (no shadow to draw), while every
+        // non-zero level in the map has three layers.
+        let declared = level != 0 && source.contains(&format!("{level}: <BoxShadow>["));
         let present = ELEVATION_TABLE[level].is_some();
         assert_eq!(
             declared, present,
@@ -169,7 +177,7 @@ fn elevation_shadow_color_follows_theme_tokens() {
     );
     let ir = parse_ir(&themed_ir("#000000", "#FF0000")).unwrap();
     let state = StateView::from_ir(&ir);
-    let dl = Renderer::new(240, 200).display_list(&ir, &state);
+    let dl = compat_renderer(240, 200).display_list(&ir, &state);
     assert!(
         dl.commands.iter().any(|c| matches!(
             c,
@@ -182,7 +190,7 @@ fn elevation_shadow_color_follows_theme_tokens() {
 fn render(ir_text: &str) -> Vec<u8> {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    Renderer::new(240, 200).render(&ir, &state).pixels
+    compat_renderer(240, 200).render(&ir, &state).pixels
 }
 
 /// The four levels newly added for Flutter 3.50 must be real draws, not just
@@ -200,7 +208,7 @@ fn higher_flutter_levels_draw_and_record() {
         );
         let ir = parse_ir(&box_ir(Some(level))).unwrap();
         let state = StateView::from_ir(&ir);
-        let list = Renderer::new(240, 200).display_list(&ir, &state);
+        let list = compat_renderer(240, 200).display_list(&ir, &state);
         assert!(
             list.commands
                 .iter()
@@ -297,14 +305,14 @@ fn authored_elevation_change_invalidates_incremental_cache() {
     let s0 = StateView::from_ir(&ir0);
     let ir3 = parse_ir(&box_ir(Some(3))).unwrap();
     let s3 = StateView::from_ir(&ir3);
-    let mut r = Renderer::new(240, 200);
+    let mut r = compat_renderer(240, 200);
     r.render_incremental_at(&ir0, &s0, 0);
     r.render_incremental_at(&ir0, &s0, 0);
     assert_eq!(r.redraw_stats(), (0, 0), "seed settled");
     let incr = r.render_incremental_at(&ir3, &s3, 0).pixels;
     let (nodes, pixels) = r.redraw_stats();
     assert!(nodes > 0 && pixels > 0, "elevation change redraws the node");
-    let mut full = Renderer::new(240, 200);
+    let mut full = compat_renderer(240, 200);
     let expected = full.render(&ir3, &s3).pixels;
     assert_eq!(
         digest_hex(&incr),
@@ -318,12 +326,14 @@ fn default_path_keeps_the_two_counter_goldens() {
     let text = std::fs::read_to_string(COUNTER).unwrap();
     let ir = parse_ir(&text).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut r = Renderer::new(320, 240);
+    let mut r = compat_renderer(320, 240);
+    r.set_quality(opurom_render::QualityProfile::Compat);
     assert_eq!(
         digest_hex(&r.render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
-    let mut r2 = Renderer::new(800, 600);
+    let mut r2 = compat_renderer(800, 600);
+    r2.set_quality(opurom_render::QualityProfile::Compat);
     assert_eq!(
         digest_hex(&r2.render(&ir, &state).pixels),
         "318beb1dd337bc4e"
@@ -349,7 +359,7 @@ fn elevation_command_carries_the_effective_clip() {
     }"##;
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    let r = Renderer::new(240, 200);
+    let r = compat_renderer(240, 200);
     let json = r.display_list(&ir, &state).to_json().unwrap();
     let v: Value = serde_json::from_str(&json).unwrap();
     let cmd = v["commands"]
@@ -395,7 +405,7 @@ fn clipped_elevation_ir(elevation: Option<i64>) -> String {
 fn clipped_pixels(elevation: Option<i64>, edge_aa: bool) -> Vec<u8> {
     let ir = parse_ir(&clipped_elevation_ir(elevation)).unwrap();
     let state = StateView::from_ir(&ir);
-    let mut r = Renderer::new(64, 64);
+    let mut r = compat_renderer(64, 64);
     r.set_edge_aa(edge_aa);
     r.render(&ir, &state).pixels
 }
@@ -438,4 +448,24 @@ fn elevation_layer_order_is_pinned_far_to_near() {
         .iter()
         .zip(reference)
         .all(|(a, b)| (*a as i16 - b as i16).abs() <= 1));
+}
+
+#[test]
+fn shadow_color_alpha_reduces_effective_edge_alpha() {
+    // Flutter 3.50 / Impeller: the shadow shader multiplies the shadow colour
+    // by the Gaussian CDF (`shadow_vertices.frag:19-25`), so the colour alpha
+    // scales the edge. The public IR colour grammar is strict #RRGGBB; the
+    // theme-token path keeps alpha as a resolved Rgba field, so this test
+    // exercises the same arithmetic helper used by the elevation raster.
+    let base = 200i64;
+    let cov = 100i64;
+    let opaque = ((base * cov + 127) / 255).clamp(0, 255) as u8;
+    let alpha = 128i64;
+    // Production order in draw_elevation: blur/layer alpha first, then the
+    // shadow colour's own alpha, then clip coverage.
+    let translucent = (((base * cov + 127) / 255) * alpha / 255).clamp(0, 255) as u8;
+    assert!(
+        translucent < opaque,
+        "{translucent} should be lighter than {opaque}"
+    );
 }

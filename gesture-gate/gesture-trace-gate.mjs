@@ -24,19 +24,24 @@ const SOURCES = [
 ];
 const TESTS = [
   'advanced_gesture_parity.rs',
+  'gesture_advanced_report.rs',
   'advanced_gesture_thresholds.rs',
   'bounce_scroll_physics.rs',
+  'gesture_bounce_report.rs',
   'drag_start_behavior.rs',
   'drag_start_parity.rs',
   'gesture_conflict_team.rs',
   'gesture_extreme_sequences.rs',
+  'host_conflict_projection.rs',
   'force_press_parity.rs',
   'gesture_focus_semantics.rs',
+  'gesture_semantics_report.rs',
   'gesture_hit_path.rs',
   'gesture_jank_tolerance.rs',
   'gesture_nested_report.rs',
   'gesture_perf_baseline.rs',
   'gesture_perf_report.rs',
+  'gesture_parallel_report.rs',
   'gesture_regression_parity.rs',
   'gesture_robustness.rs',
   'multi_pointer_fairness.rs',
@@ -52,14 +57,21 @@ const TESTS = [
   'recognizer_registration.rs',
   'hit_test_behavior.rs',
   'detector_combination.rs',
+  'long_press_move_update.rs',
   'multidrag_pointer_state.rs',
   'scrollable_config.rs',
   'dismissible_thresholds.rs',
+  'drag_target_parity.rs',
   'nested_scroll_coordinator.rs',
   'nested_scroll_coordination.rs',
   'parallel_pointer_arenas.rs',
   'pointer_resampling.rs',
   'rotation_callback.rs',
+  'elevation_radii.rs',
+  'text_baseline.rs',
+  'scroll_physics.rs',
+  'incremental_pipeline.rs',
+  'frame_boundary_hierarchy.rs',
   'scale_gesture.rs',
 ];
 const PATTERN = /([a-z_]+\.dart):(\d+)(?:-(\d+))?/g;
@@ -128,7 +140,11 @@ function evaluate(flutterDir) {
     const foundationPath = join(flutterDir, 'packages', 'flutter', 'lib', 'src', 'foundation', file);
     const renderingPath = join(flutterDir, 'packages', 'flutter', 'lib', 'src', 'rendering', file);
     const semanticsPath = join(flutterDir, 'packages', 'flutter', 'lib', 'src', 'semantics', file);
-    const candidates = [path, physicsPath, widgetsPath, foundationPath, semanticsPath, renderingPath];
+    const paintingPath = join(flutterDir, 'packages', 'flutter', 'lib', 'src', 'painting', file);
+    const engineUiPath = join(flutterDir, 'engine', 'src', 'flutter', 'lib', 'ui', file);
+    const candidates = file === 'object.dart'
+      ? [renderingPath]
+      : [path, physicsPath, widgetsPath, semanticsPath, renderingPath, paintingPath, engineUiPath];
     const found = candidates.find((candidate) => existsSync(candidate));
     if (!found) {
       filesMissing += 1;

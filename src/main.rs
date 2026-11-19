@@ -8,6 +8,8 @@
 //! historical golden pixels and is the only way to enter compat output.
 //!
 //! Flags: `[--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--no-edge-aa] [--font-metrics fixed|proportional] [--quality product|compat] [--legacy-golden] [--no-motion] [--low-power] [--system-font] [--dpr 1..4] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]`
+
+//! Incoming transition flags: //! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...]
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
@@ -33,9 +35,9 @@
 
 use opurom_render::{
     a11y_json_at, apply_policy, choose_quality, digest_hex, disable_motion, is_interactive,
-    parse_ir, svg_at, Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityTier,
-    RenderConfig, RenderPolicy, RenderProfile, Renderer, StateValue, StateView, Transition,
-    TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
+    parse_ir, svg_at, Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityProfile,
+    QualityTier, RenderConfig, RenderPolicy, RenderProfile, Renderer, StateValue, StateView,
+    Transition, TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
 };
 use std::{env, fs, process};
 
@@ -310,7 +312,10 @@ fn parse_value(typ: ValueType, raw: &str) -> Result<StateValue, String> {
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
-        return Err("usage: opurom-render <ir.json> <width> <height> <out.ppm> [--quality product|compat] [--legacy-golden] [--edge-aa] [--no-edge-aa] [--font-metrics fixed|proportional] [--no-motion] [--low-power] [--system-font] [--dpr 1..4] [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]".to_string());
+        return Err(
+            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--quality compat|product] [--incremental] [--edge-aa] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
+                .to_string(),
+        );
     }
     let width: u32 = args[1]
         .parse()
@@ -475,7 +480,7 @@ fn run() -> Result<(), String> {
                 i += 1;
             }
             "--no-motion" => {
-                policy.motion = opurom_render::MotionSpec::disabled();
+                policy.motion = opurom_render::RenderMotionSpec::disabled();
                 i += 1;
             }
             "--low-power" => {
@@ -636,6 +641,18 @@ fn run() -> Result<(), String> {
         tier_line = Some(auto_degrade_tier_line(rate, &frame_ms, n));
     }
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
+    // The frozen quality profile seeds the raster defaults; the resolved
+    // policy then replays every explicit flag so no override can be swallowed
+    // by the profile setter's broader edge/text defaults.
+    let quality = QualityProfile::resolve(
+        Some(match policy.profile {
+            opurom_render::RenderProfile::Product => opurom_render::QualityProfile::Product,
+            opurom_render::RenderProfile::Compat => opurom_render::QualityProfile::Compat,
+        }),
+        policy.edge_aa,
+        false,
+    );
+    renderer.set_quality(quality);
     renderer.set_edge_aa(policy.edge_aa);
     renderer.set_dpr(policy.dpr).map_err(|e| e.to_string())?;
     renderer.set_suppress_text(policy.system_font);

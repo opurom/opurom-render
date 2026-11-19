@@ -3,7 +3,13 @@
 //! large node scales, an unknown name falls back to a visible neutral glyph,
 //! and the three pinned golden frames stay byte-identical.
 
-use opurom_render::{digest_hex, icons, layout, parse_ir, Renderer, StateView};
+use opurom_render::{digest_hex, icons, layout, parse_ir, StateView};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 /// A single `Icon(name: ...)` node inside a padding-free column.
 fn icon_ir(name: &str, size: i64) -> String {
@@ -54,8 +60,8 @@ fn every_icon_paints_its_glyph_deterministically() {
         let ir = parse_ir(&icon_ir(name, 64)).expect("parse icon IR");
         let state = StateView::from_ir(&ir);
         let rect = icon_rect(&ir, &state, w, h);
-        let first = Renderer::new(w, h).pixels(&ir, &state);
-        let second = Renderer::new(w, h).pixels(&ir, &state);
+        let first = compat_renderer(w, h).pixels(&ir, &state);
+        let second = compat_renderer(w, h).pixels(&ir, &state);
         assert_eq!(first, second, "icon {name} must render deterministically");
         assert!(
             exact_white_in_rect(&first, rect, w as i64, h as i64) > 0,
@@ -72,13 +78,13 @@ fn icon_renders_at_small_and_large_node_scales() {
         let ir = parse_ir(&icon_ir("star", size)).expect("parse icon IR");
         let state = StateView::from_ir(&ir);
         let rect = icon_rect(&ir, &state, w, h);
-        let pixels = Renderer::new(w, h).pixels(&ir, &state);
+        let pixels = compat_renderer(w, h).pixels(&ir, &state);
         assert!(
             exact_white_in_rect(&pixels, rect, w as i64, h as i64) > 0,
             "star at {size} painted no glyph ink"
         );
         assert_eq!(
-            Renderer::new(w, h).pixels(&ir, &state),
+            compat_renderer(w, h).pixels(&ir, &state),
             pixels,
             "star at {size} must render deterministically"
         );
@@ -92,14 +98,14 @@ fn unknown_icon_name_renders_the_fallback_without_panicking() {
     let ir = parse_ir(&icon_ir("definitely_not_an_icon", 64)).expect("parse icon IR");
     let state = StateView::from_ir(&ir);
     let rect = icon_rect(&ir, &state, w, h);
-    let first = Renderer::new(w, h).pixels(&ir, &state);
+    let first = compat_renderer(w, h).pixels(&ir, &state);
     // The fallback glyph must still paint visible ink.
     assert!(
         exact_white_in_rect(&first, rect, w as i64, h as i64) > 0,
         "fallback icon painted nothing"
     );
     assert_eq!(
-        Renderer::new(w, h).pixels(&ir, &state),
+        compat_renderer(w, h).pixels(&ir, &state),
         first,
         "fallback icon must render deterministically"
     );
@@ -116,16 +122,16 @@ fn the_three_pinned_golden_frames_are_unchanged() {
     let mut state = StateView::from_ir(&ir);
     state.set("count", opurom_render::StateValue::Int(0));
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(320, 240).pixels(&ir, &state)),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "318beb1dd337bc4e"
     );
     state.set("count", opurom_render::StateValue::Int(7));
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).pixels(&ir, &state)),
+        digest_hex(&compat_renderer(800, 600).pixels(&ir, &state)),
         "40073cb95c912d80"
     );
 }
@@ -180,7 +186,7 @@ fn a_row_of_unwrapped_icons_keeps_intrinsic_size_and_draws_glyphs() {
         assert_eq!(icon.rect.w, 16, "icon must keep its intrinsic width");
         assert_eq!(icon.rect.h, 16, "icon must keep its intrinsic height");
     }
-    let pixels = Renderer::new(w, h).pixels(&ir, &state);
+    let pixels = compat_renderer(w, h).pixels(&ir, &state);
     for icon in &icons {
         let ink = exact_white_in_rect(&pixels, icon.rect, w as i64, h as i64);
         assert!(ink > 0, "icon at x={} drew no glyph ink", icon.rect.x);

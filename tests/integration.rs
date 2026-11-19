@@ -1,8 +1,13 @@
 use opurom_render::{
-    digest_hex, layout, parse_ir, Breakpoint, Direction, Ir, LaidOut, Renderer, Rgba, StateValue,
-    StateView,
+    digest_hex, layout, parse_ir, Breakpoint, Direction, Ir, LaidOut, Rgba, StateValue, StateView,
 };
 use std::{fs, process::Command};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 /// Golden IR 0.1.0 from opurom-examples/golden/counter.opuir.json (embedded so this crate is independent).
 const COUNTER_IR: &str = r##"{
@@ -97,14 +102,14 @@ fn all_kinds_honour_gap_padding_align_size_radius_color_and_dimensions() {
     assert_eq!((node(&laid, 5).rect.w, node(&laid, 5).rect.h), (32, 24));
     assert_eq!((node(&laid, 6).rect.w, node(&laid, 6).rect.h), (16, 12));
     assert_eq!((node(&laid, 8).rect.w, node(&laid, 8).rect.h), (5, 5));
-    let pixels = Renderer::new(1000, 800).pixels(&ir, &state);
+    let pixels = compat_renderer(1000, 800).pixels(&ir, &state);
     assert_eq!(pixels.len(), 1000 * 800 * 4);
 }
 
 #[test]
 fn golden_digest_is_stable() {
     let (ir, state) = fixture();
-    let mut renderer = Renderer::new(800, 600);
+    let mut renderer = compat_renderer(800, 600);
     let frame = renderer.render(&ir, &state);
     assert_eq!((frame.width, frame.height), (800, 600));
     assert_eq!(frame.pixels.len(), 800 * 600 * 4);
@@ -119,8 +124,8 @@ fn two_fresh_renderers_at_two_viewports_are_deterministic() {
     let mut digests = Vec::new();
     for (w, h) in [(400u32, 700u32), (1000u32, 700u32)] {
         let (ir, state) = fixture();
-        let mut a = Renderer::new(w, h);
-        let mut b = Renderer::new(w, h);
+        let mut a = compat_renderer(w, h);
+        let mut b = compat_renderer(w, h);
         let fa = a.render(&ir, &state);
         let fb = b.render(&ir, &state);
         assert_eq!(fa.pixels, fb.pixels, "fresh renderers disagree at {w}x{h}");
@@ -161,7 +166,7 @@ fn row_collapses_to_column_in_compact_width() {
 #[test]
 fn interpolation_renders_different_pixels_after_state_change() {
     let (ir, mut state) = fixture();
-    let mut renderer = Renderer::new(800, 600);
+    let mut renderer = compat_renderer(800, 600);
     let before = renderer.render(&ir, &state);
     assert_eq!(
         node(&renderer.compute_layout(&ir, &state), 1)
@@ -185,7 +190,7 @@ fn interpolation_renders_different_pixels_after_state_change() {
 #[test]
 fn unchanged_render_yields_zero_dirty_rects() {
     let (ir, state) = fixture();
-    let mut renderer = Renderer::new(800, 600);
+    let mut renderer = compat_renderer(800, 600);
     let first = renderer.render(&ir, &state);
     assert_eq!(first.dirty.len(), 1, "first frame covers the whole surface");
     let second = renderer.render(&ir, &state);
@@ -197,7 +202,7 @@ fn unchanged_render_yields_zero_dirty_rects() {
 #[test]
 fn changed_state_yields_bounded_covering_dirty_rects() {
     let (ir, mut state) = fixture();
-    let mut renderer = Renderer::new(800, 600);
+    let mut renderer = compat_renderer(800, 600);
     let before = renderer.render(&ir, &state);
     state.set("count", StateValue::Int(12345));
     let after = renderer.render(&ir, &state);
@@ -227,7 +232,7 @@ fn changed_state_yields_bounded_covering_dirty_rects() {
 #[test]
 fn theme_mode_and_accent_change_pixels() {
     let (ir, state) = fixture();
-    let renderer = Renderer::new(320, 240);
+    let renderer = compat_renderer(320, 240);
     let base = renderer.pixels(&ir, &state);
     let dark = parse_ir(&COUNTER_IR.replace("\"mode\": \"system\"", "\"mode\": \"dark\"")).unwrap();
     let accent = parse_ir(&COUNTER_IR.replace("#097FEB", "#E5464F")).unwrap();
@@ -292,7 +297,7 @@ fn cli_writes_ppm_and_prints_stable_digest() {
             .arg(&ir_path)
             .args(["800", "600"])
             .arg(dir.join(name))
-            .args(["--state", "count=7"])
+            .args(["--state", "count=7", "--quality", "compat"])
             .output()
             .unwrap()
     };
@@ -330,6 +335,7 @@ fn cli_writes_ppm_and_prints_stable_digest() {
         .args(["800", "600"])
         .arg(dir.join("cli-3.ppm"))
         .args(["--state", "count=9", "--state", "count=7"])
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert!(o3.status.success());
@@ -341,6 +347,7 @@ fn cli_writes_ppm_and_prints_stable_digest() {
     let bad = Command::new(exe)
         .arg(&bad_path)
         .args(["64", "48", dir.join("bad.ppm").to_str().unwrap()])
+        .args(["--quality", "compat"])
         .output()
         .unwrap();
     assert_eq!(bad.status.code(), Some(1));

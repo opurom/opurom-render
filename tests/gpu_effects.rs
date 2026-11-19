@@ -1,9 +1,15 @@
 //! GPU effect-command export: all five effect types, integer parameters, draw
 //! order, bounds, effect-free invariance and the committed proof fixture.
 
-use opurom_render::{digest_hex, parse_ir, DisplayList, Renderer, Rgba, StateView};
+use opurom_render::{digest_hex, parse_ir, DisplayList, Rgba, StateView};
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 const FIXTURE_IR: &str = include_str!("fixtures/effects.opuir.json");
 const BASE_COMMANDS: &[u8] = include_bytes!("fixtures/counter-commands.json");
@@ -146,7 +152,7 @@ fn effect_free_stream_is_byte_identical_to_r6_and_unchanged_by_an_empty_array() 
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        Renderer::new(320, 240)
+        compat_renderer(320, 240)
             .display_list(&ir, &state)
             .to_json()
             .unwrap()
@@ -256,6 +262,7 @@ fn empty_display_list_and_malformed_effect_commands_are_bounded() {
         width: 2,
         height: 1,
         background: Rgba::rgb(1, 2, 3),
+        quality: opurom_render::QualityProfile::Compat,
         commands: Vec::new(),
     };
     let json = empty.to_json().unwrap();
@@ -402,7 +409,7 @@ fn vertical_gradient_is_the_default_and_counter_commands_do_not_change() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        Renderer::new(320, 240)
+        compat_renderer(320, 240)
             .display_list(&ir, &state)
             .to_json()
             .unwrap()

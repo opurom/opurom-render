@@ -1,0 +1,143 @@
+{
+  "schema": "opurom.render.self_audit/1",
+  "generated_at_utc": "2026-11-18",
+  "flutter": {
+    "version": "3.50.0",
+    "framework": "ab2912035e160d9cad6306df307576da6128ebdb",
+    "engine": "371f77202a73e8dff57a8b3bff75bca55c090aee",
+    "skia_pin": "0e5d8d1be81b22f5529a41cf4810dd89b63527ba",
+    "skia_checkout_present": false
+  },
+  "scope": "recent render-dev kernels and parity gates (bf59321..b59bac2 plus GPU 1e3a299)",
+  "items": [
+    {
+      "id": "PERF-001",
+      "commit": "bf59321",
+      "title": "vectorized row diff",
+      "flutter_source": "packages/flutter/lib/src/rendering/object.dart:1263-1326,3344-3368",
+      "flutter_version": "3.50.0 ab2912035e16",
+      "tests": "src/lib.rs::perf_row_diff_tests 2 tests",
+      "golden": "accessibility 11/11, render_quality 3/3, incremental 3/3",
+      "status": "pass"
+    },
+    {
+      "id": "PERF-002",
+      "commit": "10a6fb3",
+      "title": "opt-in solid command coalescing",
+      "flutter_source": "engine/src/flutter/lib/ui/painting.dart Picture/Recorder draw order; packages/flutter/lib/src/rendering/object.dart:1263-1326",
+      "flutter_version": "3.50.0 ab2912035e16",
+      "tests": "src/display.rs::coalescing_tests 5 tests",
+      "golden": "default display-list byte-identical; 11/11+11/11+3/3",
+      "status": "pass-with-caveat",
+      "caveat": "wire spelling is Opurom-specific; no Skia source checkout for 1:1"
+    },
+    {
+      "id": "PERF-003",
+      "commit": "c09a18a",
+      "title": "static layer reuse architecture note",
+      "flutter_source": "rendering/layer.dart:351-372,374-389,409,444-478,860-912,1158-1168",
+      "flutter_version": "3.50.0 ab2912035e16",
+      "tests": "reports/static-layer-reuse-architecture.md parity gates (pre-wire)",
+      "golden": "zero drift; no frame-loop wiring",
+      "status": "pass"
+    },
+    {
+      "id": "PERF-004",
+      "commit": "890b5b6",
+      "title": "press release parity evidence",
+      "flutter_source": "packages/flutter/lib/src/material/ink_ripple.dart:43 (existing ripple radius kernel)",
+      "flutter_version": "3.50.0 ab2912035e16",
+      "tests": "tests/press_incremental.rs::press_release_clear_is_byte_identical_and_skips_full_raster",
+      "golden": "accessibility 11/11, render_quality 11/11, incremental 3/3",
+      "status": "pass"
+    },
+    {
+      "id": "P2-STROKE-JOIN",
+      "commit": "8fe45be",
+      "title": "stroke join miter/round/bevel",
+      "flutter_source": "engine/src/flutter/lib/ui/painting.dart:1136-1178",
+      "flutter_version": "3.50.0 371f77202a73e",
+      "tests": "src/canvas_prims.rs 5 join tests",
+      "golden": "zero drift (pure kernel)",
+      "status": "pass-with-caveat",
+      "caveat": "Skia exact pixel raster unavailable locally"
+    },
+    {
+      "id": "ROBUST-EXTREME",
+      "commit": "b3080cd",
+      "title": "extreme geometry fail-closed",
+      "flutter_source": "ui/painting.dart:5020-5038,5325-5335,2802-2858",
+      "flutter_version": "3.50.0 371f77202a73e",
+      "tests": "src/gradient.rs + src/path_ops.rs 5 extreme tests",
+      "golden": "zero drift",
+      "status": "pass"
+    },
+    {
+      "id": "ROBUST-MALFORMED",
+      "commit": "a1353d1",
+      "title": "malformed IR fail-closed",
+      "flutter_source": "IR 0.1.0 protocol, display.rs:155-170,390-396",
+      "flutter_version": "Opurom wire contract aligned to Flutter typed-error model",
+      "tests": "tests/malformed_ir.rs 4 tests",
+      "golden": "zero drift",
+      "status": "pass"
+    },
+    {
+      "id": "ROBUST-STRESS",
+      "commit": "e48243e",
+      "title": "display-list limits",
+      "flutter_source": "ui/painting.dart:2802-2858,5325-5335 (geometry contract); Opurom display.rs:12,356-370; lib.rs:205",
+      "flutter_version": "3.50.0 371f77202a73e",
+      "tests": "tests/display_list.rs 3 tests",
+      "golden": "zero drift",
+      "status": "pass"
+    },
+    {
+      "id": "TIMING-DETERMINISM",
+      "commit": "3f4ec91",
+      "title": "animation and press order stability",
+      "flutter_source": "animation/animation.dart:126-140,247-262; rendering/object.dart:1263-1326,3344-3368",
+      "flutter_version": "3.50.0 ab2912035e16",
+      "tests": "tests/timing_determinism.rs 3 tests",
+      "golden": "zero drift",
+      "status": "pass"
+    },
+    {
+      "id": "GPU-CMDSURFACE",
+      "commit": "1e3a299",
+      "title": "GPU command surface parity",
+      "flutter_source": "ui/painting.dart Picture/Recorder ordered display list",
+      "flutter_version": "3.50.0 371f77202a73e",
+      "tests": "opurom-gpu/tests/command_surface.rs 3 tests + 115 GPU suite",
+      "golden": "cross-repo display 11/11, software_effects 17/17",
+      "status": "pass"
+    },
+    {
+      "id": "ALPHA-ORDER",
+      "commit": "b59bac2",
+      "title": "src-over order and premultiply inputs",
+      "flutter_source": "impeller/geometry/color.cc:165-168; color.h:56-58,212-221",
+      "flutter_version": "3.50.0 371f77202a73e",
+      "tests": "src/gradient.rs::alpha_order_tests 4 tests",
+      "golden": "zero drift",
+      "status": "pass"
+    }
+  ],
+  "summary": {
+    "items": 11,
+    "pass": 9,
+    "pass_with_caveat": 2,
+    "fail": 0
+  },
+  "caveats": [
+    "Skia submodule unavailable locally; Skia-level exact pixel rules remain unverified for stroke joins and command coalescing"
+  ],
+  "gates": {
+    "render_tests": 726,
+    "render_fmt": "pass",
+    "golden_accessibility": "11/11",
+    "golden_render_quality": "11/11",
+    "golden_incremental": "3/3",
+    "gpu_tests": 115
+  }
+}

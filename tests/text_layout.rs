@@ -2,7 +2,13 @@
 //! into lines that stay inside its node, overflowing lines are clipped, short
 //! labels and the pinned golden frames are untouched.
 
-use opurom_render::{digest_hex, font, layout, parse_ir, Renderer, StateValue, StateView};
+use opurom_render::{digest_hex, font, layout, parse_ir, StateValue, StateView};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 const LONG_LABEL_IR: &str = r##"{
   "ir": "0.1.0", "app": "WrapProof",
@@ -82,7 +88,7 @@ fn text_scale(ir: &opurom_render::Ir, state: &StateView, w: u32, h: u32) -> i64 
 fn long_label_wraps_into_multiple_lines_inside_its_node() {
     let ir = parse_ir(LONG_LABEL_IR).expect("parse long label IR");
     let state = StateView::from_ir(&ir);
-    let renderer = Renderer::new(200, 160);
+    let renderer = compat_renderer(200, 160);
     let pixels = renderer.pixels(&ir, &state);
     let rect = text_rect(&ir, &state, 200, 160);
     let scale = text_scale(&ir, &state, 200, 160);
@@ -114,7 +120,7 @@ fn long_label_wraps_into_multiple_lines_inside_its_node() {
 fn overflowing_lines_are_clipped_to_the_node_rect() {
     let ir = parse_ir(TALL_TEXT_CLIP_IR).expect("parse clip IR");
     let state = StateView::from_ir(&ir);
-    let renderer = Renderer::new(200, 160);
+    let renderer = compat_renderer(200, 160);
     let pixels = renderer.pixels(&ir, &state);
     let rect = text_rect(&ir, &state, 200, 160);
 
@@ -139,7 +145,7 @@ fn overflowing_lines_are_clipped_to_the_node_rect() {
 fn short_label_is_unchanged() {
     let ir = parse_ir(SHORT_LABEL_IR).expect("parse short label IR");
     let state = StateView::from_ir(&ir);
-    let digest = digest_hex(&Renderer::new(200, 160).pixels(&ir, &state));
+    let digest = digest_hex(&compat_renderer(200, 160).pixels(&ir, &state));
     assert_eq!(
         digest, "408d6127abcb26d2",
         "a short label must keep its historical frame"
@@ -157,12 +163,12 @@ fn golden_digests_are_unchanged_by_wrapping() {
 
     let mut state = StateView::from_ir(&ir);
     state.set("count", StateValue::Int(0));
-    let d0 = digest_hex(&Renderer::new(320, 240).pixels(&ir, &state));
+    let d0 = digest_hex(&compat_renderer(320, 240).pixels(&ir, &state));
     assert_eq!(d0, "8d45f412996a99c6");
-    let d0_800 = digest_hex(&Renderer::new(800, 600).pixels(&ir, &state));
+    let d0_800 = digest_hex(&compat_renderer(800, 600).pixels(&ir, &state));
     assert_eq!(d0_800, "318beb1dd337bc4e");
 
     state.set("count", StateValue::Int(7));
-    let d7_800 = digest_hex(&Renderer::new(800, 600).pixels(&ir, &state));
+    let d7_800 = digest_hex(&compat_renderer(800, 600).pixels(&ir, &state));
     assert_eq!(d7_800, "40073cb95c912d80");
 }

@@ -8,8 +8,14 @@
 
 use opurom_render::{
     animate_progress, layout_animated_at, layout_at, lerp, lerp_rgba, parse_ir, AnimSpec,
-    AnimTable, AnimValue, Curve, Renderer, Rgba, StateView, ONE, SETTLED_MS,
+    AnimTable, AnimValue, Curve, Rgba, StateView, ONE, SETTLED_MS,
 };
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 /// A `Container` with an animated prop set. The root `Column` is inert so the
 /// animated node is always `laid[1]`.
@@ -49,8 +55,8 @@ fn laid_plain(ir: &opurom_render::Ir, tick: i64) -> Vec<opurom_render::LaidOut> 
 fn animate_none_and_absent_are_byte_identical() {
     let none = parse(r##""width": 60, "height": 40, "color": "#102030", "animate": "none""##);
     let absent = parse(r##""width": 60, "height": 40, "color": "#102030""##);
-    let a = Renderer::new(200, 120).render(&none, &StateView::from_ir(&none));
-    let b = Renderer::new(200, 120).render(&absent, &StateView::from_ir(&absent));
+    let a = compat_renderer(200, 120).render(&none, &StateView::from_ir(&none));
+    let b = compat_renderer(200, 120).render(&absent, &StateView::from_ir(&absent));
     assert_eq!(
         opurom_render::digest_hex(&a.pixels),
         opurom_render::digest_hex(&b.pixels)
@@ -70,8 +76,8 @@ fn settled_animation_is_byte_identical_to_non_animated() {
     );
     plain.tree.children[0].props.animate = Curve::None;
 
-    let frame_anim = Renderer::new(200, 120).render(&animated, &StateView::from_ir(&animated));
-    let frame_plain = Renderer::new(200, 120).render(&plain, &StateView::from_ir(&plain));
+    let frame_anim = compat_renderer(200, 120).render(&animated, &StateView::from_ir(&animated));
+    let frame_plain = compat_renderer(200, 120).render(&plain, &StateView::from_ir(&plain));
     assert_eq!(
         opurom_render::digest_hex(&frame_anim.pixels),
         opurom_render::digest_hex(&frame_plain.pixels)
@@ -105,7 +111,7 @@ fn layout_metrics_do_not_change_at_rest() {
 
 #[test]
 fn color_interpolates_between_targets_and_settles() {
-    let renderer = Renderer::new(200, 120);
+    let renderer = compat_renderer(200, 120);
     let mut ir = parse(
         r##""width": 60, "height": 40, "color": "#102030", "animate": "ease", "duration": 200"##,
     );
@@ -131,7 +137,7 @@ fn color_interpolates_between_targets_and_settles() {
 
 #[test]
 fn opacity_interpolates_between_targets_and_settles() {
-    let renderer = Renderer::new(200, 120);
+    let renderer = compat_renderer(200, 120);
     let mut ir = parse(
         r##""width": 60, "height": 40, "color": "#102030", "opacity": 0.5, "animate": "ease", "duration": 200"##,
     );
@@ -151,7 +157,7 @@ fn opacity_interpolates_between_targets_and_settles() {
 
 #[test]
 fn radius_and_shadow_interpolate_and_settle() {
-    let renderer = Renderer::new(200, 120);
+    let renderer = compat_renderer(200, 120);
     let mut ir = parse(
         r##""width": 60, "height": 40, "color": "#102030", "radius": 4, "shadow": 1, "animate": "spring", "duration": 200"##,
     );
@@ -178,7 +184,7 @@ fn radius_and_shadow_interpolate_and_settle() {
 fn padding_interpolation_moves_the_child_and_settles() {
     // A Container with padding and one child; animating the padding moves the
     // child's rect and settles on the declared value.
-    let renderer = Renderer::new(200, 120);
+    let renderer = compat_renderer(200, 120);
     let mut ir = parse_ir(
         r##"{
       "ir": "0.1.0", "app": "Pad", "state": [],
@@ -212,7 +218,7 @@ fn padding_interpolation_moves_the_child_and_settles() {
 
 #[test]
 fn duration_and_delay_ordering_holds_then_runs_then_settles() {
-    let renderer = Renderer::new(200, 120);
+    let renderer = compat_renderer(200, 120);
     let mut ir = parse(
         r##""width": 60, "height": 40, "color": "#102030", "opacity": 0.25, "animate": "ease", "duration": 100, "delay": 50"##,
     );
@@ -243,7 +249,7 @@ fn duration_and_delay_ordering_holds_then_runs_then_settles() {
 
 #[test]
 fn settled_frame_matches_non_animated_after_a_change() {
-    let mut renderer = Renderer::new(200, 120);
+    let mut renderer = compat_renderer(200, 120);
     let mut ir = parse(
         r##""width": 60, "height": 40, "color": "#102030", "radius": 8, "animate": "ease", "duration": 200"##,
     );
@@ -259,7 +265,7 @@ fn settled_frame_matches_non_animated_after_a_change() {
 
     let mut plain = ir.clone();
     plain.tree.children[0].props.animate = Curve::None;
-    let plain_frame = Renderer::new(200, 120).render(&plain, &StateView::from_ir(&plain));
+    let plain_frame = compat_renderer(200, 120).render(&plain, &StateView::from_ir(&plain));
 
     assert_eq!(
         opurom_render::digest_hex(&animated_frame.pixels),
@@ -274,8 +280,8 @@ fn same_ir_and_tick_is_byte_identical() {
     );
     let state = StateView::from_ir(&ir);
     for tick in [0i64, 30, 96, 200, 1000, SETTLED_MS] {
-        let a = Renderer::new(200, 120).pixels_at(&ir, &state, tick);
-        let b = Renderer::new(200, 120).pixels_at(&ir, &state, tick);
+        let a = compat_renderer(200, 120).pixels_at(&ir, &state, tick);
+        let b = compat_renderer(200, 120).pixels_at(&ir, &state, tick);
         assert_eq!(
             opurom_render::digest_hex(&a),
             opurom_render::digest_hex(&b),

@@ -6,6 +6,12 @@ use opurom_render::{
     StateView,
 };
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 /// Mixed fixture: three text nodes with start/center/end alignment, a filled
 /// rounded container (non-text graphic), an icon, and a plain shape.
 const MIXED: &str = r##"{
@@ -44,12 +50,12 @@ fn default_path_keeps_all_pinned_goldens() {
     let counter = std::fs::read_to_string("../opurom-examples/golden/counter.opuir.json").unwrap();
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
-    let a = Renderer::new(320, 240).render(&ir, &state).pixels;
-    let b = Renderer::new(800, 600).render(&ir, &state).pixels;
+    let a = compat_renderer(320, 240).render(&ir, &state).pixels;
+    let b = compat_renderer(800, 600).render(&ir, &state).pixels;
     assert_eq!(format!("{:016x}", digest(&a)), "8d45f412996a99c6");
     assert_eq!(format!("{:016x}", digest(&b)), "318beb1dd337bc4e");
     // The setter exists but defaults to off, keeping bytes identical.
-    let c = Renderer::new(320, 240).render(&ir, &state).pixels;
+    let c = compat_renderer(320, 240).render(&ir, &state).pixels;
     assert_eq!(a, c);
 
     // Third pinned golden: the effects fixture frame digest, via the CLI path

@@ -5,6 +5,12 @@ use opurom_render::{digest_hex, parse_ir, raster::Canvas, Rect, Renderer, Rgba, 
 use serde_json::json;
 use std::{fs, path::PathBuf, process::Command};
 
+fn compat_renderer(width: u32, height: u32) -> Renderer {
+    let mut renderer = Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 fn scene(on: bool) -> Vec<u8> {
     let mut c = Canvas::new(32, 32, Rgba::rgb(0, 0, 0));
     if on {
@@ -122,16 +128,16 @@ fn msaa_flag_changes_pixels_but_not_the_capture_stream() {
     let state = StateView::from_ir(&src);
     let qstate = StateView::from_ir(&qsrc);
     assert_ne!(
-        Renderer::new(48, 48).pixels(&src, &state),
-        Renderer::new(48, 48).pixels(&qsrc, &qstate),
+        compat_renderer(48, 48).pixels(&src, &state),
+        compat_renderer(48, 48).pixels(&qsrc, &qstate),
         "renderQuality.msaa must change the raster frame"
     );
     assert_eq!(
-        Renderer::new(48, 48)
+        compat_renderer(48, 48)
             .display_list(&src, &state)
             .to_json()
             .unwrap(),
-        Renderer::new(48, 48)
+        compat_renderer(48, 48)
             .display_list(&qsrc, &qstate)
             .to_json()
             .unwrap(),
@@ -146,11 +152,11 @@ fn default_path_bytes_and_pinned_digests_stay_identical() {
     let ir = parse_ir(&counter).unwrap();
     let state = StateView::from_ir(&ir);
     assert_eq!(
-        digest_hex(&Renderer::new(320, 240).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(320, 240).render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
     assert_eq!(
-        digest_hex(&Renderer::new(800, 600).render(&ir, &state).pixels),
+        digest_hex(&compat_renderer(800, 600).render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
 

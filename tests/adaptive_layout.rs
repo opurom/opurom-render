@@ -5,6 +5,12 @@ use opurom_render::{
     Renderer, StateValue, StateView, MAX_GRID_COLUMNS, MIN_COLUMN_WIDTH,
 };
 
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
+
 /// Golden IR 0.1.0 from opurom-examples/golden/counter.opuir.json (embedded so this crate
 /// stays independent of the framework implementation).
 const COUNTER_IR: &str = r##"{
@@ -217,8 +223,8 @@ fn the_fluid_grid_reaches_the_raster_output() {
     let state = StateView::from_ir(&ir);
     // The wide viewport lays the six cells out in one row, the narrow one in
     // three rows, so the rendered pixels differ.
-    let wide = Renderer::new(1600, 900).pixels(&ir, &state);
-    let narrow = Renderer::new(320, 900).pixels(&ir, &state);
+    let wide = compat_renderer(1600, 900).pixels(&ir, &state);
+    let narrow = compat_renderer(320, 900).pixels(&ir, &state);
     assert_ne!(wide, narrow, "the fluid grid must change the pixels");
     assert_ne!(digest_hex(&wide), digest_hex(&narrow));
 }
@@ -228,7 +234,7 @@ fn the_fluid_grid_reaches_the_raster_output() {
 #[test]
 fn a_resize_across_tiers_recomputes_the_layout() {
     let (ir, state) = counter();
-    let mut renderer = Renderer::new(800, 600);
+    let mut renderer = compat_renderer(800, 600);
     let before = renderer.compute_layout(&ir, &state);
     renderer
         .resize(1600, 600)
@@ -241,7 +247,7 @@ fn a_resize_across_tiers_recomputes_the_layout() {
 #[test]
 fn an_unchanged_viewport_yields_zero_dirty_rects() {
     let (ir, state) = counter();
-    let mut renderer = Renderer::new(800, 600);
+    let mut renderer = compat_renderer(800, 600);
     assert_eq!(renderer.render(&ir, &state).dirty.len(), 1);
     assert!(renderer.render(&ir, &state).dirty.is_empty());
     // A resize to the same size is not a change either.
@@ -349,7 +355,7 @@ fn the_resize_diff_covers_every_changed_or_new_pixel() {
         ((1000, 800), (1600, 900)),
         ((1600, 900), (320, 240)),
     ] {
-        let mut renderer = Renderer::new(from.0, from.1);
+        let mut renderer = compat_renderer(from.0, from.1);
         let before = renderer.render(&ir, &state);
         renderer.resize(to.0, to.1).unwrap();
         let after = renderer.render(&ir, &state);
@@ -400,19 +406,22 @@ fn the_resize_diff_covers_every_changed_or_new_pixel() {
 #[test]
 fn the_three_golden_digests_are_unchanged() {
     let (ir, state) = counter();
-    let mut small = Renderer::new(320, 240);
+    let mut small = compat_renderer(320, 240);
+    small.set_quality(opurom_render::QualityProfile::Compat);
     assert_eq!(
         digest_hex(&small.render(&ir, &state).pixels),
         "8d45f412996a99c6"
     );
-    let mut large = Renderer::new(800, 600);
+    let mut large = compat_renderer(800, 600);
+    large.set_quality(opurom_render::QualityProfile::Compat);
     assert_eq!(
         digest_hex(&large.render(&ir, &state).pixels),
         "318beb1dd337bc4e"
     );
     let (ir, mut state) = counter();
     state.set("count", StateValue::Int(7));
-    let mut seven = Renderer::new(800, 600);
+    let mut seven = compat_renderer(800, 600);
+    seven.set_quality(opurom_render::QualityProfile::Compat);
     assert_eq!(
         digest_hex(&seven.render(&ir, &state).pixels),
         "40073cb95c912d80"
@@ -438,7 +447,7 @@ fn two_runs_of_the_same_resize_sequence_agree() {
     let sequence = [(320u32, 240u32), (800, 600), (1000, 700), (1600, 900)];
     let mut digests = Vec::new();
     for _ in 0..2 {
-        let mut renderer = Renderer::new(320, 240);
+        let mut renderer = compat_renderer(320, 240);
         let mut run = Vec::new();
         for (w, h) in sequence {
             renderer.resize(w, h).unwrap();

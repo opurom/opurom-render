@@ -3,7 +3,13 @@
 //! the name is not in the table. These tests pin that priority and the
 //! deterministic output.
 
-use opurom_render::{parse_ir, Renderer, StateView};
+use opurom_render::{parse_ir, StateView};
+
+fn compat_renderer(width: u32, height: u32) -> opurom_render::Renderer {
+    let mut renderer = opurom_render::Renderer::new(width, height);
+    renderer.set_quality(opurom_render::QualityProfile::Compat);
+    renderer
+}
 
 /// A 24x24 `disc` glyph: an outer ring and an inner dot (two full-circle arcs
 /// plus a small filled circle drawn as arcs). Distinct from the built-in disc.
@@ -31,7 +37,7 @@ fn ir_with_icon(name: &str, paths: &[&str], icon_name: &str) -> String {
 fn render(ir_text: &str) -> Vec<u8> {
     let ir = parse_ir(ir_text).unwrap();
     let state = StateView::from_ir(&ir);
-    let renderer = Renderer::new(96, 96);
+    let renderer = compat_renderer(96, 96);
     renderer.pixels(&ir, &state)
 }
 
@@ -122,7 +128,7 @@ fn music_app_renders_package_icons_natively() {
     assert!(!ir.icons.is_empty(), "music IR must carry package icons");
     assert!(ir.icons.contains_key("music"), "music icon must resolve");
     let state = StateView::from_ir(&ir);
-    let renderer = Renderer::new(390, 1200);
+    let renderer = compat_renderer(390, 1200);
     let pixels = renderer.pixels(&ir, &state);
     // The music icon sits in the header chip; its 16x16 box must carry ink that
     // is the package glyph, not an empty square.
