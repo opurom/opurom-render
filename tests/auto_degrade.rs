@@ -39,6 +39,7 @@ fn run(ir: &Path, ppm: &Path, args: &[&str]) -> Output {
         .arg(ir)
         .args(["120", "90"])
         .arg(ppm)
+        .args(["--quality", "compat"])
         .args(args)
         .output()
         .unwrap()
@@ -91,6 +92,7 @@ fn no_flags_keep_stdout_shape_and_the_three_canonical_goldens() {
             .arg(golden)
             .args(wh)
             .arg(&ppm)
+            .args(["--quality", "compat"])
             .args(state)
             .output()
             .unwrap();

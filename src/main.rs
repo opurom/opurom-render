@@ -1,4 +1,13 @@
-//! `opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa]`
+//! `opurom-render <ir.json> <width> <height> <out.ppm> [flags]`
+//!
+//! Defaults to the highest product render specification: geometric edge AA,
+//! proportional metrics over the high-resolution glyph atlas, system-font
+//! overlay support, material shadow/gradient/rounded/glass/liquid effects,
+//! MotionSpec timing and DPR-aware rasterization. Explicit flags override one
+//! field each; `--quality compat` (or `--legacy-golden`) restores the pinned
+//! historical golden pixels and is the only way to enter compat output.
+//!
+//! Flags: `[--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--no-edge-aa] [--font-metrics fixed|proportional] [--quality product|compat] [--legacy-golden] [--no-motion] [--low-power] [--system-font] [--dpr 1..4] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]`
 //!
 //! Writes a P6 PPM snapshot (RGB; the opaque alpha channel is dropped) and
 //! prints `digest=<16 hex>` (FNV-1a 64 over RGBA bytes) plus `dirty=<count>`.
@@ -23,10 +32,10 @@
 //! stays exactly `digest=...` then `dirty=...`.
 
 use opurom_render::{
-    a11y_json_at, apply_policy, choose_quality, digest_hex, is_interactive, parse_ir, svg_at,
-    Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityTier, RenderConfig,
-    Renderer, StateValue, StateView, Transition, TransitionKind, ValueType, SETTLED_MS,
-    WINDOW_FRAMES,
+    a11y_json_at, apply_policy, choose_quality, digest_hex, disable_motion, is_interactive,
+    parse_ir, svg_at, Frame, FrameBudget, FrameRate, Ir, IrError, Node, NodeState, QualityTier,
+    RenderConfig, RenderPolicy, RenderProfile, Renderer, StateValue, StateView, Transition,
+    TransitionKind, ValueType, SETTLED_MS, WINDOW_FRAMES,
 };
 use std::{env, fs, process};
 
@@ -88,6 +97,39 @@ fn auto_degrade_tier_line(rate: FrameRate, samples: &[i64], n: usize) -> String 
         budget.target_ms(),
         budget.promote_ms()
     )
+}
+
+/// Apply the explicit `--low-power` caps to the tree: drop expensive effect
+/// passes and cap deterministic particle fields. Shadows, gradients, opacity
+/// and rounded corners stay intact; low power only removes the costly work.
+/// Returns a deterministic `quality=` line so the caller can report it.
+fn apply_low_power(tree: &mut Node) -> String {
+    fn walk(node: &mut Node) -> (usize, usize) {
+        let mut fields = 0usize;
+        let mut dots = 0usize;
+        node.props.effects.retain(|e| {
+            !matches!(
+                e.kind,
+                opurom_render::VisualEffectKind::Glass | opurom_render::VisualEffectKind::Liquid
+            )
+        });
+        if let Some(p) = node.props.particles.as_mut() {
+            p.count = p.count.min(opurom_render::PARTICLE_MAX_COUNT / 4);
+            fields += 1;
+            dots += p.count.max(0) as usize;
+        }
+        if node.props.glass {
+            node.props.glass = false;
+        }
+        for child in &mut node.children {
+            let (f, d) = walk(child);
+            fields += f;
+            dots += d;
+        }
+        (fields, dots)
+    }
+    let (fields, dots) = walk(tree);
+    format!("quality=low-power effects=reduced fields={fields} particles={dots}")
 }
 
 /// Applies `choose_quality` to the parsed IR tree in place, so the render
@@ -268,10 +310,7 @@ fn parse_value(typ: ValueType, raw: &str) -> Result<StateValue, String> {
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() < 4 {
-        return Err(
-            "usage: opurom-render <ir.json> <width> <height> <out.ppm> [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale, defaults to the IR] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--edge-aa] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]"
-                .to_string(),
-        );
+        return Err("usage: opurom-render <ir.json> <width> <height> <out.ppm> [--quality product|compat] [--legacy-golden] [--edge-aa] [--no-edge-aa] [--font-metrics fixed|proportional] [--no-motion] [--low-power] [--system-font] [--dpr 1..4] [--state name=value ...] [--interactive-state default|hover|active|focus|disabled|loading|success|error] [--tick 0..4000] [--transition slide|fade|scale] [--a11y out.json] [--svg out.svg] [--commands out.json] [--frame-budget 0..1000] [--incremental] [--auto-degrade 60|120 --frame-ms a,b,c [--frame-samples n]]".to_string());
     }
     let width: u32 = args[1]
         .parse()
@@ -294,8 +333,12 @@ fn run() -> Result<(), String> {
     // Opt-in incremental raster: reuse the previous frame and redraw only the
     // changed region. Without it the full reference raster is used.
     let mut incremental = false;
-    // Opt-in 4x geometric edge coverage; off by default for golden parity.
-    let mut edge_aa = false;
+    // Resolved render defaults. The product profile is the default; explicit
+    // flags override one field each. Compat is entered only by name and keeps
+    // the historical golden bytes.
+    let mut policy = RenderPolicy::product();
+    // `true` when any explicit quality/compat flag was supplied. This gates
+    // the extra report line so the default stdout stays digest then dirty.
     // Opt-in measured-frame budget: inject explicit samples (the CLI has no
     // live render loop) and apply the resulting tier caps to the render config.
     let mut auto_rate: Option<FrameRate> = None;
@@ -396,9 +439,66 @@ fn run() -> Result<(), String> {
                 incremental = true;
                 i += 1;
             }
+            // The product profile turns edge AA on by default; both spellings
+            // exist so an explicit choice always wins over the default.
             "--edge-aa" => {
-                edge_aa = true;
+                policy.edge_aa = true;
                 i += 1;
+            }
+            "--no-edge-aa" => {
+                policy.edge_aa = false;
+                i += 1;
+            }
+            "--font-metrics" => {
+                let contract = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--font-metrics requires fixed or proportional".to_string())?;
+                policy.font_metrics =
+                    opurom_render::FontMetrics::parse(contract).ok_or_else(|| {
+                        format!("invalid font metrics {contract:?}: expected fixed or proportional")
+                    })?;
+                i += 2;
+            }
+            "--quality" => {
+                let contract = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--quality requires product or compat".to_string())?;
+                policy =
+                    RenderPolicy::for_profile(RenderProfile::parse(contract).ok_or_else(|| {
+                        format!("invalid quality {contract:?}: expected product or compat")
+                    })?);
+                i += 2;
+            }
+            // Alias for --quality compat: the historical golden bytes.
+            "--legacy-golden" => {
+                policy = RenderPolicy::compat();
+                i += 1;
+            }
+            "--no-motion" => {
+                policy.motion = opurom_render::MotionSpec::disabled();
+                i += 1;
+            }
+            "--low-power" => {
+                policy.low_power = true;
+                i += 1;
+            }
+            "--system-font" => {
+                policy.system_font = true;
+                i += 1;
+            }
+            "--dpr" => {
+                let contract = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--dpr requires a ratio between 1 and 4".to_string())?;
+                let parsed: f64 = contract
+                    .parse()
+                    .map_err(|_| format!("invalid dpr {contract:?}: expected a number 1..4"))?;
+                if !(1.0..=4.0).contains(&parsed) {
+                    return Err(format!("invalid dpr {contract:?}: expected 1..4"));
+                }
+                // Fixed point (1024 == 1x), rounded to the nearest 1024th.
+                policy.dpr = (parsed * 1024.0).round() as i64;
+                i += 2;
             }
             "--auto-degrade" => {
                 let contract = args
@@ -446,7 +546,7 @@ fn run() -> Result<(), String> {
             }
             other => {
                 return Err(format!(
-                    "unexpected argument {other:?}: expected --state name=value, --interactive-state default|hover|active|focus|disabled|loading|success|error, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental, --edge-aa, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
+                    "unexpected argument {other:?}: expected --quality product|compat, --legacy-golden, --edge-aa, --no-edge-aa, --font-metrics fixed|proportional, --no-motion, --low-power, --system-font, --dpr 1..4, --state name=value, --interactive-state default|hover|active|focus|disabled|loading|success|error, --tick 0..={SETTLED_MS}, --transition slide|fade|scale (defaults to the IR), --a11y out.json, --svg out.svg, --commands out.json, --frame-budget 0..={MAX_FRAME_BUDGET_MS}, --incremental, --auto-degrade 60|120, --frame-ms a,b,c or --frame-samples n"
                 ));
             }
         }
@@ -482,13 +582,51 @@ fn run() -> Result<(), String> {
                 .to_string(),
         );
     }
-    if edge_aa && commands_path.is_some() {
+    if policy.edge_aa && commands_path.is_some() {
         return Err("--edge-aa is unavailable with --commands: the display-list stream has no coverage field"
             .to_string());
     }
+    // Compat must keep the historical golden bytes: no edge AA, fixed metrics,
+    // and the product extras such as low power are unavailable there.
+    if policy.profile == RenderProfile::Compat {
+        if policy.low_power {
+            return Err(
+                "--low-power is unavailable with --quality compat: compat pins the golden bytes"
+                    .to_string(),
+            );
+        }
+        if policy.motion.enabled == false {
+            return Err(
+                "--no-motion is unavailable with --quality compat: compat pins the golden bytes"
+                    .to_string(),
+            );
+        }
+    }
+    // Explicit product-fidelity overrides applied to the tree. Compat keeps the
+    // authored tree untouched so the golden bytes stay pinned.
+    let mut quality_line: Option<String> = None;
+    if policy.profile == RenderProfile::Product {
+        if !policy.motion.enabled {
+            disable_motion(&mut ir.tree);
+        }
+        if policy.low_power {
+            quality_line = Some(apply_low_power(&mut ir.tree));
+        }
+        // The theme-level metrics default follows the profile: proportional is
+        // the product default, fixed is the compat default. A node-level
+        // `fontMetrics` prop always wins over this default because it is
+        // parsed into the per-node prop and `fill_font_metrics` only fills the
+        // unset ones.
+        ir.theme.font_metrics = policy.font_metrics;
+    }
+    // Quality flags are visible in the rendered pixels. Stdout keeps its
+    // historical `digest` then `dirty` shape on every path; auto-degrade still
+    // appends its own explicit `tier=` line when `--auto-degrade` is supplied.
     // Opt-in only: without the flag the IR tree is untouched, so the default
     // path is byte-for-byte identical to previous releases.
-    let quality_line = frame_budget_ms.map(|ms| apply_quality(&mut ir.tree, ms));
+    if let Some(ms) = frame_budget_ms {
+        quality_line = Some(apply_quality(&mut ir.tree, ms));
+    }
     let mut tier_line: Option<String> = None;
     // Opt-in measured-frame budget: apply the decided tier caps to the render
     // config. Without it the IR is untouched, so the default path is identical.
@@ -498,7 +636,9 @@ fn run() -> Result<(), String> {
         tier_line = Some(auto_degrade_tier_line(rate, &frame_ms, n));
     }
     let mut renderer = Renderer::try_new(width, height).map_err(|e| e.to_string())?;
-    renderer.set_edge_aa(edge_aa);
+    renderer.set_edge_aa(policy.edge_aa);
+    renderer.set_dpr(policy.dpr).map_err(|e| e.to_string())?;
+    renderer.set_suppress_text(policy.system_font);
     let (mut frame, incremental_line) = if incremental {
         let frame = renderer.render_incremental_at(&ir, &state, elapsed_ms);
         let (nodes, pixels) = renderer.redraw_stats();

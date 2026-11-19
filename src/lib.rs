@@ -52,6 +52,7 @@ pub mod nav;
 pub mod particles;
 pub mod perf;
 pub mod primitives;
+pub mod profile;
 pub mod raster;
 pub mod scroll_physics;
 pub mod svg;
@@ -62,7 +63,8 @@ pub use anim::{
     animate_progress, choose_quality, default_duration_ms, lerp, lerp_rgba, AnimSpec, AnimTable,
     AnimValue, Animator, Curve, FrameRate, GestureAnim, Particle, ParticleSystem, Quality,
     StepMode, Transition, TransitionKind, ANIMATE_DEFAULT_MS, ANIMATE_MAX_MS, INERTIA_SETTLE_MS,
-    ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, SPRING_SETTLE_MS, TRANSITION_MS,
+    M3_MEDIUM1_MS, M3_SHORT1_MS, ONE, PARTICLE_FIELD, PARTICLE_MAX_LIFE, SPRING_SETTLE_MS,
+    TRANSITION_MS,
 };
 pub use curve::cubic_bezier;
 pub use display::{Command, DisplayList, MAX_COMMANDS, MAX_DIMENSION};
@@ -107,6 +109,9 @@ pub use particles::{Particles, PARTICLE_MAX_COUNT, PARTICLE_MAX_RADIUS, PARTICLE
 pub use perf::{
     apply_policy, perf_report, FrameBudget, PerfReport, PerfWindow, QualityTier, RenderConfig,
     TierCaps, PROMOTION_DEN, PROMOTION_NUM, PROMOTION_WINDOWS, WINDOW_FRAMES,
+};
+pub use profile::{
+    disable_motion, MotionSpec, RenderPolicy, RenderProfile, DEFAULT_DPR, DPI_UNIT, MAX_DPR,
 };
 pub use svg::{svg, svg_at};
 pub use text_span::{text_spans, text_spans_for, text_spans_json, TextSpan};
@@ -235,6 +240,10 @@ pub struct Renderer {
     edge_aa: bool,
     /// Opt-in display-layer split: skip bitmap text for system-font overlay.
     suppress_text: bool,
+    /// Device pixel ratio in fixed point (`1024 == 1x`). Layout keeps logical
+    /// pixels; the raster pass uses this to size stroke/edge coverage. The
+    /// default of 1x is byte-identical to the pinned renderer.
+    dpr: i64,
 }
 
 /// True when the IR node with `id` is tappable: either a `gesture: tap` prop
@@ -318,6 +327,7 @@ impl Renderer {
             anim: RefCell::new(AnimTable::new()),
             edge_aa: false,
             suppress_text: false,
+            dpr: crate::profile::DEFAULT_DPR,
         })
     }
 
@@ -325,6 +335,26 @@ impl Renderer {
     /// default path stays byte-identical; capture/display-list output ignores it.
     pub fn set_edge_aa(&mut self, on: bool) {
         self.edge_aa = on;
+    }
+
+    /// Set the device pixel ratio as a fixed-point value (`1024 == 1x`).
+    /// Logical layout is unchanged; a ratio above 1x enables the finer edge
+    /// coverage grid. The default 1x keeps every pinned frame byte-identical.
+    pub fn set_dpr(&mut self, dpr: i64) -> Result<(), IrError> {
+        if dpr < crate::profile::DPI_UNIT || dpr > crate::profile::MAX_DPR {
+            return Err(IrError(format!(
+                "invalid dpr {dpr}: expected {}..={} (fixed point, 1024 == 1x)",
+                crate::profile::DPI_UNIT,
+                crate::profile::MAX_DPR
+            )));
+        }
+        self.dpr = dpr;
+        Ok(())
+    }
+
+    /// Effective device pixel ratio in fixed point (`1024 == 1x`).
+    pub fn dpr(&self) -> i64 {
+        self.dpr
     }
 
     /// Skip bitmap text so a display host can overlay system-font spans. The
@@ -398,6 +428,7 @@ impl Renderer {
         );
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_dpr(self.dpr);
         canvas.set_suppress_text(self.suppress_text);
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in &laid {
@@ -430,6 +461,7 @@ impl Renderer {
         );
         let mut canvas = raster::Canvas::capturing(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_dpr(self.dpr);
         canvas.set_suppress_text(self.suppress_text);
         for n in &laid {
             let frame = crate::effects::EffectFrame::new(self.width, self.height, n);
@@ -599,6 +631,7 @@ impl Renderer {
                     .unwrap_or_else(|| vec![0u8; (self.width * self.height * 4) as usize]),
             );
             canvas.set_edge_aa(self.edge_aa);
+            canvas.set_dpr(self.dpr);
             canvas.set_suppress_text(self.suppress_text);
             canvas.set_render_quality(ir.render_quality.as_ref());
             canvas.clip = Some(region);
@@ -681,6 +714,7 @@ impl Renderer {
         let pal = Palette::from_theme(&ir.theme);
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_dpr(self.dpr);
         canvas.set_suppress_text(self.suppress_text);
         canvas.set_render_quality(ir.render_quality.as_ref());
         for n in laid {
@@ -703,6 +737,7 @@ impl Renderer {
         let pal = Palette::from_theme(&ir.theme);
         let mut canvas = raster::Canvas::new(self.width, self.height, pal.stage);
         canvas.set_edge_aa(self.edge_aa);
+        canvas.set_dpr(self.dpr);
         canvas.set_suppress_text(self.suppress_text);
         let host = press.and_then(|p| press_host(laid, ir, p));
         canvas.set_render_quality(ir.render_quality.as_ref());
@@ -785,6 +820,7 @@ impl Renderer {
                 let mut canvas =
                     raster::Canvas::from_pixels(self.width, self.height, prev.to_vec());
                 canvas.set_edge_aa(self.edge_aa);
+                canvas.set_dpr(self.dpr);
                 canvas.set_suppress_text(self.suppress_text);
                 canvas.set_render_quality(ir.render_quality.as_ref());
                 canvas.clip = Some(region);
