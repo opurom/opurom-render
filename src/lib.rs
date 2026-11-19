@@ -1427,11 +1427,24 @@ pub fn render_laid_press_for_abi_impl(
     press: Option<&PressPhase>,
     elapsed_ms: i64,
 ) -> Frame {
-    let pixels = renderer.raster_laid_press(laid, ir, press, elapsed_ms);
+    // Flutter gives press feedback only to the ink host (`render_with_press`
+    // sets the host state to Active before rastering). The host-state table
+    // path resolves the discrete host state, so the press host must be marked
+    // Active here as well or the ripple and the M3 state layer are lost.
+    let mut owned: Vec<LaidOut> = laid.to_vec();
+    let host_id = press.and_then(|p| press_host(&owned, ir, p).map(|(host, _)| host.id));
+    if let Some(id) = host_id {
+        if let Some(n) = owned.iter_mut().find(|n| n.id == id) {
+            if n.state != NodeState::Disabled {
+                n.state = NodeState::Active;
+            }
+        }
+    }
+    let pixels = renderer.raster_laid_press(&owned, ir, press, elapsed_ms);
     renderer.prev_press_disc = press
-        .and_then(|p| press_host(laid, ir, p))
+        .and_then(|p| press_host(&owned, ir, p))
         .map(|(host, hp)| ripple_disc(host, hp.touch, renderer.width, renderer.height));
-    renderer.finish_frame(laid.to_vec(), pixels)
+    renderer.finish_frame(owned, pixels)
 }
 
 #[cfg(test)]
