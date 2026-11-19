@@ -70,7 +70,8 @@ pub mod visual_gate;
 
 pub use a11y::{a11y_json, a11y_json_at, a11y_tree, a11y_tree_at, A11yNode};
 pub use abi_helpers::{
-    anim_for_abi, apply_node_states_for_abi, render_laid_for_abi, render_laid_press_for_abi,
+    anim_for_abi, apply_node_states_for_abi, apply_press_state_for_abi, render_laid_for_abi,
+    render_laid_press_for_abi,
 };
 pub use anim::{
     animate_progress, choose_quality, default_duration_ms, lerp, lerp_rgba, AnimSpec, AnimTable,
@@ -404,6 +405,7 @@ pub mod abi_helpers {
     pub use crate::{
         anim_for_abi_impl as anim_for_abi,
         apply_node_states_for_abi_impl as apply_node_states_for_abi,
+        apply_press_state_for_abi_impl as apply_press_state_for_abi,
         render_laid_for_abi_impl as render_laid_for_abi,
         render_laid_press_for_abi_impl as render_laid_press_for_abi,
     };
@@ -1405,6 +1407,27 @@ pub fn apply_node_states_for_abi_impl(laid: &mut [LaidOut], ir: &Ir, entries: &[
     // slot on every node so raster uses the discrete state transform.
     for node in laid.iter_mut() {
         node.state_paint = crate::interaction::StatePaintSlot(None);
+    }
+}
+
+/// ABI helper: mark the pressed ink host Active in a caller-supplied layout.
+/// The renderer applies this step in its own press path; a host that lays the
+/// tree out once and then applies its own state table needs the same step, or
+/// a press shows no state change at all. A node the host marked Disabled
+/// stays Disabled.
+pub fn apply_press_state_for_abi_impl(laid: &mut [LaidOut], ir: &Ir, press: Option<&PressPhase>) {
+    let Some(press) = press else {
+        return;
+    };
+    // Flutter gives press feedback only to the ink host: the hit test may land
+    // on a text or row inside a Button, so the Button is the node that tints.
+    let host_id = press_host(laid, ir, press).map(|(host, _)| host.id);
+    if let Some(id) = host_id {
+        if let Some(node) = laid.iter_mut().find(|n| n.id == id) {
+            if node.state != NodeState::Disabled {
+                node.state = NodeState::Active;
+            }
+        }
     }
 }
 
